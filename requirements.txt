@@ -2,12 +2,12 @@ black
 autoflake 
 isort 
 vulture
-fastapi
+fastapi==0.103.1
 motor
-pydantic
+pydantic==2.3.0
 httpx
 pydantic-settings
-uvicorn
+uvicorn==0.23.2
 pinecone
 tiktoken
 bson==0.5.9
