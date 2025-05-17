@@ -1,0 +1,14 @@
+black 
+autoflake 
+isort 
+vulture
+fastapi
+motor
+pydantic
+httpx
+pydantic-settings
+uvicorn
+pinecone
+tiktoken
+bson==0.5.9
+pymongo==4.9.2
