@@ -1,41 +1,47 @@
-import os
 import json
 import logging
+import os
 from datetime import datetime
 
+
 class JSONFormatter(logging.Formatter):
-    
+
     def format(self, record):
         log_entry = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "levelname": record.levelname,
             "module": record.module,
             "funcName": record.funcName,
-            "lineno": record.lineno
+            "lineno": record.lineno,
         }
 
         message = record.getMessage()
         try:
             parsed_message = json.loads(message)
-            log_entry["message"] = json.dumps(parsed_message, indent=4, ensure_ascii=False)
+            log_entry["message"] = json.dumps(
+                parsed_message, indent=4, ensure_ascii=False
+            )
         except json.JSONDecodeError:
             log_entry["message"] = message
-        
+
         if record.args:
             log_entry["extra"] = record.args
-            
-        return json.dumps(log_entry, ensure_ascii = False, indent=4)
 
-def setup_logger(name: str, log_file: str, log_dir: str = "struct_logs", level=logging.INFO) -> logging.Logger:
+        return json.dumps(log_entry, ensure_ascii=False, indent=4)
+
+
+def setup_logger(
+    name: str, log_file: str, log_dir: str = "struct_logs", level=logging.INFO
+) -> logging.Logger:
     """
     Sets up a logger with a specified name and log file.
-    
+
     Args:
         name (str): The name of the logger.
         log_file (str): The name of the log file.
         log_dir (str): Directory where logs will be stored.
         level (int): Logging level (default: logging.INFO).
-    
+
     Returns:
         logging.Logger: Configured logger instance.
     """
@@ -51,6 +57,8 @@ def setup_logger(name: str, log_file: str, log_dir: str = "struct_logs", level=l
     logger.addHandler(handler)
     return logger
 
+
 loggers = {
-    
+    "pinecone": setup_logger("pinecone_service", "pinecone_service.log"),
+    "voyageai": setup_logger("voyageai_service", "voyageai_service.log"),
 }

@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     MONGODB_DB_NAME: str = "n8n"
     ERROR_COLLECTION_NAME: str = "error_logs"
     LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"
+    VOYAGEAI_API_KEY: str
+    VOYAGEAI_BASE_URL: str
 
     # Pinecone settings
     PINECONE_CREATE_INDEX_URL: str = "https://api.pinecone.io/indexes"
@@ -20,6 +22,8 @@ class Settings(BaseSettings):
     PINECONE_API_KEY: str
     PINECONE_INDEX_NAME: str = "n8n-examples"
     PINECONE_SIMILARITY_THRESHOLD: float = 0.56
+    OPENAI_API_KEY: str
+    ANTHROPIC_API_KEY: str
 
     class Config:
         env_file = ".env"

@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException
 
-from app.config.database import mongodb_database
-from app.models.domain.error import Error
+from src.app.config.database import mongodb_database
+from src.app.models.domain.error import Error
 
 
 class ErrorRepo:
