@@ -1,7 +1,7 @@
 from fastapi import Depends
 from typing import List, Dict, Any
 
-from src.app.services.file_access_services.file_search_service import FileSearchService
+from src.app.services.file_access_tools.file_search_service import FileSearchService
 
 
 class FileSearchUseCase:

@@ -1,7 +1,7 @@
 from fastapi import Depends
 from typing import List, Dict, Any, Optional
 
-from src.app.services.file_access_services.directory_list_service import DirectoryListService
+from src.app.services.file_access_tools.directory_list_service import DirectoryListService
 
 
 class DirectoryListUseCase:

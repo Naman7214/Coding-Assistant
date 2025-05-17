@@ -1,7 +1,7 @@
 from fastapi import Depends
 from typing import Dict, Any, Optional
 
-from src.app.services.file_access_services.file_read_service import FileReadService
+from src.app.services.file_access_tools.file_read_service import FileReadService
 
 
 class FileReadUseCase:
