@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config.database import mongodb_database
 from src.app.apis.file_access_routes import router as file_access_router
+from src.app.apis.modification_routes import router as modification_router
 
 
 @asynccontextmanager
@@ -29,6 +30,7 @@ app.add_middleware(
 )
 
 app.include_router(file_access_router)
+app.include_router(modification_router)
 
 @app.get("/")
 async def root():

@@ -2,7 +2,7 @@ from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
 from src.app.models.schemas.file_access_schemas import DirectoryListRequest
-from src.app.usecases.file_access_usecases.directory_list_usecase import DirectoryListUseCase
+from src.app.usecases.file_access_tools.directory_list_usecase import DirectoryListUseCase
 
 
 class DirectoryListController:
