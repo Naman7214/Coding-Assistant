@@ -85,7 +85,7 @@ class ToolAdapter:
             if not tool_info:
                 error_msg = f"Tool '{tool_call.tool_name}' not found in available tools"
                 logger.error(error_msg)
-                return ToolResult(success=False, content=error_msg)
+                return ToolResult(success=False, content=error_msg, error=error_msg)
             
             # Prepare the request to the MCP server
             endpoint = tool_info.get("endpoint", f"/tools/{tool_call.tool_name}")

@@ -23,15 +23,15 @@ class ToolResult(BaseModel):
     content: Any = Field(..., description="The content returned by the tool")
     error: Optional[str] = Field(None, description="Error message if the tool execution failed")
 
-class AgentAction(BaseModel):
+class SingleAgentIteration(BaseModel):
     """
     Represents an action determined by the agent.
     """
-    action_type: str = Field(..., description="Type of action: 'tool_call' or 'final_response'")
+    action_type: Optional[str] = Field(None, description="Type of action: 'tool_call' or 'final_response'")
     tool_name: Optional[str] = Field(None, description="Name of the tool to call (if action_type is 'tool_call')")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Parameters for the tool call")
     content: Optional[str] = Field(None, description="Content of the final response (if action_type is 'final_response')")
-    message: Optional[str] = Field(None, description="Explanatory message to the user about the action being taken")
+    thought: Optional[str] = Field(None, description="Explanatory message to the user about the action being taken and it's internal reasoning")
 
 class AgentState(BaseModel):
     """
@@ -52,8 +52,4 @@ class AgentState(BaseModel):
     completed: bool = Field(
         default=False,
         description="Whether the agent has completed processing the query"
-    )
-    requires_user_input: bool = Field(
-        default=False,
-        description="Whether the agent needs input from the user to continue"
     )

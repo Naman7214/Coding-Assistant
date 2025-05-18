@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 import httpx
 from fastapi import HTTPException
 
-from agent.models.schemas import AgentState, AgentAction
+from agent.models.schemas import AgentState, SingleAgentIteration
 from agent.models.prompts import create_tool_selection_prompt
 from agent.config.settings import settings
 
@@ -25,8 +25,9 @@ class LLMAdapter:
         self.base_url = settings.CLAUDE_BASE_URL
         self.messages_endpoint = settings.CLAUDE_MESSAGES_ENDPOINT
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=300.0, write=300.0, pool=60.0))
+        self.timeout = httpx.Timeout(connect=60.0, read=300.0, write=300.0, pool=60.0)
         
-    async def determine_next_action(self, agent_state: AgentState) -> AgentAction:
+    async def determine_next_action(self, agent_state: AgentState) -> SingleAgentIteration:
         """
         Determine the next action to take based on the current agent state.
         
@@ -78,7 +79,7 @@ class LLMAdapter:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=settings.TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(verify= False, timeout=self.timeout) as client:
                 response = await client.post(
                     url=url,
                     headers=headers,
@@ -112,7 +113,7 @@ class LLMAdapter:
                 detail=f"Error calling Claude API: {str(e)}"
             )
     
-    def _parse_claude_response(self, response: Dict[str, Any]) -> AgentAction:
+    def _parse_claude_response(self, response: Dict[str, Any]) -> SingleAgentIteration:
         """
         Parse Claude's response to determine the next action.
         
@@ -135,22 +136,30 @@ class LLMAdapter:
                 
                 if "tool_calls" in json_content and json_content["tool_calls"]:
                     tool_call = json_content["tool_calls"][0]
-                    return AgentAction(
+                    return SingleAgentIteration(
+                        thought=json_content.get("thought", ""),
                         action_type="tool_call",
                         tool_name=tool_call.get("tool"),
                         parameters=tool_call.get("args", {}),
-                        message=json_content.get("message", "")
+                        content=json_content.get("content", "")
                     )
                 
-                return AgentAction(
+                return SingleAgentIteration(
+                    thought=json_content.get("thought", ""),
                     action_type="final_response",
-                    content=json_content.get("message", "")
+                    content=json_content.get("content", ""),
+                    tool_name=None,
+                    parameters=None
                 )
+                
         except (json.JSONDecodeError, IndexError) as e:
             logger.warning(f"Failed to parse JSON from response: {str(e)}")
         
         # If JSON parsing fails, return the raw text as final response
-        return AgentAction(
+        return SingleAgentIteration(
+            thought=text_content,
             action_type="final_response",
-            content=text_content
+            content=text_content,
+            tool_name=None,
+            parameters=None
         )
