@@ -2,7 +2,7 @@ from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
 from src.app.models.schemas.file_access_schemas import FileSearchRequest
-from src.app.usecases.file_access_tools.file_search_usecase import FileSearchUseCase
+from src.app.usecases.file_access_usecases.file_search_usecase import FileSearchUseCase
 
 
 class FileSearchController:

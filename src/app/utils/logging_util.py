@@ -61,5 +61,4 @@ def setup_logger(
 loggers = {
     "pinecone": setup_logger("pinecone_service", "pinecone_service.log"),
     "voyageai": setup_logger("voyageai_service", "voyageai_service.log"),
-    "ChunkLogger": setup_logger("chunking_service", "chunking_service.log"),
 }

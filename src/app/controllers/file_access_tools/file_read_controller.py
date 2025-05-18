@@ -2,7 +2,7 @@ from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
 from src.app.models.schemas.file_access_schemas import FileReadRequest
-from src.app.usecases.file_access_tools.file_read_usecase import FileReadUseCase
+from src.app.usecases.file_access_usecases.file_read_usecase import FileReadUseCase
 
 
 class FileReadController:

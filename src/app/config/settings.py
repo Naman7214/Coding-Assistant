@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"
     VOYAGEAI_API_KEY: str
     VOYAGEAI_BASE_URL: str
-    MEM0_API_KEY:  str 
 
     # Pinecone settings
     PINECONE_CREATE_INDEX_URL: str = "https://api.pinecone.io/indexes"
@@ -29,8 +28,6 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4.1-mini-2025-04-14"
     TAVILY_API_KEY: str
     SUMMARIZATION_TOKEN_THRESHOLD: int = 300
-    
-    CHUNKS_OUTPUT_PATH: str = "chunks"
 
     class Config:
         env_file = ".env"

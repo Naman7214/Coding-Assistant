@@ -2,7 +2,7 @@ from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
 from src.app.models.schemas.file_access_schemas import FilesDeleteRequest
-from src.app.usecases.file_access_tools.file_deletion_usecase import FileDeletionUseCase
+from src.app.usecases.file_access_usecases.file_deletion_usecase import FileDeletionUseCase
 
 
 class FileDeletionController:
