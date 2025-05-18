@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, status
 
-from backend.app.config.settings import settings
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
 
@@ -42,7 +41,7 @@ class SearchReplaceService:
         case_sensitive = options.get("case_sensitive", True)
         include_pattern = options.get("include_pattern", "*")
         exclude_pattern = options.get("exclude_pattern", "")
-        search_paths = options.get("search_paths", [settings.CODEBASE_DIR])
+        search_paths = options.get("search_paths", ".")
 
         flags = 0 if case_sensitive else re.IGNORECASE
         try:

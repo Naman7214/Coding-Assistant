@@ -29,10 +29,6 @@ class Settings(BaseSettings):
     TAVILY_API_KEY: str
     SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
 
-    CODEBASE_DIR: str = (
-        "/Users/krishgoyani/Developer/Code-Generation-Assistant/codebase"
-    )
-
     class Config:
         env_file = ".env"
 

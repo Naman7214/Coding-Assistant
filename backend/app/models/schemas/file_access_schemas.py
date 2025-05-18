@@ -23,7 +23,7 @@ class FilesDeleteRequest(BaseModel):
 
 class DirectoryListRequest(BaseModel):
     dir_path: str = Field(
-        default="",
+        default=".",
         description="The path to the directory to list, defaults to current directory if not provided",
     )
     recursive: bool = Field(

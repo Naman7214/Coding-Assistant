@@ -4,7 +4,6 @@ from typing import Any, Dict, List
 
 from fastapi import Depends, HTTPException, status
 
-from backend.app.config.settings import settings
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
 
@@ -17,28 +16,70 @@ class FileSearchService:
         self, pattern: str, explanation: str
     ) -> List[Dict[str, Any]]:
         try:
-            # Use CODEBASE_DIR instead of current working directory
-            current_dir = settings.CODEBASE_DIR
 
-            cmd = [
-                "fzf",
-                "-f",
-                pattern,
-                "-i",
-                "--print-query",
-                "--no-sort",
-                "--tac",
+            current_dir = "."
+
+            # Directories to exclude from search
+            exclude_dirs = [
+                ".venv",
+                ".env",
+                "venv",
+                "env",
+                "node_modules",
+                "__pycache__",
+                ".git",
+                ".idea",
+                ".vs",
+                ".vscode",
+                "dist",
+                "build",
             ]
 
-            process = subprocess.Popen(
-                cmd,
+            # First, generate a list of files excluding the directories
+            find_cmd = ["find", current_dir]
+
+            # Add exclusion patterns
+            for exclude_dir in exclude_dirs:
+                find_cmd.extend(
+                    [
+                        "-not",
+                        "-path",
+                        f"*/{exclude_dir}/*",
+                        "-not",
+                        "-path",
+                        f"*/{exclude_dir}",
+                    ]
+                )
+
+            # Run find command to get filtered file list
+            find_process = subprocess.run(
+                find_cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 text=True,
                 cwd=current_dir,
             )
 
-            stdout, stderr = process.communicate()
+            # Get the filtered file list
+            file_list = find_process.stdout.strip().split("\n")
+
+            # Create a temporary file to pass to fzf
+            with subprocess.Popen(
+                [
+                    "fzf",
+                    "-f",
+                    pattern,
+                    "-i",
+                    "--print-query",
+                    "--no-sort",
+                    "--tac",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            ) as process:
+                # Pass the filtered file list to fzf
+                stdout, stderr = process.communicate(input="\n".join(file_list))
 
             if stderr:
                 await self.error_repo.insert_error(

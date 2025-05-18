@@ -4,7 +4,6 @@ from typing import Any, Dict
 
 from fastapi import Depends
 
-from backend.app.config.settings import settings
 from backend.app.models.domain.error import Error
 from backend.app.models.schemas.grep_search_query_schema import (
     GrepSearchQueryRequest,
@@ -51,7 +50,7 @@ class GrepSearchUsecase:
             cmd.extend(["-g", f"!{exclude_pattern}"])
 
             # Add the query and directory (codebase directory by default)
-        cmd.extend([query, settings.CODEBASE_DIR])  # i have changed here
+        cmd.extend([query, "."])  # i have changed here
 
         try:
             # Debug: Print the command being executed

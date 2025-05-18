@@ -7,8 +7,6 @@ from fastapi import Depends, HTTPException, status
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
 
-from backend.app.config.settings import settings
-
 
 class DirectoryListService:
     def __init__(self, error_repo: ErrorRepo = Depends()):
@@ -21,10 +19,30 @@ class DirectoryListService:
         explanation: str,
     ) -> List[Dict[str, Any]]:
         try:
-            dir_path = dir_path if dir_path else settings.CODEBASE_DIR
-            
+            # Ensure dir_path is not empty or just whitespace
+            dir_path = dir_path.strip() if dir_path else "."
+            # Verify that the directory exists
+            if not os.path.exists(dir_path):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Directory not found: {dir_path}",
+                )
+
+            if not os.path.isdir(dir_path):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Path is not a directory: {dir_path}",
+                )
+
             # Directories to exclude from listing
-            excluded_dirs = ['node_modules', 'venv', '.venv', 'env', '.env', '__pycache__']
+            excluded_dirs = [
+                "node_modules",
+                "venv",
+                ".venv",
+                "env",
+                ".env",
+                "__pycache__",
+            ]
 
             async def process_directory(
                 current_path: str,
@@ -88,6 +106,9 @@ class DirectoryListService:
 
             return await process_directory(dir_path)
 
+        except HTTPException:
+            # Re-raise HTTP exceptions to preserve their status codes
+            raise
         except Exception as e:
             await self.error_repo.insert_error(
                 Error(
