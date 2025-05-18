@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     PINECONE_INDEX_NAME: str = "n8n-examples"
     PINECONE_SIMILARITY_THRESHOLD: float = 0.56
 
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    VOYAGEAI_API_KEY: str = ""
+    VOYAGEAI_BASE_URL: str = ""
+
     class Config:
         env_file = ".env"
 
