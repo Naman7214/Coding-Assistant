@@ -1,14 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Depends, status
 from fastapi.responses import JSONResponse
+
 from src.app.usecases.codebase_indexing_usecase import CodebaseIndexingUseCase
 
 
 class CodebaseIndexingController:
-    def __init__(self, codebase_indexing_usecase: CodebaseIndexingUseCase = Depends(CodebaseIndexingUseCase)):
+    def __init__(
+        self,
+        codebase_indexing_usecase: CodebaseIndexingUseCase = Depends(
+            CodebaseIndexingUseCase
+        ),
+    ):
         self.codebase_indexing_usecase = codebase_indexing_usecase
 
     async def sync_codebase_index(self):
-        result=  await self.codebase_indexing_usecase.sync_codebase_index()
+        result = await self.codebase_indexing_usecase.sync_codebase_index()
         return JSONResponse(
             content={
                 "data": result,

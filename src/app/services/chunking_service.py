@@ -1,283 +1,332 @@
-import tree_sitter_python as tspython
-from tree_sitter import Language, Parser
-import uuid
+import hashlib
 import json
 import os
-import hashlib
-import re
-import time
-import httpx
+
 from fastapi import Depends, HTTPException, status
 
 from src.app.config.settings import settings
-from src.app.utils.codebase_context_utils import codebase_context
-from src.app.utils.logging_util import loggers
-from datetime import datetime, timedelta
 from src.app.models.domain.error import Error
 from src.app.repositories.error_repo import ErrorRepo
+from src.app.utils.logging_util import loggers
 
 
 class ChunkingService:
     def __init__(self, error_repo: ErrorRepo = Depends(ErrorRepo)):
         self.error_repo = error_repo
-        self.PY_LANGUAGE = Language(tspython.language())
-        self.parser = Parser(self.PY_LANGUAGE)
-        
-    def extract_chunks(self, node, code_bytes, file_path, current_class=None, import_statements=None):
-        if import_statements is None:
-            import_statements = []
 
-        chunks = []
+        # MERN stack file extensions
+        self.mern_extensions = [
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",  # JavaScript/TypeScript
+            ".json",
+            ".html",
+            ".css",
+            ".scss",  # Web assets
+            ".md",
+            ".env",
+            ".gitignore",  # Config files
+        ]
 
-        if node.type in ['import_statement', 'import_from_statement']:
-            start = node.start_byte
-            end = node.end_byte
-            import_statements.append(code_bytes[start:end])
-        elif node.type == 'class_definition':
-            class_name_node = node.child_by_field_name('name')
-            if class_name_node:
-                current_class = code_bytes[class_name_node.start_byte:class_name_node.end_byte]
-            for child in node.children:
-                chunks.extend(self.extract_chunks(child, code_bytes, file_path, current_class, import_statements))
-        elif node.type == 'function_definition':
-            start = node.start_byte
-            end = node.end_byte
-            function_code = code_bytes[start:end]
-            
-            function_name_node = node.child_by_field_name('name')
-            function_name = None
-            if function_name_node:
-                function_name = code_bytes[function_name_node.start_byte:function_name_node.end_byte]
-            
-            start_line = node.start_point[0] + 1  
-            end_line = node.end_point[0] + 1  
+    def heuristic_chunking(self, file_path, token_limit=None, overlap=None):
+        """
+        Chunk a file based on token count with overlap.
+        Used for all MERN stack files with a sliding window approach.
+        """
+        # Use settings values if not provided
+        token_limit = token_limit or settings.CHUNK_TOKEN_LIMIT
+        overlap = overlap or settings.CHUNK_OVERLAP
 
-            chunks.append({
-                'code': function_code,
-                'metadata': {
-                    'class': current_class,
-                    'function_name': function_name,
-                    'file_path': file_path,
-                    'start_line': start_line,
-                    'end_line': end_line
-                }
-            })
-        else:
-            for child in node.children:
-                chunks.extend(self.extract_chunks(child, code_bytes, file_path, current_class, import_statements))
-
-        if node.type == 'module' and import_statements:
-            combined_imports = '\n'.join(import_statements)
-            start_line = node.start_point[0] + 1 
-            end_line = start_line + len(import_statements) - 1
-
-            chunks.insert(0, {
-                'code': combined_imports,
-                'metadata': {
-                    'class': None,
-                    'function_name': None,
-                    'file_path': file_path,
-                    'start_line': start_line,
-                    'end_line': end_line
-                }
-            })
-
-        return chunks
-
-    def chunk_codebase(self, file_path):
         try:
-            tree = self.parse_code(file_path)
-            root_node = tree.root_node
-            
-            with open(file_path, 'r', encoding='utf-8') as file:
-                code_bytes = file.read()
-            
-            chunks = self.extract_chunks(root_node, code_bytes, file_path=file_path)
+            with open(file_path, "r", encoding="utf-8") as file:
+                content = file.read()
+
+            # Split content by whitespace to count tokens approximately
+            tokens = content.split()
+            total_tokens = len(tokens)
+
+            chunks = []
+            line_mapping = {}
+
+            # Create a mapping of token index to line number
+            lines = content.split("\n")
+            current_token_idx = 0
+            for line_idx, line in enumerate(lines):
+                line_tokens = len(line.split())
+                for i in range(line_tokens):
+                    line_mapping[current_token_idx + i] = line_idx
+                current_token_idx += line_tokens
+
+            # Create chunks with overlap
+            for start_idx in range(0, total_tokens, token_limit - overlap):
+                end_idx = min(start_idx + token_limit, total_tokens)
+
+                # Get corresponding code
+                chunk_tokens = tokens[start_idx:end_idx]
+                chunk_code = " ".join(chunk_tokens)
+
+                # Determine start and end lines
+                start_line = line_mapping.get(start_idx, 0) + 1
+                end_line = line_mapping.get(end_idx - 1, len(lines) - 1) + 1
+
+                # Determine file type
+                file_ext = os.path.splitext(file_path)[1].lower()
+                file_type = file_ext[1:] if file_ext else "unknown"
+
+                chunks.append(
+                    {
+                        "code": chunk_code,
+                        "metadata": {
+                            "file_path": file_path,
+                            "file_type": file_type,
+                            "start_line": start_line,
+                            "end_line": end_line,
+                            "start_token": start_idx,
+                            "end_token": end_idx,
+                            "total_tokens": total_tokens,
+                        },
+                    }
+                )
+
+                # Break if we've reached the end
+                if end_idx >= total_tokens:
+                    break
+
             return chunks
         except Exception as e:
-            loggers["ChunkLogger"].error(f"Error processing file {file_path}: {str(e)}")
+            loggers["ChunkLogger"].error(
+                f"Error in chunking for {file_path}: {str(e)}"
+            )
             return []
-        
-    def save_chunks_to_json(self,chunks, output_file="chunks.json"):
+
+    def chunk_codebase(self, file_path):
+        """Chunk a single file from the MERN codebase"""
+        try:
+            # Check if it's a file type we should process
+            _, file_extension = os.path.splitext(file_path)
+            file_extension = file_extension.lower()
+
+            if file_extension not in self.mern_extensions:
+                loggers["ChunkLogger"].info(
+                    f"Skipping non-MERN file: {file_path}"
+                )
+                return []
+
+            # Use chunking with settings values
+            chunks = self.heuristic_chunking(file_path)
+            return chunks
+
+        except Exception as e:
+            loggers["ChunkLogger"].error(
+                f"Error processing file {file_path}: {str(e)}"
+            )
+            return []
+
+    def save_chunks_to_json(self, chunks, output_file="chunks.json"):
         """
         Saves the formatted chunks to a JSON file.
-        
+
         Parameters:
             chunks (list): List of formatted chunk dictionaries.
             output_file (str): Path to the output JSON file.
         """
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(chunks, f, indent=4)
-        
-        print(f"Chunks saved to {output_file}")
+        try:
+            # Ensure we have valid JSON content to write
+            if not chunks:
+                loggers["ChunkLogger"].warning(
+                    f"No chunks to save to {output_file}"
+                )
+                chunks = []  # Ensure we at least write an empty array, not null
 
-    def split_large_chunk(self, chunk, max_token_limit):
-        """Split a large chunk into smaller chunks that fit within token limit"""
-        code = chunk['code']
-        metadata = chunk['metadata']
-        
-        # Simple splitting by lines
-        lines = code.split('\n')
-        current_chunk_lines = []
-        current_token_count = 0
-        split_chunks = []
-        chunk_index = 1
-        
-        for line in lines:
-            line_token_count = len(line.split())
-            if current_token_count + line_token_count > max_token_limit:
-                if current_chunk_lines:
-                    split_code = '\n'.join(current_chunk_lines)
-                    # Create new metadata with updated line numbers
-                    new_metadata = metadata.copy()
-                    new_metadata['start_line'] = metadata['start_line'] + (chunk_index - 1) * len(current_chunk_lines)
-                    new_metadata['end_line'] = new_metadata['start_line'] + len(current_chunk_lines) - 1
-                    new_metadata['chunk_index'] = chunk_index
-                    new_metadata['is_split'] = True
-                    
-                    split_chunks.append({
-                        'code': split_code,
-                        'metadata': new_metadata
-                    })
-                    
-                    current_chunk_lines = [line]
-                    current_token_count = line_token_count
-                    chunk_index += 1
-                else:
-                    # A single line exceeds token limit, we'll include it anyway
-                    split_chunks.append({
-                        'code': line,
-                        'metadata': {
-                            'class': metadata['class'],
-                            'function_name': metadata['function_name'],
-                            'file_path': metadata['file_path'],
-                            'start_line': metadata['start_line'],
-                            'end_line': metadata['start_line'],
-                            'chunk_index': chunk_index,
-                            'is_split': True
-                        }
-                    })
-                    chunk_index += 1
-            else:
-                current_chunk_lines.append(line)
-                current_token_count += line_token_count
-        
-        # Add the last chunk if there's anything left
-        if current_chunk_lines:
-            split_code = '\n'.join(current_chunk_lines)
-            new_metadata = metadata.copy()
-            new_metadata['start_line'] = metadata['start_line'] + (chunk_index - 1) * len(current_chunk_lines)
-            new_metadata['end_line'] = new_metadata['start_line'] + len(current_chunk_lines) - 1
-            new_metadata['chunk_index'] = chunk_index
-            new_metadata['is_split'] = True
-            
-            split_chunks.append({
-                'code': split_code,
-                'metadata': new_metadata
-            })
-        
-        return split_chunks
+            # Write with explicit flush and close operations
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(chunks, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())  # Force write to disk
+            print(f"Chunks saved to {output_file}")
 
-    def format_chunks_for_json(self, chunks, max_token_limit=32000):
+            # Verify the file exists and has content
+            file_size = os.path.getsize(output_file)
+            loggers["ChunkLogger"].info(
+                f"Chunks saved to {output_file} (size: {file_size} bytes)"
+            )
+
+            if file_size == 0:
+                loggers["ChunkLogger"].warning(
+                    f"Warning: {output_file} has zero size"
+                )
+
+            return True
+        except Exception as e:
+            loggers["ChunkLogger"].error(
+                f"Error saving chunks to {output_file}: {str(e)}"
+            )
+            return False
+
+    def format_chunks_for_json(self, chunks):
+        """Format chunks for JSON output with additional MERN metadata"""
         formatted_chunks = []
+
         for chunk in chunks:
-            code = chunk['code']
-            
-            # Approximate token count (simple whitespace-based approach)
+            code = chunk["code"]
+            metadata = chunk["metadata"]
+            file_path = metadata["file_path"]
+            file_name = os.path.basename(file_path)
+
+            # Extract just the directory name, not the full path
+            full_directory = os.path.dirname(file_path)
+            directory_name = (
+                os.path.basename(full_directory) if full_directory else ""
+            )
+
+            # Get file extension/type
+            _, file_extension = os.path.splitext(file_path)
+            file_type = file_extension[1:] if file_extension else "unknown"
+
+            # Determine component type based on path or extension
+            component_type = "unknown"
+            if "components" in file_path:
+                component_type = "component"
+            elif "routes" in file_path or "pages" in file_path:
+                component_type = "page"
+            elif "api" in file_path:
+                component_type = "api"
+            elif "models" in file_path:
+                component_type = "model"
+            elif "controllers" in file_path:
+                component_type = "controller"
+            elif "hooks" in file_path:
+                component_type = "hook"
+
+            # Count tokens
             token_count = len(code.split())
-            
-            # If token count exceeds limit, split the chunk
-            if token_count > max_token_limit:
-                loggers["ChunkLogger"].warning(f"Chunk exceeds token limit ({token_count} > {max_token_limit}), splitting into smaller chunks")
-                split_chunks = self.split_large_chunk(chunk, max_token_limit)
-                
-                # Process each split chunk
-                for split_chunk in split_chunks:
-                    formatted_chunks.append(self.format_single_chunk(split_chunk, max_token_limit))
-            else:
-                formatted_chunks.append(self.format_single_chunk(chunk, max_token_limit))
-                
+
+            formatted_chunk = {
+                "id": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+                "file_path": file_path,
+                "file_name": file_name,
+                "file_type": file_type,
+                "directory": directory_name,
+                "component_type": component_type,
+                "start_line": metadata["start_line"],
+                "end_line": metadata["end_line"],
+                "content": code,
+                "size": len(code),
+                "token_count": token_count,
+                "start_token": metadata.get("start_token"),
+                "end_token": metadata.get("end_token"),
+            }
+
+            formatted_chunks.append(formatted_chunk)
+
         return formatted_chunks
 
-    def format_single_chunk(self, chunk, max_token_limit):
-        """Format a single chunk for JSON output"""
-        code = chunk['code']
-        token_count = len(code.split())
-        metadata = chunk['metadata']
-        file_path = metadata['file_path']
-        file_name = os.path.basename(file_path)
-        
-        # Extract just the directory name, not the full path
-        full_directory = os.path.dirname(file_path)
-        directory_name = os.path.basename(full_directory) if full_directory else ""
-        
-        # Include split information if present
-        chunk_index = metadata.get('chunk_index', 1)
-        is_split = metadata.get('is_split', False)
-        
-        formatted_chunk = {
-            "id": hashlib.sha256((code + str(chunk_index)).encode('utf-8')).hexdigest(),
-            "file_path": file_path,
-            "file_name": file_name,
-            "directory": directory_name,
-            "start_line": metadata['start_line'],
-            "end_line": metadata['end_line'],
-            "content": code,
-            "size": len(code),
-            "token_count": token_count,
-            "parent-class": metadata['class'],
-            "function_name": metadata['function_name'],
-            "is_split": is_split,
-            "chunk_index": chunk_index if is_split else 1
-        }
-        return formatted_chunk
+    async def process_directory(self, directory_path, output_dir=None):
+        # Use settings value if not provided
+        output_dir = output_dir or settings.CHUNKS_OUTPUT_PATH
 
-    async def process_directory(self, directory_path, output_dir="chunks", max_token_limit=32000):
         try:
             all_chunks = []
-            
+
+            # Use ignore directories and files from settings
+            ignore_directories = settings.IGNORE_DIRECTORIES
+            ignore_files = settings.IGNORE_FILES
+
             # Create output directory if it doesn't exist
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-                
-            for root, _, files in os.walk(directory_path):
+
+            loggers["ChunkLogger"].info(
+                f"Scanning MERN codebase in directory: {directory_path}"
+            )
+            loggers["ChunkLogger"].info(
+                f"Ignoring directories: {', '.join(ignore_directories)}"
+            )
+            loggers["ChunkLogger"].info(
+                f"Ignoring files: {', '.join(ignore_files)}"
+            )
+            loggers["ChunkLogger"].info(
+                f"Processing files with extensions: {', '.join(self.mern_extensions)}"
+            )
+
+            for root, dirs, files in os.walk(directory_path):
+                # Modify dirs in-place to skip ignored directories
+                dirs[:] = [d for d in dirs if d not in ignore_directories]
+
                 for file in files:
-                    if file.endswith(".py"):
+                    # Skip files in the ignore list
+                    if file.lower() in [f.lower() for f in ignore_files]:
+                        loggers["ChunkLogger"].info(
+                            f"Skipping ignored file: {file}"
+                        )
+                        continue
+
+                    _, file_extension = os.path.splitext(file)
+                    file_extension = file_extension.lower()
+
+                    if file_extension in self.mern_extensions:
                         file_path = os.path.join(root, file)
                         loggers["ChunkLogger"].info(f"Processing: {file_path}")
                         file_chunks = self.chunk_codebase(file_path)
-                        
-                        for chunk in file_chunks:
-                            code = chunk['code']
-                            metadata = chunk['metadata']
-                            loggers["ChunkLogger"].info(f"File: {metadata['file_path']}")
-                            loggers["ChunkLogger"].info(f"Class: {metadata['class']}")
-                            loggers["ChunkLogger"].info(f"Lines: {metadata['start_line']} to {metadata['end_line']}")
-                            
-                        all_chunks.extend(file_chunks)
-                        
-            formatted_chunks = self.format_chunks_for_json(all_chunks, max_token_limit)
-            output_file = os.path.join(output_dir, "codebase_chunks.json")
+
+                        if file_chunks:
+                            loggers["ChunkLogger"].info(
+                                f"Found {len(file_chunks)} chunks in {file_path}"
+                            )
+                            all_chunks.extend(file_chunks)
+                        else:
+                            loggers["ChunkLogger"].warning(
+                                f"No chunks extracted from {file_path}"
+                            )
+
+            # ... rest of the method unchanged
+
+            total_chunks = len(all_chunks)
+            loggers["ChunkLogger"].info(
+                f"Total chunks extracted: {total_chunks}"
+            )
+
+            if not all_chunks:
+                loggers["ChunkLogger"].warning("No chunks found in any files")
+                # Save empty array to avoid null
+                output_file = os.path.join(
+                    output_dir, settings.CHUNKS_OUTPUT_FILENAME
+                )
+                self.save_chunks_to_json([], output_file)
+                return {
+                    "status": "warning",
+                    "message": "No code chunks extracted",
+                    "chunks_count": 0,
+                    "output_file": output_file,
+                }
+
+            formatted_chunks = self.format_chunks_for_json(all_chunks)
+            output_file = os.path.join(
+                output_dir, settings.CHUNKS_OUTPUT_FILENAME
+            )
             self.save_chunks_to_json(formatted_chunks, output_file)
-            
-            # Count original and split chunks
-            original_count = len(all_chunks)
-            split_count = len(formatted_chunks)
-            
+
             return {
                 "status": "success",
-                "original_chunks_count": original_count,
-                "formatted_chunks_count": split_count,
-                "chunks_split": split_count > original_count,
-                "output_file": output_file
+                "chunks_count": len(formatted_chunks),
+                "files_processed": len(
+                    set(chunk["metadata"]["file_path"] for chunk in all_chunks)
+                ),
+                "output_file": output_file,
             }
-            
+
         except Exception as e:
-            error_message = f"Error processing directory {directory_path}: {str(e)}"
+            error_message = (
+                f"Error processing directory {directory_path}: {str(e)}"
+            )
             loggers["ChunkLogger"].error(error_message)
+            import traceback
+
+            loggers["ChunkLogger"].error(traceback.format_exc())
             await self.error_repo.insert_error(
                 Error(
-                    tool_name="codebase_chunking",
+                    tool_name="mern_codebase_chunking",
                     error_message=error_message,
                 )
             )

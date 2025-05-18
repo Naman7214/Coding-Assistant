@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import time
 from datetime import datetime
 from typing import Any, Dict
@@ -154,15 +155,25 @@ class PineconeService:
     ):
         results = []
         for i in range(len(chunks)):
+            # Generate ID if not present
+            chunk_id = (
+                chunks[i].get("_id")
+                or chunks[i].get("id")
+                or hashlib.sha256(str(i).encode()).hexdigest()
+            )
+
+            # Create metadata from all fields except _id and id
             metadata = {
-                key: value for key, value in chunks[i].items() if key != "_id"
+                key: value
+                for key, value in chunks[i].items()
+                if key not in ["_id", "id"]
             }
 
             metadata["created_at"] = datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
             result = {
-                "id": chunks[i]["_id"],
+                "id": chunk_id,
                 "values": vector_embeddings[i],
                 "metadata": metadata,
                 # "sparse_values": {

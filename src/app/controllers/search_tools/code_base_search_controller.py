@@ -4,13 +4,9 @@ from fastapi.responses import JSONResponse
 from src.app.models.schemas.code_base_search_schema import (
     CodeBaseSearchQueryRequest,
 )
-from src.app.models.schemas.grep_search_query_schema import (
-    GrepSearchQueryRequest,
-)
 from src.app.usecases.search_tools.code_base_usecase import (
     CodeBaseSearchUsecase,
 )
-from src.app.usecases.search_tools.grep_search_usecase import GrepSearchUsecase
 
 
 class CodeBaseSearchController:
@@ -18,7 +14,7 @@ class CodeBaseSearchController:
         self,
         code_base_search_usecase: CodeBaseSearchUsecase = Depends(
             CodeBaseSearchUsecase
-        )
+        ),
     ):
         self.code_base_search_usecase = code_base_search_usecase
 

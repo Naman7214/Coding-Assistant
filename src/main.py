@@ -3,18 +3,18 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.app.utils.codebase_context_utils import codebase_context
-from src.app.middleware.codebase_context_middleware import CodebaseContextMiddleware, ThreadContextMiddleware
-
 
 from src.app.apis import (
     code_base_search_route,
+    codebase_indexing_routes,
     run_terminal_cmd_route,
     web_search_route,
-    codebase_indexing_routes
 )
-from src.app.config.database import mongodb_database
 from src.app.apis.file_access_routes import router as file_access_router
+from src.app.config.database import mongodb_database
+from src.app.middleware.codebase_context_middleware import (
+    ThreadContextMiddleware,
+)
 
 
 @asynccontextmanager
@@ -37,11 +37,10 @@ app.include_router(
     run_terminal_cmd_route.router, prefix="/api/v1", tags=["enviornment tools"]
 )
 app.include_router(
-    codebase_indexing_routes.router, prefix="/api/v1", tags=["codebase indexing"]
+    codebase_indexing_routes.router,
+    prefix="/api/v1",
+    tags=["codebase indexing"],
 )
-
-# Add the codebase context middleware
-app.add_middleware(CodebaseContextMiddleware)
 
 # Add the thread context middleware
 app.add_middleware(ThreadContextMiddleware)
@@ -56,6 +55,7 @@ app.add_middleware(
 )
 
 app.include_router(file_access_router)
+
 
 @app.get("/")
 async def root():
