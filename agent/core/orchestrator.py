@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from agent.adapters.llm_adapter import LLMAdapter
 
 # from agent.adapters.tool_adapter import ToolAdapter
+from agent.adapters.tool_adapter import ToolAdapter
 from agent.config.settings import settings
 from agent.memory.agent_memory import MongoDBMemory
 from agent.models.schemas import AgentState, ToolCall, UserQuery
@@ -16,10 +17,9 @@ class Orchestrator:
     Main orchestrator that manages the workflow for the agent system.
     This orchestrator runs a single agent in a loop to process user requests.
     """
-
-    def __init__(self, llm_adapter: LLMAdapter):
+    def __init__(self, llm_adapter: LLMAdapter, tool_adapter: ToolAdapter = ToolAdapter()):
         self.llm_adapter = llm_adapter
-        # self.tool_adapter = tool_adapter
+        self.tool_adapter = tool_adapter
         self.max_tool_calls = settings.MAX_TOOL_CALLS_PER_SESSION
         self.memory = MongoDBMemory()
 
