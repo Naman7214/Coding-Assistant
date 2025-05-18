@@ -37,13 +37,3 @@ class CodeBaseSearchController:
             status_code=status.HTTP_200_OK,
         )
 
-    async def process_grep_query(self, request: GrepSearchQueryRequest):
-        result = await self.grep_search_usecase.execute_grep_search(request)
-        return JSONResponse(
-            content={
-                "data": result,
-                "message": "Grep search completed successfully",
-                "error": None,
-            },
-            status_code=status.HTTP_200_OK,
-        )
