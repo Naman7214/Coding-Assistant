@@ -24,7 +24,7 @@ class FileDeletionService:
             '.env.development',
             '.env.production',
             'public',
-            'src',
+            # 'src', src nikala vrna andr ka kuch delete bnai krne dega 
             'build',
             'dist',
             '.next',
