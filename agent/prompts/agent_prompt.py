@@ -1,7 +1,8 @@
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from agent.models.schemas import AgentState
+
+from agent.memory.agent_memory import MongoDBMemory
 
 tools_description = {
     "tools": [
@@ -325,7 +326,7 @@ You have tools to search the codebase and read files. Follow these rules regardi
 </searching_and_reading>
 
 <tools_description>
-{json.dumps(tools_description, indent=4, separators=(",", ":"))}
+{json.dumps(tools_description, separators=(",", ":"))}
 </tools_description>
 
 You MUST use the following format when citing code regions or blocks:
@@ -337,10 +338,17 @@ This is the ONLY acceptable format for code citations. The format is ```startLin
 <output_format>
 When you need to call a tool, your response MUST be in the following JSON format:
 
-{json.dumps(response_format, indent=4, separators=(",", ":"))}
+{json.dumps(response_format,separators=(",", ":"))}
 
-The \"tool_calls\" field should only be included when you need to call a tool. If you're just responding to the user without calling a tool, your response should simply be a JSON with message field.
+
 ALWAYS wrap your response in ```json code blocks.
+
+Your response should follow the SingleAgentIteration schema:
+- action_type: Must be either "tool_call" or "final_response"
+- tool_name: The name of the tool to call (required when action_type is "tool_call")
+- parameters: Dictionary of parameters for the tool call (required when action_type is "tool_call")
+- content: The content of your final response (required when action_type is "final_response")
+- thought: Your explanatory message about the action and your reasoning (optional)
 
 </output_format>
 
@@ -348,20 +356,27 @@ Answer the user's request using the relevant tool(s), if they are available. Che
 """
 
 
-def create_tool_selection_prompt(agent_state: AgentState) -> Dict[str, Any]:
+async def create_tool_selection_prompt(session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a prompt for the LLM to determine the next tool to call.
+    If session_id is provided, it will retrieve conversation history from MongoDB.
 
     Args:
-        agent_state: The current state of the agent
+        session_id: Optional session ID to retrieve conversation history from MongoDB
 
     Returns:
         A dict with system message and conversation messages formatted for the LLM
     """
     # Format the conversation history for the LLM
     formatted_messages = []
+    
 
-    for entry in agent_state.conversation_history:
+    # Initialize MongoDB memory
+    memory = MongoDBMemory()
+    # Retrieve conversation history
+    conversation_history = await memory.get_conversation_history(session_id)
+
+    for entry in conversation_history:
         role = entry.get("role")
         content = entry.get("content")
 
@@ -411,6 +426,14 @@ def create_tool_selection_prompt(agent_state: AgentState) -> Dict[str, Any]:
                     ],
                 }
             )
+        elif role == "system" and content and content.startswith("Summary of previous conversation:"):
+            # Special handling for summary messages from MongoDB memory
+            formatted_messages.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": content}],
+                }
+            )
 
     # Create the system message
     system_message = [
@@ -427,8 +450,8 @@ def create_tool_selection_prompt(agent_state: AgentState) -> Dict[str, Any]:
     # If the last message wasn't from the user (like a tool result),
     # add a prompt asking for the next step
     if (
-        not agent_state.conversation_history
-        or agent_state.conversation_history[-1]["role"] != "user"
+        not conversation_history
+        or conversation_history[-1]["role"] != "user"
     ):
         messages["messages"].append(
             {
@@ -441,11 +464,11 @@ def create_tool_selection_prompt(agent_state: AgentState) -> Dict[str, Any]:
                 ],
             }
         )
-
+    print(messages)
     return messages
 
 
-def create_continuation_prompt(agent_state: AgentState) -> List[Dict[str, Any]]:
+async def create_continuation_prompt(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Create a prompt for when the agent has reached the maximum number of tool calls
     and needs to ask the user if they want to continue.
@@ -465,6 +488,9 @@ def create_continuation_prompt(agent_state: AgentState) -> List[Dict[str, Any]]:
     ]
 
     # Add conversation history
-    messages.extend(agent_state.conversation_history)
+    memory = MongoDBMemory()
+    conversation_history = await memory.get_conversation_history(session_id)
+    messages.extend(conversation_history)
+    print(messages) 
 
     return messages

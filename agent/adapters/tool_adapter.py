@@ -5,7 +5,6 @@ import httpx
 
 from agent.config.settings import settings
 from agent.models.schemas import ToolCall, ToolResult
-from agent.utils.error_handler import handle_tool_execution_error
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class ToolAdapter:
 
     def __init__(self):
         self.mcp_base_url = settings.MCP_BASE_URL
-        self.client = httpx.AsyncClient(timeout=60.0)
+        self.client = httpx.AsyncClient(verify=False, timeout=60.0)
         self._available_tools = None
 
     async def initialize(self):
@@ -119,10 +118,10 @@ class ToolAdapter:
             )
 
         except Exception as e:
-            error_message = handle_tool_execution_error(e, tool_call)
+            # error_message = handle_tool_execution_error(e, tool_call)
             logger.error(
-                f"Tool execution error for {tool_call.tool_name}: {error_message}"
+                f"Tool execution error for {tool_call.tool_name}: {str(e)}"
             )
             return ToolResult(
-                success=False, content=f"Error executing tool: {error_message}"
+                success=False, content=f"Error executing tool: {str(e)}", error=str(e)
             )
