@@ -5,7 +5,9 @@ import tiktoken
 from fastapi import Depends
 
 from backend.app.config.settings import settings
-from backend.app.models.schemas.web_search_query_schema import WebSearchQueryRequest
+from backend.app.models.schemas.web_search_query_schema import (
+    WebSearchQueryRequest,
+)
 from backend.app.services.external_tools.scrape_webpages_service import (
     ScrapeWebpagesService,
 )

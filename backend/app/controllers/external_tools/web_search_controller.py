@@ -1,8 +1,12 @@
 from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
-from backend.app.models.schemas.web_search_query_schema import WebSearchQueryRequest
-from backend.app.usecases.external_tools.web_search_usecase import WebSearchUsecase
+from backend.app.models.schemas.web_search_query_schema import (
+    WebSearchQueryRequest,
+)
+from backend.app.usecases.external_tools.web_search_usecase import (
+    WebSearchUsecase,
+)
 
 
 class WebSearchController:

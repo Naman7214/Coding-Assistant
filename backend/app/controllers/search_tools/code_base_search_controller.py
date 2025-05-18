@@ -10,7 +10,9 @@ from backend.app.models.schemas.grep_search_query_schema import (
 from backend.app.usecases.search_tools.code_base_usecase import (
     CodeBaseSearchUsecase,
 )
-from backend.app.usecases.search_tools.grep_search_usecase import GrepSearchUsecase
+from backend.app.usecases.search_tools.grep_search_usecase import (
+    GrepSearchUsecase,
+)
 
 
 class CodeBaseSearchController:

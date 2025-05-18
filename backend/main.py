@@ -6,11 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.apis import (
     code_base_search_route,
+    file_access_routes,
+    modification_routes,
     run_terminal_cmd_route,
     web_search_route,
 )
 from backend.app.config.database import mongodb_database
-from backend.app.apis.file_access_routes import router as file_access_router
 
 
 @asynccontextmanager
@@ -32,6 +33,12 @@ app.include_router(
 app.include_router(
     run_terminal_cmd_route.router, prefix="/api/v1", tags=["enviornment tools"]
 )
+app.include_router(
+    modification_routes.router, prefix="/api/v1", tags=["modification tools"]
+)
+app.include_router(
+    file_access_routes.router, prefix="/api/v1", tags=["file access tools"]
+)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -41,8 +48,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(file_access_router)
-app.include_router(modification_router)
 
 @app.get("/")
 async def root():
@@ -50,4 +55,4 @@ async def root():
 
 
 if __name__ == "__main__":
-    uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)

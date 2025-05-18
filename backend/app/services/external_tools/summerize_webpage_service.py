@@ -6,7 +6,9 @@ import tiktoken
 from fastapi import Depends
 
 from backend.app.config.settings import settings
-from backend.app.prompts.webpage_summarizer_prompt import WEB_PAGE_SUMMARIZER_PROMPT
+from backend.app.prompts.webpage_summarizer_prompt import (
+    WEB_PAGE_SUMMARIZER_PROMPT,
+)
 from backend.app.repositories.llm_usage_repo import LLMUsageRepository
 
 

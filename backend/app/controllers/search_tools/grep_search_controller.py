@@ -4,7 +4,9 @@ from fastapi.responses import JSONResponse
 from backend.app.models.schemas.grep_search_query_schema import (
     GrepSearchQueryRequest,
 )
-from backend.app.usecases.search_tools.grep_search_usecase import GrepSearchUsecase
+from backend.app.usecases.search_tools.grep_search_usecase import (
+    GrepSearchUsecase,
+)
 
 
 class GrepSearchController:
