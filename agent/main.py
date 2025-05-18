@@ -21,9 +21,7 @@ from rich.text import Text
 # Add the necessary path to import agent modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent.adapters.llm_adapter import LLMAdapter
-from agent.core.orchestrator import (
-    Orchestrator,
-)  # Adjust this import based on your actual agent implementation
+from agent.core.orchestrator import Orchestrator
 from agent.models.schemas import UserQuery
 
 
@@ -33,16 +31,16 @@ class CodeAssistantCLI:
     def __init__(self):
         """Initialize the CLI interface"""
         self.llm_adapter = LLMAdapter()
-        # self.tool_adapter = ToolAdapter()
         self.orchestrator = Orchestrator(self.llm_adapter)
         self.console = Console()
+        self.current_session_id = None  # Store the current session ID
 
     def display_welcome(self):
         """Display a welcome message"""
         self.console.print(
             Panel.fit(
                 "[bold blue]Code Generation Assistant[/bold blue]\n"
-                "Type your instructions or 'exit' to quit.",
+                "Type your instructions or 'exit'/'end' to quit.",
                 border_style="blue",
             )
         )
@@ -65,46 +63,65 @@ class CodeAssistantCLI:
             padding=(0, 1),
         )
 
-    def show_thinking(self, reasoning: Dict[str, Any]):
-        """Display the agent's reasoning process"""
-        if "thinking" in reasoning:
+    def show_tool_call(self, tool_call: Dict[str, Any], thought: str = ""):
+        """Display a tool call with thought process"""
+        if thought:
             self.console.print(
                 Panel(
-                    reasoning["thinking"],
-                    title="Agent Reasoning",
+                    thought,
+                    title="Thought Process",
                     border_style="yellow",
                 )
             )
 
-        if "tool_calls" in reasoning:
-            for tool in reasoning["tool_calls"]:
-                self.console.print(
-                    Panel(
-                        f"[cyan]Tool:[/cyan] {tool['name']}\n"
-                        f"[magenta]Parameters:[/magenta] {tool['parameters']}",
-                        title="Tool Call",
-                        border_style="blue",
-                    )
-                )
+        self.console.print(
+            Panel(
+                f"[cyan]Tool:[/cyan] {tool_call['name']}\n"
+                f"[magenta]Parameters:[/magenta] {tool_call['parameters']}",
+                title="Tool Call",
+                border_style="blue",
+            )
+        )
 
-    def show_result(self, result: Dict[str, Any]):
-        """Display the final result"""
-        if "conversation_history" in result:
-            # Get the last assistant message
-            for message in reversed(result["conversation_history"]):
-                if (
-                    message["role"] == "assistant"
-                    and "content" in message
-                    and message["content"]
-                ):
-                    self.console.print(
-                        Panel(
-                            message["content"],
-                            title="Result",
-                            border_style="green",
-                        )
+    def show_assistant_message(self, message: Dict[str, Any]):
+        """Display an assistant message"""
+        if message.get("content"):
+            self.console.print(
+                Panel(
+                    message["content"],
+                    title="Assistant",
+                    border_style="green",
+                )
+            )
+
+    def show_tool_result(self, message: Dict[str, Any]):
+        """Display a tool result"""
+        self.console.print(
+            Panel(
+                f"[cyan]Tool Result ({message['name']}):[/cyan]\n{message['content']}",
+                title="Tool Result",
+                border_style="bright_blue",
+            )
+        )
+
+    def display_conversation_updates(self, history, last_shown_index=0):
+        """Display new messages in the conversation history"""
+        # Ensure we only display new messages
+        for i, message in enumerate(history[last_shown_index:], start=last_shown_index):
+            if message["role"] == "assistant":
+                if "tool_call" in message:
+                    self.show_tool_call(
+                        message["tool_call"], 
+                        message.get("thought", "")
                     )
-                    break
+                elif message.get("content"):
+                    self.show_assistant_message(message)
+            elif message["role"] == "tool":
+                self.show_tool_result(message)
+            # Skip user messages as they're already displayed in the input
+        
+        # Return the new index for tracking what's been shown
+        return len(history)
 
     async def run_repl(self):
         """Run the REPL loop"""
@@ -125,19 +142,20 @@ class CodeAssistantCLI:
 
         # Create prompt session
         session = PromptSession(key_bindings=kb, multiline=True)
-
+        last_shown_index = 0
+        
         while True:
             try:
                 # Get user input
                 self.console.print(
-                    "\n[bold blue]>>[/bold blue] (Press Enter to submit, Escape+Enter for new line)"
+                    "\n[bold blue]>>[/bold blue] (Press Enter to submit, Escape+Enter for new line, 'end' to exit)"
                 )
                 query = await session.prompt_async("")
 
-                if query.lower() in ("exit", "quit"):
+                if query.lower() in ("exit", "quit", "end"):
                     self.console.print("[yellow]Goodbye![/yellow]")
                     break
-
+                
                 # Show thinking animation
                 with Live(refresh_per_second=10, transient=True) as live:
                     frame = 0
@@ -149,35 +167,37 @@ class CodeAssistantCLI:
                         live.update(self._create_thinking_animation(frame))
                         await asyncio.sleep(0.05)
 
+                # If we're starting a new session, reset the display index
+                if not self.current_session_id:
+                    last_shown_index = 0
+
                 # Process the query
                 is_continuation = False
 
                 # Process the query and get result
                 user_query_obj = UserQuery(
-                    text=query, is_continuation_response=is_continuation
+                    text=query, 
+                    session_id=self.current_session_id,
+                    is_continuation_response=is_continuation
                 )
                 result = await self.orchestrator.process_query(user_query_obj)
+                
+                # Save the session ID for future queries
+                if result and "session_id" in result:
+                    self.current_session_id = result["session_id"]
+
+                # Display the conversation updates
+                if result.get("conversation_history"):
+                    last_shown_index = self.display_conversation_updates(
+                        result["conversation_history"], 
+                        last_shown_index
+                    )
 
                 # Check if we need to ask for continuation
                 while (
                     "waiting_for_continuation" in result
                     and result["waiting_for_continuation"]
                 ):
-                    # Show the continuation question to the user
-                    for message in reversed(result["conversation_history"]):
-                        if (
-                            message["role"] == "assistant"
-                            and "content" in message
-                        ):
-                            self.console.print(
-                                Panel(
-                                    message["content"],
-                                    title="Continuation Request",
-                                    border_style="yellow",
-                                )
-                            )
-                            break
-
                     # Get user's continuation decision
                     self.console.print(
                         "\n[bold yellow]>>[/bold yellow] (continue/stop)"
@@ -187,7 +207,7 @@ class CodeAssistantCLI:
                     # Process the continuation response
                     user_query_obj = UserQuery(
                         text=continuation_choice,
-                        session_id=session_id,
+                        session_id=self.current_session_id,
                         is_continuation_response=True,
                     )
 
@@ -196,20 +216,30 @@ class CodeAssistantCLI:
                         user_query_obj
                     )
 
-                # Display the reasoning steps if available
-                if "reasoning_steps" in result:
-                    self.show_thinking(result["reasoning_steps"])
+                    # Display any new messages in the conversation
+                    if result.get("conversation_history"):
+                        last_shown_index = self.display_conversation_updates(
+                            result["conversation_history"], 
+                            last_shown_index
+                        )
 
-                # Display the final result
-                self.show_result(result)
+                # If the task is completed, show a message and reset session
+                if result.get("completed", False):
+                    self.console.print("[bold green]Session completed! Starting a new session for your next query.[/bold green]")
+                    # Reset session ID if the session is completed
+                    self.current_session_id = None
+                    last_shown_index = 0
 
             except KeyboardInterrupt:
                 self.console.print(
                     "\n[yellow]Operation cancelled by user[/yellow]"
                 )
+                self.current_session_id = None
+                last_shown_index = 0
 
             except Exception as e:
                 self.console.print(f"[bold red]Error:[/bold red] {str(e)}")
+                # Optionally keep the session alive despite errors
 
 
 async def main():

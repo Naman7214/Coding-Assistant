@@ -1,8 +1,8 @@
 import json
 from typing import Any, Dict, List, Optional
 
+
 from agent.memory.agent_memory import MongoDBMemory
-from agent.models.schemas import AgentState
 
 tools_description = {
     "tools": [
@@ -356,15 +356,12 @@ Answer the user's request using the relevant tool(s), if they are available. Che
 """
 
 
-async def create_tool_selection_prompt(
-    agent_state: AgentState, session_id: Optional[str] = None
-) -> Dict[str, Any]:
+async def create_tool_selection_prompt(session_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a prompt for the LLM to determine the next tool to call.
     If session_id is provided, it will retrieve conversation history from MongoDB.
 
     Args:
-        agent_state: The current state of the agent
         session_id: Optional session ID to retrieve conversation history from MongoDB
 
     Returns:
@@ -372,16 +369,12 @@ async def create_tool_selection_prompt(
     """
     # Format the conversation history for the LLM
     formatted_messages = []
+    
 
-    # Use conversation history from MongoDB if session_id is provided
-    if session_id:
-        # Initialize MongoDB memory
-        memory = MongoDBMemory()
-        # Retrieve conversation history
-        conversation_history = await memory.get_conversation_history(session_id)
-    else:
-        # Use the conversation history from agent_state
-        conversation_history = agent_state.conversation_history
+    # Initialize MongoDB memory
+    memory = MongoDBMemory()
+    # Retrieve conversation history
+    conversation_history = await memory.get_conversation_history(session_id)
 
     for entry in conversation_history:
         role = entry.get("role")
@@ -433,11 +426,7 @@ async def create_tool_selection_prompt(
                     ],
                 }
             )
-        elif (
-            role == "system"
-            and content
-            and content.startswith("Summary of previous conversation:")
-        ):
+        elif role == "system" and content and content.startswith("Summary of previous conversation:"):
             # Special handling for summary messages from MongoDB memory
             formatted_messages.append(
                 {
@@ -460,7 +449,10 @@ async def create_tool_selection_prompt(
 
     # If the last message wasn't from the user (like a tool result),
     # add a prompt asking for the next step
-    if not conversation_history or conversation_history[-1]["role"] != "user":
+    if (
+        not conversation_history
+        or conversation_history[-1]["role"] != "user"
+    ):
         messages["messages"].append(
             {
                 "role": "user",
@@ -476,7 +468,7 @@ async def create_tool_selection_prompt(
     return messages
 
 
-def create_continuation_prompt(agent_state: AgentState) -> List[Dict[str, Any]]:
+async def create_continuation_prompt(session_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Create a prompt for when the agent has reached the maximum number of tool calls
     and needs to ask the user if they want to continue.
@@ -496,7 +488,9 @@ def create_continuation_prompt(agent_state: AgentState) -> List[Dict[str, Any]]:
     ]
 
     # Add conversation history
-    messages.extend(agent_state.conversation_history)
-    print(messages)
+    memory = MongoDBMemory()
+    conversation_history = await memory.get_conversation_history(session_id)
+    messages.extend(conversation_history)
+    print(messages) 
 
     return messages

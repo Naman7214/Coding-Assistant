@@ -27,6 +27,7 @@ class ToolCall(BaseModel):
     parameters: Dict[str, Any] = Field(
         default_factory=dict, description="Parameters to pass to the tool"
     )
+    thought: Optional[str] = Field(None, description="Thought process behind the tool call")
 
 
 class ToolResult(BaseModel):
@@ -43,48 +44,3 @@ class ToolResult(BaseModel):
     )
 
 
-class SingleAgentIteration(BaseModel):
-    """
-    Represents an action determined by the agent.
-    """
-
-    action_type: Optional[str] = Field(
-        None, description="Type of action: 'tool_call' or 'final_response'"
-    )
-    tool_name: Optional[str] = Field(
-        None,
-        description="Name of the tool to call (if action_type is 'tool_call')",
-    )
-    parameters: Optional[Dict[str, Any]] = Field(
-        None, description="Parameters for the tool call"
-    )
-    content: Optional[str] = Field(
-        None,
-        description="Content of the final response (if action_type is 'final_response')",
-    )
-    thought: Optional[str] = Field(
-        None,
-        description="Explanatory message to the user about the action being taken and it's internal reasoning",
-    )
-
-
-class AgentState(BaseModel):
-    """
-    Represents the current state of the agent during a conversation.
-    """
-
-    conversation_history: List[Dict[str, Any]] = Field(
-        default_factory=list, description="History of the conversation so far"
-    )
-    current_tool_calls: List[ToolCall] = Field(
-        default_factory=list,
-        description="List of tool calls made in the current iteration",
-    )
-    available_tools: Any = Field(
-        default_factory=list,
-        description="List of available tools the agent can use",
-    )
-    completed: bool = Field(
-        default=False,
-        description="Whether the agent has completed processing the query",
-    )

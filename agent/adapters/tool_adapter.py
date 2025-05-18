@@ -120,8 +120,8 @@ class ToolAdapter:
         except Exception as e:
             # error_message = handle_tool_execution_error(e, tool_call)
             logger.error(
-                f"Tool execution error for {tool_call.tool_name}: {error_message}"
+                f"Tool execution error for {tool_call.tool_name}: {str(e)}"
             )
             return ToolResult(
-                success=False, content=f"Error executing tool: {error_message}"
+                success=False, content=f"Error executing tool: {str(e)}", error=str(e)
             )
