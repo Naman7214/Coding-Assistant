@@ -11,10 +11,9 @@ from src.app.apis import (
     code_base_search_route,
     run_terminal_cmd_route,
     web_search_route,
-    codebase_indexing_routes
+    file_access_routes,
 )
 from src.app.config.database import mongodb_database
-from src.app.apis.file_access_routes import router as file_access_router
 
 
 @asynccontextmanager
@@ -37,14 +36,8 @@ app.include_router(
     run_terminal_cmd_route.router, prefix="/api/v1", tags=["enviornment tools"]
 )
 app.include_router(
-    codebase_indexing_routes.router, prefix="/api/v1", tags=["codebase indexing"]
+    file_access_routes.router, prefix="/api/v1", tags=["file access tools"]
 )
-
-# Add the codebase context middleware
-app.add_middleware(CodebaseContextMiddleware)
-
-# Add the thread context middleware
-app.add_middleware(ThreadContextMiddleware)
 
 # Add CORS middleware
 app.add_middleware(
@@ -54,8 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.include_router(file_access_router)
 
 @app.get("/")
 async def root():

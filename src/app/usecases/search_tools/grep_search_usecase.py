@@ -50,7 +50,7 @@ class GrepSearchUsecase:
             cmd.extend(["-g", f"!{exclude_pattern}"])
 
             # Add the query and directory (codebase directory by default)
-        cmd.extend([query, "codebase"])
+        cmd.extend([query, "."]) # i have changed here 
 
         try:
             # Debug: Print the command being executed
