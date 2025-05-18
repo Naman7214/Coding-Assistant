@@ -1,13 +1,12 @@
-import os
 import subprocess
 from datetime import datetime
 from typing import Any, Dict, List
 
 from fastapi import Depends, HTTPException, status
 
+from backend.app.config.settings import settings
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
-from backend.app.config.settings import settings
 
 
 class FileSearchService:

@@ -1,6 +1,5 @@
 import json
 import logging
-from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -24,32 +23,17 @@ timeout = httpx.Timeout(
 )
 
 
-async def run_terminal_command(
-    command: str,
-    is_background: bool,
-    # require_user_approval: bool,
-    explanation: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Run a terminal command on the user's system.
+async def web_search(
+    search_term: str, target_urls: list[str] = [], explanation: str = ""
+) -> str:
 
-    Args:
-        command: The terminal command to execute
-        is_background: Whether the command should be run in the background
-        require_user_approval: Whether user approval is required
-        explanation: Explanation for why the command is needed
-
-    Returns:
-        A dictionary with the command output and execution status
-    """
-    url = "http://192.168.17.182:8000/api/v1/run_terminal_cmd"
+    url = "http://127.0.0.1:8000/api/v1/web-search"
 
     payload = {
-        "cmd": command,
-        "is_background": is_background,
+        "search_term": search_term,
+        "target_urls": target_urls,
+        "explanation": explanation,
     }
-    if explanation:
-        payload["explanation"] = explanation
 
     try:
         async with httpx.AsyncClient(verify=False, timeout=timeout) as client:

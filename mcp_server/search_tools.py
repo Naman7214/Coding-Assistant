@@ -30,7 +30,7 @@ async def codebase_search(
     """
     Search the codebase for the given query.
     """
-    url = "http://192.168.17.182:8000/api/v1/code_base_search"
+    url = "http://127.0.0.1:8000/api/v1/code-base-search"
 
     payload = {
         "query": query,
@@ -77,7 +77,7 @@ async def execute_grep_search(
         A dictionary with the search results and metadata
     """
 
-    url = "http://192.168.17.182:8000/api/v1/grep_search"
+    url = "http://127.0.0.1:8000/api/v1/grep-search"
 
     payload = {
         "query": query,

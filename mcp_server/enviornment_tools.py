@@ -1,4 +1,6 @@
+import json
 import logging
+from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -22,41 +24,38 @@ timeout = httpx.Timeout(
 )
 
 
-
-
-async def search_and_replace(
-    query: str,
-    replacement: str,
-    explanation: str,
-    options: Optional[Dict[str, Any]] = None,
+async def run_terminal_command(
+    command: str,
+    is_background: bool,
+    # require_user_approval: bool,
+    explanation: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Search for text and replace it in files.
-    
-    Args:
-        query: The text or regex pattern to search for
-        replacement: The text to replace the matched content with
-        options: Dictionary containing search options
-        
-    Returns:
-        Dictionary with results of the operation
-    """
+    Run a terminal command on the user's system.
 
-    url = "http://192.168.17.182:8000/api/v1/search-replace"
-            
+    Args:
+        command: The terminal command to execute
+        is_background: Whether the command should be run in the background
+        require_user_approval: Whether user approval is required
+        explanation: Explanation for why the command is needed
+
+    Returns:
+        A dictionary with the command output and execution status
+    """
+    url = "http://127.0.0.1:8000/api/v1/run-terminal-cmd"
+
     payload = {
-        "query": query,
-        "replacement": replacement,
-        "explanation": explanation
+        "cmd": command,
+        "is_background": is_background,
     }
-    if options:
-        payload["options"] = options
-   
+    if explanation:
+        payload["explanation"] = explanation
+
     try:
-        async with httpx.AsyncClient(verify=False, timeout = timeout) as client:
-            response = await client.post(url, json = payload)
+        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+            response = await client.post(url, json=payload)
             response.raise_for_status()
-            response_json =  response.json()
+            response_json = response.json()
             # print(response_json)
             print(json.dumps(response_json, indent=4))
 
@@ -66,5 +65,5 @@ async def search_and_replace(
         return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
         return f"HTTP request error occured : {str(e)}"
-    except Exception as e :
+    except Exception as e:
         return f"An error occured : {str(e)}"

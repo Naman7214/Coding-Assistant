@@ -31,7 +31,7 @@ async def read_file(
     end_line: Optional[int] = None,
 ) -> Dict[str, Any]:
 
-    url = "http://192.168.17.182:8000/api/v1/read-file"
+    url = "http://127.0.0.1:8000/api/v1/read-file"
 
     payload = {"file_path": file_path, "explanation": explanation}
 
@@ -70,7 +70,7 @@ async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
         A dictionary with the deletion status and any error
     """
 
-    url = "http://192.168.17.182:8000/api/v1/delete-file"
+    url = "http://127.0.0.1:8000/api/v1/delete-file"
 
     payload = {"path": path, "explanation": explanation}
 
@@ -99,7 +99,7 @@ async def list_directory(
     explanation: str = "",
 ) -> List[Dict[str, Any]]:
 
-    url = "http://192.168.17.182:8000/api/v1/list-directory"
+    url = "http://127.0.0.1:8000/api/v1/list-directory"
 
     payload = {
         "dir_path": dir_path if dir_path else " ",
@@ -125,7 +125,7 @@ async def list_directory(
 
 async def search_files(query: str, explanation: str) -> List[Dict[str, Any]]:
 
-    url = "http://192.168.17.182:8000/api/v1/search-files"
+    url = "http://127.0.0.1:8000/api/v1/search-files"
 
     payload = {"pattern": query, "explanation": explanation}
 
