@@ -10,6 +10,7 @@ from src.app.apis import (
     web_search_route,
 )
 from src.app.config.database import mongodb_database
+from src.app.apis.file_access_routes import router as file_access_router
 
 
 @asynccontextmanager
@@ -40,6 +41,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(file_access_router)
 
 @app.get("/")
 async def root():
