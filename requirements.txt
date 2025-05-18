@@ -10,7 +10,7 @@ pydantic-settings
 uvicorn==0.23.2
 pinecone
 tiktoken
-bson==0.5.9
-pymongo==4.9.2
+pymongo
+bson
 crawl4ai
 tiktoken
