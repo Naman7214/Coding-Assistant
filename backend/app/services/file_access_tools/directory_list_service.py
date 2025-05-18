@@ -7,6 +7,8 @@ from fastapi import Depends, HTTPException, status
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
 
+from backend.app.config.settings import settings
+
 
 class DirectoryListService:
     def __init__(self, error_repo: ErrorRepo = Depends()):
@@ -19,7 +21,10 @@ class DirectoryListService:
         explanation: str,
     ) -> List[Dict[str, Any]]:
         try:
-            dir_path = dir_path if dir_path else os.getcwd()
+            dir_path = dir_path if dir_path else settings.CODEBASE_DIR
+            
+            # Directories to exclude from listing
+            excluded_dirs = ['node_modules', 'venv', '.venv', 'env', '.env', '__pycache__']
 
             async def process_directory(
                 current_path: str,
@@ -28,7 +33,8 @@ class DirectoryListService:
 
                 try:
                     for item in os.listdir(current_path):
-                        if item.startswith("."):
+                        # Skip hidden files and excluded directories
+                        if item.startswith(".") or item in excluded_dirs:
                             continue
 
                         full_path = os.path.join(current_path, item)

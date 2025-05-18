@@ -248,7 +248,7 @@ def main(port: int) -> int:
             ),
             types.Tool(
                 name="read_file",
-                description="Reads the contents of a specified file. You may choose to read the entire file or a specific range of lines by providing optional start and end line numbers. The tool returns the file content, file size in bytes, and last modified timestamp. If an explanation string is provided, it will be printed before reading the file.",
+                description="Reads the contents of a specified file. You may choose to read the entire file or a specific range of lines by providing optional start and end line numbers. The tool returns the file content.",
                 inputSchema={
                     "type": "object",
                     "required": ["file_path", "explanation"],
@@ -278,7 +278,7 @@ def main(port: int) -> int:
             ),
             types.Tool(
                 name="run_terminal_command",
-                description="PROPOSE a command to run on behalf of the user.\nIf you have this tool, note that you DO have the ability to run commands directly on the USER's system.\nIn using these tools, adhere to the following guidelines:\n1. Based on the contents of the conversation, you will be told if you are in the same shell as a previous step or a different shell.\n2. If in a new shell, you should cd to the appropriate directory and do necessary setup in addition to running the command.\n3. If in the same shell, the state will persist (eg. if you cd in one step, that cwd is persisted next time you invoke this tool).\n4. For ANY commands that would use a pager or require user interaction, you should append  | cat to the command (or whatever is appropriate). Otherwise, the command will break. You MUST do this for: git, less, head, tail, more, etc.\n5. For commands that are long running/expected to run indefinitely until interruption, please run them in the background. To run jobs in the background, set is_background to true rather than changing the details of the command.\n6. Dont include any newlines in the command.",
+                description="PROPOSE a command to run on behalf of the user.\nIf you have this tool, note that you DO have the ability to run commands directly on the USER's system.\nIn using these tools, adhere to the following guidelines:\n1. Commands will be executed in a predefined path set by the system.\n2. The state will persist between command executions (eg. if you cd in one step, that cwd is persisted next time you invoke this tool).\n3. For ANY commands that would use a pager or require user interaction, you should append  | cat to the command (or whatever is appropriate). Otherwise, the command will break. You MUST do this for: git, less, head, tail, more, etc.\n4. For commands that are long running/expected to run indefinitely until interruption, please run them in the background. To run jobs in the background, set is_background to true rather than changing the details of the command.\n5. Dont include any newlines in the command.",
                 inputSchema={
                     "type": "object",
                     "required": ["command", "is_background"],
@@ -322,7 +322,7 @@ def main(port: int) -> int:
             ),
             types.Tool(
                 name="list_directory",
-                description="List the contents of a directory. The quick tool to use for discovery, before using more targeted tools like semantic search or file reading. Useful to try to understand the file structure before diving deeper into specific files. Can be used to explore the codebase. The tool returns a JSON array of file paths, file types, sizes, and last modified timestamps. If an explanation string is provided, it will be printed before listing the directory.",
+                description="List the contents of a directory. The quick tool to use for discovery, before using more targeted tools like semantic search or file reading. Useful to try to understand the file structure before diving deeper into specific files. Can be used to explore the codebase. The tool returns a JSON array of file paths.",
                 inputSchema={
                     "type": "object",
                     "required": [],
