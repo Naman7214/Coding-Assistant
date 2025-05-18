@@ -20,7 +20,7 @@ from backend.app.models.schemas.file_access_schemas import (
 )
 from backend.app.utils.error_handler import handle_exceptions
 
-router = APIRouter(prefix="/files", tags=["files"])
+router = APIRouter()
 
 
 @router.post("/read-file")
