@@ -177,4 +177,4 @@ template.py
 linters.sh
 codebase/
 struct_logs
-temp.py
+coding_agent/.env
