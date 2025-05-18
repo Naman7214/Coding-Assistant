@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
     OPENAI_MODEL: str = "gpt-4.1-mini-2025-04-14"
     TAVILY_API_KEY: str
-    SUMMARIZATION_TOKEN_THRESHOLD: int = 300
+    SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
+
+    CODEBASE_DIR: str = "/Users/krishgoyani/Developer/Code-Generation-Assistant/codebase"
 
     class Config:
         env_file = ".env"
