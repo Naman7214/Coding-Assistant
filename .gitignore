@@ -175,5 +175,5 @@ cython_debug/
 template.py
 .env
 linters.sh
-codebase
+codebase/
 struct_logs
