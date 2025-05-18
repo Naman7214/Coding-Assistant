@@ -7,6 +7,8 @@ from fastapi import Depends, HTTPException, status
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
 
+from backend.app.config.settings import settings
+
 
 class DirectoryListService:
     def __init__(self, error_repo: ErrorRepo = Depends()):

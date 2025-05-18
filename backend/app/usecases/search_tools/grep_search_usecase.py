@@ -9,6 +9,7 @@ from backend.app.models.schemas.grep_search_query_schema import (
     GrepSearchQueryRequest,
 )
 from backend.app.repositories.error_repo import ErrorRepo
+from backend.app.config.settings import settings
 
 
 class GrepSearchUsecase:
@@ -50,7 +51,7 @@ class GrepSearchUsecase:
             cmd.extend(["-g", f"!{exclude_pattern}"])
 
             # Add the query and directory (codebase directory by default)
-        cmd.extend([query, "codebase"])
+        cmd.extend([query, settings.CODEBASE_DIR])  # i have changed here
 
         try:
             # Debug: Print the command being executed

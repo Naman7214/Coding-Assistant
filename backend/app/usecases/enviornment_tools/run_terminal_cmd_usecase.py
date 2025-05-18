@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any, Dict, Optional
+from backend.app.config.settings import settings
 
 
 class RunTerminalCmdUsecase:
@@ -36,11 +37,12 @@ class RunTerminalCmdUsecase:
             if is_background:
                 # For background processes, use Popen and don't wait
                 process = subprocess.Popen(
-                    command,  # shlex.split(command),on doin this commands break for example mkdir .. && ... then sabhi directories bana deta tha
+                    command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     start_new_session=True,
+                    cwd=settings.CODEBASE_DIR,  # Set working directory to CODEBASE_DIR
                 )
                 return {
                     "output": f"Command started in background with PID {process.pid}",
@@ -53,7 +55,9 @@ class RunTerminalCmdUsecase:
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    cwd=settings.CODEBASE_DIR,  # Set working directory to CODEBASE_DIR
                 )
+
 
                 stdout, stderr = await process.communicate()
                 stdout_str = stdout.decode("utf-8")

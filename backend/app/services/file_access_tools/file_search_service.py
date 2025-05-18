@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, status
 
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
+from backend.app.config.settings import settings
 
 
 class FileSearchService:
@@ -17,7 +18,8 @@ class FileSearchService:
         self, pattern: str, explanation: str
     ) -> List[Dict[str, Any]]:
         try:
-            current_dir = os.getcwd()
+            # Use CODEBASE_DIR instead of current working directory
+            current_dir = settings.CODEBASE_DIR
 
             cmd = [
                 "fzf",

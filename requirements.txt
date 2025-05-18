@@ -2,12 +2,12 @@ black
 autoflake 
 isort 
 vulture
-fastapi==0.103.1
+fastapi
 motor
-pydantic==2.3.0
+pydantic
 httpx
 pydantic-settings
-uvicorn==0.23.2
+uvicorn
 pinecone
 tiktoken
 pymongo
@@ -16,3 +16,4 @@ crawl4ai
 tiktoken
 prompt-toolkit
 rich
+mcp
