@@ -24,7 +24,6 @@ class LLMAdapter:
         self.model = settings.CLAUDE_MODEL
         self.base_url = settings.CLAUDE_BASE_URL
         self.messages_endpoint = settings.CLAUDE_MESSAGES_ENDPOINT
-        self.client = httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=300.0, write=300.0, pool=60.0))
         
     async def determine_next_action(self, agent_state: AgentState) -> AgentAction:
         """
@@ -78,7 +77,8 @@ class LLMAdapter:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=settings.TIMEOUT_SECONDS) as client:
+            # Create a new client for each request to avoid the "Cannot reopen a client instance" error
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=300.0, write=300.0, pool=60.0)) as client:
                 response = await client.post(
                     url=url,
                     headers=headers,
