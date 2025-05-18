@@ -5,7 +5,7 @@ class Settings(BaseSettings):
 
     # MongoDB settings
     MONGODB_URL: str = "mongodb://localhost:27017"
-    MONGODB_DB_NAME: str = "n8n"
+    MONGODB_DB_NAME: str = "coding_assistant"
     ERROR_COLLECTION_NAME: str = "error_logs"
     LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"
     VOYAGEAI_API_KEY: str
@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     PINECONE_SIMILARITY_THRESHOLD: float = 0.56
     OPENAI_API_KEY: str
     ANTHROPIC_API_KEY: str
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
+    OPENAI_MODEL: str = "gpt-4.1-mini-2025-04-14"
+    TAVILY_API_KEY: str
+    SUMMARIZATION_TOKEN_THRESHOLD: int = 300
 
     class Config:
         env_file = ".env"

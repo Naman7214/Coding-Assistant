@@ -4,7 +4,11 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.app.apis.code_base_search import code_base_search_route
+from src.app.apis import (
+    code_base_search_route,
+    run_terminal_cmd_route,
+    web_search_route,
+)
 from src.app.config.database import mongodb_database
 
 
@@ -20,6 +24,12 @@ async def db_lifespan(app: FastAPI):
 app = FastAPI(title="My FastAPI Application", lifespan=db_lifespan)
 app.include_router(
     code_base_search_route.router, prefix="/api/v1", tags=["search tools"]
+)
+app.include_router(
+    web_search_route.router, prefix="/api/v1", tags=["external tools"]
+)
+app.include_router(
+    run_terminal_cmd_route.router, prefix="/api/v1", tags=["enviornment tools"]
 )
 # Add CORS middleware
 app.add_middleware(

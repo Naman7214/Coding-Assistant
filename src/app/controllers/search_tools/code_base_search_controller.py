@@ -1,4 +1,5 @@
-from fastapi import Depends
+from fastapi import Depends, status
+from fastapi.responses import JSONResponse
 
 from src.app.models.schemas.code_base_search_schema import (
     CodeBaseSearchQueryRequest,
@@ -24,7 +25,23 @@ class CodeBaseSearchController:
         self.grep_search_usecase = grep_search_usecase
 
     async def process_query(self, request: CodeBaseSearchQueryRequest):
-        return await self.code_base_search_usecase.process_query(request)
+        result = await self.code_base_search_usecase.process_query(request)
+        return JSONResponse(
+            content={
+                "data": result,
+                "message": "Code base search completed successfully",
+                "error": None,
+            },
+            status_code=status.HTTP_200_OK,
+        )
 
     async def process_grep_query(self, request: GrepSearchQueryRequest):
-        return await self.grep_search_usecase.execute_grep_search(request)
+        result = await self.grep_search_usecase.execute_grep_search(request)
+        return JSONResponse(
+            content={
+                "data": result,
+                "message": "Grep search completed successfully",
+                "error": None,
+            },
+            status_code=status.HTTP_200_OK,
+        )

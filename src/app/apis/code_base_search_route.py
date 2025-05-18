@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends
 
-from src.app.controllers.code_base_search.code_base_search_controller import (
+from src.app.controllers.search_tools.code_base_search_controller import (
     CodeBaseSearchController,
+)
+from src.app.controllers.search_tools.grep_search_controller import (
+    GrepSearchController,
 )
 from src.app.models.schemas.code_base_search_schema import (
     CodeBaseSearchQueryRequest,
@@ -20,14 +23,15 @@ async def code_base_search(
         CodeBaseSearchController
     ),
 ):
+
     return await code_base_search_controller.process_query(request)
 
 
 @router.post("/grep_search")
 async def grep_search(
     request: GrepSearchQueryRequest,
-    grep_search_controller: CodeBaseSearchController = Depends(
-        CodeBaseSearchController
+    grep_search_controller: GrepSearchController = Depends(
+        GrepSearchController
     ),
 ):
     return await grep_search_controller.process_grep_query(request)
