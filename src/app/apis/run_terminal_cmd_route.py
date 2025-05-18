@@ -10,7 +10,7 @@ from src.app.models.schemas.run_terminal_command_schema import (
 router = APIRouter()
 
 
-@router.post("/run_terminal_cmd")
+@router.post("/run-terminal-cmd")
 async def run_terminal_cmd(
     request: RunTerminalCommandRequest,
     run_terminal_cmd_controller: RunTerminalCmdController = Depends(

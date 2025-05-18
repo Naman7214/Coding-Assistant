@@ -12,5 +12,9 @@ pinecone
 tiktoken
 bson==0.5.9
 pymongo==4.9.2
-crawl4ai
+Crawl4AI
 tiktoken
+mem0ai
+code-splitter
+tree-sitter-python
+tree-sitter
