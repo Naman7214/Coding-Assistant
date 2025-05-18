@@ -42,6 +42,7 @@ app.add_middleware(
 )
 
 app.include_router(file_access_router)
+app.include_router(modification_router)
 
 @app.get("/")
 async def root():
