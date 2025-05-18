@@ -26,7 +26,7 @@ class FileDeletionService:
             ".env.development",
             ".env.production",
             "public",
-            "src",
+            # "src",
             "build",
             "dist",
             ".next",
