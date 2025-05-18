@@ -12,6 +12,10 @@ class UserQuery(BaseModel):
     session_id: Optional[str] = Field(
         None, description="Session ID for continuing conversations"
     )
+    is_continuation_response: bool = Field(
+        False,
+        description="Flag indicating if this is a response to a continuation prompt",
+    )
 
 
 class ToolCall(BaseModel):
@@ -76,7 +80,7 @@ class AgentState(BaseModel):
         default_factory=list,
         description="List of tool calls made in the current iteration",
     )
-    available_tools: List[Dict[str, Any]] = Field(
+    available_tools: Any = Field(
         default_factory=list,
         description="List of available tools the agent can use",
     )

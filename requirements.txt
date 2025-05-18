@@ -14,3 +14,5 @@ pymongo
 bson
 crawl4ai
 tiktoken
+prompt-toolkit
+rich

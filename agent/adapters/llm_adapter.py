@@ -1,14 +1,14 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import HTTPException
 
 from agent.config.settings import settings
-from agent.models.prompts import create_tool_selection_prompt
 from agent.models.schemas import AgentState, SingleAgentIteration
+from agent.prompts.agent_prompt import create_tool_selection_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -25,29 +25,25 @@ class LLMAdapter:
         self.model = settings.CLAUDE_MODEL
         self.base_url = settings.CLAUDE_BASE_URL
         self.messages_endpoint = settings.CLAUDE_MESSAGES_ENDPOINT
-        self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                connect=60.0, read=300.0, write=300.0, pool=60.0
-            )
-        )
         self.timeout = httpx.Timeout(
             connect=60.0, read=300.0, write=300.0, pool=60.0
         )
 
     async def determine_next_action(
-        self, agent_state: AgentState
+        self, agent_state: AgentState, session_id: Optional[str] = None
     ) -> SingleAgentIteration:
         """
         Determine the next action to take based on the current agent state.
 
         Args:
             agent_state: Current state of the agent including conversation history
+            session_id: Optional session ID to retrieve conversation history from MongoDB
 
         Returns:
             AgentAction object with details of the next action to take
         """
 
-        messages = create_tool_selection_prompt(agent_state)
+        messages = await create_tool_selection_prompt(agent_state, session_id)
 
         # Use the formatted messages directly
         response = await self.completions(
