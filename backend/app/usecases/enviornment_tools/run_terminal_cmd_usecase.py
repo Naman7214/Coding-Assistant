@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any, Dict, Optional
+
 from backend.app.config.settings import settings
 
 
@@ -57,7 +58,6 @@ class RunTerminalCmdUsecase:
                     stderr=subprocess.PIPE,
                     cwd=settings.CODEBASE_DIR,  # Set working directory to CODEBASE_DIR
                 )
-
 
                 stdout, stderr = await process.communicate()
                 stdout_str = stdout.decode("utf-8")

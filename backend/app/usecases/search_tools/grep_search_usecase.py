@@ -4,12 +4,12 @@ from typing import Any, Dict
 
 from fastapi import Depends
 
+from backend.app.config.settings import settings
 from backend.app.models.domain.error import Error
 from backend.app.models.schemas.grep_search_query_schema import (
     GrepSearchQueryRequest,
 )
 from backend.app.repositories.error_repo import ErrorRepo
-from backend.app.config.settings import settings
 
 
 class GrepSearchUsecase:

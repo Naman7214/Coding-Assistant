@@ -1,7 +1,7 @@
 from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
-from backend.app.models.schemas.file_access_schemas import SearchReplaceRequest
+from backend.app.models.schemas.modification_schemas import SearchReplaceRequest
 from backend.app.usecases.modification_tools.search_replace_usecase import (
     SearchReplaceUseCase,
 )

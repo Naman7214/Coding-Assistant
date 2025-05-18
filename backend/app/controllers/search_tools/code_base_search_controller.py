@@ -9,7 +9,6 @@ from backend.app.usecases.search_tools.code_base_usecase import (
 )
 
 
-
 class CodeBaseSearchController:
     def __init__(
         self,

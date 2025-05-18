@@ -12,8 +12,8 @@ pinecone
 tiktoken
 pymongo
 bson
-crawl4ai
 tiktoken
 prompt-toolkit
 rich
-mcp
+crawl4ai
+mcp[cli]
