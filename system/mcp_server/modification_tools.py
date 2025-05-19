@@ -100,6 +100,7 @@ async def reapply(target_file_path: str, code_snippet: str, explanation: str):
         "explanation": explanation,
     }
     try:
+
         async with httpx.AsyncClient(verify=False, timeout=60) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()

@@ -46,7 +46,7 @@ console = Console(theme=custom_theme)
 
 
 class AnthropicAgent:
-    MAX_TOOL_CALL_DEPTH = 25  # Prevent infinite recursion
+    MAX_TOOL_CALL_DEPTH = 30  # Prevent infinite recursion
     MAX_RETRIES = 3
 
     def __init__(self, model_name="claude-3-7-sonnet-20250219"):
@@ -233,9 +233,12 @@ class AnthropicAgent:
                     border_style="red",
                 )
             )
-            return {
-                "message": "Maximum tool call depth reached. Stopping to prevent infinite loops."
-            }, self.agent_memory
+            # Add exit logic when MAX_TOOL_CALL_DEPTH is reached
+            await self.cleanup()
+            console.print(
+                "[success]Session ended due to reaching MAX_TOOL_CALL_DEPTH[/success]"
+            )
+            sys.exit(0)
 
         # Extract content blocks from Anthropic response
         content_blocks = assistant_message.get("content", [])
@@ -268,6 +271,31 @@ class AnthropicAgent:
             tool_use_id = tool_call.get("id")
             tool_name = tool_call.get("name")
             tool_input = tool_call.get("input", {})
+
+            # Check if total tool calls will exceed 25
+            if self.agent_memory.total_tool_calls >= 25:
+                console.print(
+                    Panel(
+                        f"[bold yellow]The agent has already made 25 tool calls in this session.[/bold yellow]\nContinuing might lead to longer processing times.",
+                        title="[warning]Tool Call Limit Reached[/warning]",
+                        border_style="yellow",
+                    )
+                )
+                permission = (
+                    input(
+                        "Do you want to continue with more tool calls? (yes/no): "
+                    )
+                    .strip()
+                    .lower()
+                )
+                if permission not in ["yes", "y"]:
+                    # If user doesn't want to continue, clean up and exit
+                    console.print(
+                        "[info]Stopping further tool calls as requested.[/info]"
+                    )
+                    await self.cleanup()
+                    console.print("[success]Session ended by user[/success]")
+                    sys.exit(0)
 
             # Extract thinking text if present (looking for text blocks before this tool call)
             thinking_text = ""
@@ -339,12 +367,16 @@ class AnthropicAgent:
                 with console.status(
                     f"[thinking]Executing {tool_name}...[/thinking]"
                 ):
+                    # Check if session exists before calling
+                    if not self.session:
+                        raise Exception("Session is not initialized")
                     tool_result = await self.session.call_tool(
                         tool_name, tool_input
                     )
 
                 # Process result
                 if tool_result:
+                    # Fix content.text access to handle different result types
                     tool_content = "\n".join(
                         [
                             (
@@ -492,7 +524,8 @@ class AnthropicAgent:
                     self.client_context = sse_client(server_url)
                     streams = await self.client_context.__aenter__()
                 else:  # stdio
-                    self.client_context = stdio_client()
+                    # Fix missing server parameter
+                    self.client_context = stdio_client(server=server_url)
                     streams = await self.client_context.__aenter__()
 
                 # Create client session
@@ -590,7 +623,11 @@ class AnthropicAgent:
                     "\n[user]What can I help you with?[/user]"
                 )
                 if user_query.lower() in ("exit", "quit"):
-                    break
+                    # Clean up and exit when user types exit or quit
+                    console.print("[info]Exiting as requested...[/info]")
+                    await self.cleanup()
+                    console.print("[success]Session ended[/success]")
+                    sys.exit(0)
 
                 # Add user message to the conversation visually
                 console.print(
@@ -612,7 +649,6 @@ class AnthropicAgent:
 
                 # Add the user message to agent memory
                 self.agent_memory.add_user_message(enhanced_query)
-
                 # First call to Anthropic with full conversation history
                 with console.status("[thinking]Thinking...[/thinking]"):
                     response = await self.anthropic_api_call(
@@ -702,19 +738,34 @@ class AnthropicAgent:
 
     async def cleanup(self):
         """Clean up resources before exiting"""
-        if self.session:
-            try:
-                await self.session.__aexit__(None, None, None)
-            except Exception as e:
-                console.print(f"[error]Error closing session: {str(e)}[/error]")
+        try:
+            if self.session:
+                try:
+                    await self.session.__aexit__(None, None, None)
+                except AttributeError as e:
+                    # Handle TaskGroup._exceptions AttributeError gracefully
+                    if "_exceptions" in str(e):
+                        console.print(
+                            "[info]Handled known session closure issue[/info]"
+                        )
+                    else:
+                        console.print(
+                            f"[error]Session attribute error: {str(e)}[/error]"
+                        )
+                except Exception as e:
+                    console.print(
+                        f"[error]Error closing session: {str(e)}[/error]"
+                    )
 
-        if self.client_context:
-            try:
-                await self.client_context.__aexit__(None, None, None)
-            except Exception as e:
-                console.print(
-                    f"[error]Error closing client context: {str(e)}[/error]"
-                )
+            if self.client_context:
+                try:
+                    await self.client_context.__aexit__(None, None, None)
+                except Exception as e:
+                    console.print(
+                        f"[error]Error closing client context: {str(e)}[/error]"
+                    )
+        except Exception as e:
+            console.print(f"[error]Error during cleanup: {str(e)}[/error]")
 
     @classmethod
     async def main_async(

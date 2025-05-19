@@ -65,12 +65,9 @@ class Settings(BaseSettings):
     INDEXING_EMBED_MODEL_NAME: str = "voyage-code-3"
     INDEXING_SEMAPHORE_VALUE: int = 5
 
-    # CODEBASE_DIR: str = "/Users/krishgoyani/Developer/Code-Generation-Assistant/codebase"
+    CODEBASE_DIR: str = "/Users/codebase"
     SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
 
-    CODEBASE_DIR: str = (
-        "/Users/vinithachilkamari/Developer/n8n_frontend/frontend"
-    )
 
     class Config:
         env_file = ".env"
