@@ -11,6 +11,7 @@ from system.backend.app.models.domain.error import Error
 from system.backend.app.repositories.error_repo import ErrorRepo
 from system.backend.app.utils.path_validator import is_safe_path
 
+
 class SearchReplaceService:
     def __init__(self, error_repo: ErrorRepo = Depends()):
         self.error_repo = error_repo
@@ -44,7 +45,7 @@ class SearchReplaceService:
         include_pattern = options.get("include_pattern", "*")
         exclude_pattern = options.get("exclude_pattern", "")
         search_paths = options.get("search_paths", ".")
-        
+
         if search_paths:
             search_paths = [os.path.abspath(path) for path in search_paths]
         else:

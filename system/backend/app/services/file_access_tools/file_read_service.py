@@ -36,7 +36,7 @@ class FileReadService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Access denied: {error_msg}",
                 )
-            
+
             stats = os.stat(file_path)
             file_extension = os.path.splitext(file_path)[1].lower()
 

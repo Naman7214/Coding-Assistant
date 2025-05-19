@@ -22,10 +22,10 @@ class DirectoryListService:
         try:
             # Ensure dir_path is not empty or just whitespace
             dir_path = dir_path.strip()
-            
+
             if len(dir_path) == 0:
                 dir_path = os.path.abspath("codebase")
-            
+
             # Check if path is safe
             is_safe, error_msg = is_safe_path(dir_path)
             if not is_safe:
@@ -40,7 +40,7 @@ class DirectoryListService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Access denied: {error_msg}",
                 )
-                
+
             # Verify that the directory exists
             if not os.path.exists(dir_path):
                 raise HTTPException(

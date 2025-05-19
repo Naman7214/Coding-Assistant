@@ -27,7 +27,11 @@ from system.mcp_server.file_access_tools import (
     read_file,
     search_files,
 )
-from system.mcp_server.modification_tools import edit_file, reapply, search_and_replace
+from system.mcp_server.modification_tools import (
+    edit_file,
+    reapply,
+    search_and_replace,
+)
 from system.mcp_server.search_tools import codebase_search, execute_grep_search
 
 logging.basicConfig(

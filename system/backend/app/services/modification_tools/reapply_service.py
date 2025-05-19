@@ -2,13 +2,13 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import HTTPException, status
 from dotenv import load_dotenv
+from fastapi import HTTPException, status
 from openai import OpenAI
 
 from system.backend.app.config.settings import settings
-from system.backend.app.utils.path_validator import is_safe_path
 from system.backend.app.models.domain.error import Error
+from system.backend.app.utils.path_validator import is_safe_path
 
 
 class ReapplyService:
@@ -34,7 +34,7 @@ class ReapplyService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Access denied: {error_msg}",
                 )
-                
+
             if not os.path.exists(target_file_path):
                 return {
                     "success": False,

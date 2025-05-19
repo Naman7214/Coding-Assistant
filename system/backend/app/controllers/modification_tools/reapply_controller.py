@@ -1,7 +1,9 @@
 from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
-from system.backend.app.models.schemas.modification_schemas import ReapplyRequest
+from system.backend.app.models.schemas.modification_schemas import (
+    ReapplyRequest,
+)
 from system.backend.app.usecases.modification_tools.reapply_usecase import (
     ReapplyUsecase,
 )

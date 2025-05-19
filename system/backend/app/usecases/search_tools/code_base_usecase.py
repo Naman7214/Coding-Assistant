@@ -7,9 +7,15 @@ from system.backend.app.models.schemas.code_base_search_schema import (
     CodeBaseSearchQueryRequest,
 )
 from system.backend.app.repositories.error_repo import ErrorRepo
-from system.backend.app.services.search_tools.embedding_service import EmbeddingService
-from system.backend.app.services.search_tools.pinecone_service import PineconeService
-from system.backend.app.services.search_tools.re_ranking_service import RerankerService
+from system.backend.app.services.search_tools.embedding_service import (
+    EmbeddingService,
+)
+from system.backend.app.services.search_tools.pinecone_service import (
+    PineconeService,
+)
+from system.backend.app.services.search_tools.re_ranking_service import (
+    RerankerService,
+)
 
 
 class CodeBaseSearchUsecase:

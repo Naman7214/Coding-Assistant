@@ -8,7 +8,7 @@ class TavilySearchService:
         pass
 
     async def tavily_search(
-        self, query: str, max_results: int = 1, time_range: str = "year"
+        self, query: str, max_results: int = 2, time_range: str = "month"
     ) -> dict:
         """
         Make a POST request to the Tavily API to search for information.
