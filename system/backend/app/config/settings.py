@@ -66,7 +66,6 @@ class Settings(BaseSettings):
     CODEBASE_DIR: str = "/Users/codebase"
     SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
 
-
     class Config:
         env_file = ".env"
 

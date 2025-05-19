@@ -131,10 +131,7 @@ class AnthropicAgent:
             "max_tokens": params.get("max_tokens", 3000),
             "tools": anthropic_tools,
             "messages": anthropic_messages,
-            "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": 2500
-            }
+            "thinking": {"type": "enabled", "budget_tokens": 2500},
         }
 
         # Add system parameter if we have a system message
@@ -261,8 +258,16 @@ class AnthropicAgent:
             text_content = ""
             thinking_text = None
             for block in content_blocks:
-                if block.get("type") == "thinking" and (block.get("thinking") or block.get("text") or block.get("content")):
-                    thinking_text = block.get("thinking") or block.get("text") or block.get("content")
+                if block.get("type") == "thinking" and (
+                    block.get("thinking")
+                    or block.get("text")
+                    or block.get("content")
+                ):
+                    thinking_text = (
+                        block.get("thinking")
+                        or block.get("text")
+                        or block.get("content")
+                    )
                 if block.get("type") == "text":
                     text_content += block.get("text", "")
 
