@@ -14,6 +14,7 @@ The Code Generation Assistant is a powerful AI agent system designed to help wit
 - pip
 - install ripgrep , for Mac : ```brew install ripgrep```
 - install fzf , for Mac : ```brew install fzf```
+- deploy fastapply model on hugging face to use edit_file and reapply tool
 
 
 ## Installation
