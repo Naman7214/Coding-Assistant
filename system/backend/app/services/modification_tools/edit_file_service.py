@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from openai import OpenAI
@@ -15,7 +16,12 @@ class EditFileService:
     def __init__(self):
         self.HF_API_KEY = settings.HUGGINGFACE_API_KEY
         self.BASE_URL = settings.HUGGINGFACE_API_URL
-        self.client = OpenAI(base_url=self.BASE_URL, api_key=self.HF_API_KEY)
+        self.http_client = httpx.Client(verify=False)
+        self.client = OpenAI(
+            base_url=self.BASE_URL,
+            api_key=self.HF_API_KEY,
+            http_client=self.http_client,
+        )
 
     async def edit_file(
         self, target_file_path: str, code_snippet: str, explanation: str
