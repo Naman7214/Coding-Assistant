@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     TAVILY_API_KEY: str
     SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
 
+    # HuggingFace settings
+    HUGGINGFACE_API_KEY: str
+    HUGGINGFACE_API_URL: str
+
     class Config:
         env_file = ".env"
 
