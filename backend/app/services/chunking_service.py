@@ -44,29 +44,24 @@ class ChunkingService:
             int(overlap or 0), token_limit // 2
         )  # Default to 0 if None, and cap at half token_limit
 
-        print(f"Chunking with token_limit={token_limit}, overlap={overlap}")
-
         try:
             with open(file_path, "r", encoding="utf-8") as file:
                 content = file.read()
 
             # If file is empty, return no chunks
             if not content.strip():
-                print(f"File is empty: {file_path}")
                 return []
 
             # Split content by whitespace to count tokens approximately
             tokens = content.split()
             total_tokens = len(tokens)
 
-            print(f"File {file_path} has {total_tokens} tokens")
 
             if total_tokens == 0:
                 return []
 
             # If file is smaller than token limit, create a single chunk
             if total_tokens <= token_limit:
-                print(f"File fits in a single chunk: {file_path}")
                 # Return the whole file as one chunk
                 return [
                     {
@@ -140,10 +135,6 @@ class ChunkingService:
             return chunks
 
         except Exception as e:
-            print(f"Error in chunking for {file_path}: {str(e)}")
-            import traceback
-
-            print(traceback.format_exc())
             return []
 
     def chunk_codebase(self, file_path):
@@ -161,7 +152,6 @@ class ChunkingService:
 
             # Use chunking with settings values
             chunks = self.heuristic_chunking(file_path)
-            print(f"chunks: {chunks}")
             return chunks
 
         except Exception as e:
@@ -197,9 +187,7 @@ class ChunkingService:
                 chunks = []  # Ensure we at least write an empty array, not null
             try:
                 json_content = json.dumps(chunks, indent=4)
-                print(f"JSON content size: {len(json_content)} bytes")
             except Exception as json_err:
-                print(f"JSON serialization error: {str(json_err)}")
                 # Try to identify problematic chunks
                 for i, chunk in enumerate(chunks):
                     try:
@@ -283,9 +271,6 @@ class ChunkingService:
 
                     # Limit content size to avoid potential issues with very large files
                     if len(code) > 1_000_000:  # 1MB limit
-                        print(
-                            f"Warning: Large chunk detected ({len(code)} chars). Truncating..."
-                        )
                         code = code[:1_000_000] + "... [content truncated]"
 
                     formatted_chunk = {
@@ -312,7 +297,6 @@ class ChunkingService:
                     print(f"Error formatting chunk {i}: {str(chunk_err)}")
                     # Continue with other chunks
 
-            print(f"Successfully formatted {len(formatted_chunks)} chunks")
             return formatted_chunks
 
         except Exception as e:
@@ -370,7 +354,6 @@ class ChunkingService:
                         file_path = os.path.join(root, file)
                         loggers["ChunkLogger"].info(f"Processing: {file_path}")
                         file_chunks = self.chunk_codebase(file_path)
-                        print(f"file_chunks: {file_chunks}")
                         if file_chunks:
                             loggers["ChunkLogger"].info(
                                 f"Found {len(file_chunks)} chunks in {file_path}"
@@ -386,7 +369,6 @@ class ChunkingService:
                 f"Total chunks extracted: {total_chunks}"
             )
             print(f"Total chunks extracted: {total_chunks}")
-            print(f"all_chunks: {all_chunks}")
 
             if not all_chunks:
                 loggers["ChunkLogger"].warning("No chunks found in any files")
