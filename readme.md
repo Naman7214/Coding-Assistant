@@ -57,6 +57,8 @@ pip uninstall crawl4ai
 pip install Crawl4AI
 ```
 
+before running the application run this command to setup crawl4AI : ```crawl4ai-setup```
+
 ## Running the Application
 
 ### 1. Start the Backend
