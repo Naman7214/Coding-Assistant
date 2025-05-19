@@ -1,6 +1,9 @@
 from crawl4ai import AsyncWebCrawler
 
-from system.backend.app.config.scrape_webpage_config import browser_conf, crawler_cfg
+from system.backend.app.config.scrape_webpage_config import (
+    browser_conf,
+    crawler_cfg,
+)
 
 
 class ScrapeWebpagesService:

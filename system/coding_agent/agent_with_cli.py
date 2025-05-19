@@ -1,8 +1,10 @@
 import asyncio
 import json
-from logging import getLogger
 import os
 import sys
+import time
+from datetime import datetime
+from logging import getLogger
 from typing import Any, Dict, List
 
 import httpx
@@ -11,30 +13,33 @@ from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from memory.agent_memory import AgentMemory
+from motor.motor_asyncio import AsyncIOMotorClient
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.theme import Theme
-from rich.prompt import Prompt
-from rich.markdown import Markdown
 
 logger = getLogger(__name__)
 
 
 # Custom Rich theme
-custom_theme = Theme({
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "bold red",
-    "success": "bold green",
-    "tool": "bold magenta",
-    "user": "bold blue",
-    "assistant": "green",
-    "tool_result": "dim white",
-    "thinking": "yellow",
-})
+custom_theme = Theme(
+    {
+        "info": "cyan",
+        "warning": "yellow",
+        "error": "bold red",
+        "success": "bold green",
+        "tool": "bold magenta",
+        "user": "bold blue",
+        "assistant": "green",
+        "tool_result": "dim white",
+        "thinking": "yellow",
+    }
+)
 
 # Create console with custom theme
 console = Console(theme=custom_theme)
@@ -50,14 +55,22 @@ class AnthropicAgent:
         self.session = None
         self.client_context = None
         self.anthropic_tools = []
-            
-    def is_safe_path(self, path):
-        abs_path = os.path.abspath(path)
-        # Check if path is within system directories
-        for system_dir in self.system_directories:
-            if abs_path.startswith(system_dir):
-                return False, f"Access denied: {path} is in protected system directory"
-        return True, None
+        self.timeout = httpx.Timeout(
+            connect=60.0,  # Time to establish a connection
+            read=120.0,  # Time to read the response
+            write=120.0,  # Time to send data
+            pool=60.0,  # Time to wait for a connection from the pool
+        )
+
+        try:
+            self.mongodb_client = AsyncIOMotorClient(settings.MONGODB_URL)
+            self.llm_usage_collection = self.mongodb_client[
+                settings.MONGODB_DB_NAME
+            ][settings.LLM_USAGE_COLLECTION_NAME]
+        except Exception as e:
+            console.print(f"[error]MongoDB connection error: {str(e)}[/error]")
+            self.mongodb_client = None
+            self.llm_usage_collection = None
 
     async def anthropic_api_call(
         self,
@@ -125,23 +138,86 @@ class AnthropicAgent:
             payload["system"] = system_content
 
         try:
-            async with httpx.AsyncClient(verify=False, timeout=100) as client:
+            start_time = time.time()
+
+            async with httpx.AsyncClient(
+                verify=False, timeout=self.timeout
+            ) as client:
                 response = await client.post(
                     url=url, headers=headers, json=payload
                 )
                 response.raise_for_status()
-                return response.json()
+                response_data = response.json()
+
+                # Calculate API call duration
+                duration = time.time() - start_time
+
+                # Log API usage to MongoDB
+                if (
+                    self.mongodb_client is not None
+                    and self.llm_usage_collection is not None
+                ):
+                    try:
+                        # Extract usage information
+                        usage = response_data.get("usage", {})
+                        input_tokens = usage.get("input_tokens", 0)
+                        output_tokens = usage.get("output_tokens", 0)
+                        cache_creation_input_tokens = usage.get(
+                            "cache_creation_input_tokens", 0
+                        )
+                        cache_read_input_tokens = usage.get(
+                            "cache_read_input_tokens", 0
+                        )
+
+                        total_tokens = (
+                            input_tokens
+                            + output_tokens
+                            + cache_creation_input_tokens
+                            + cache_read_input_tokens
+                        )
+
+                        # Create usage log document
+                        llm_usage = {
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                            "total_tokens": total_tokens,
+                            "cache_creation_input_tokens": cache_creation_input_tokens,
+                            "cache_read_input_tokens": cache_read_input_tokens,
+                            "duration": duration,
+                            "provider": "Anthropic",
+                            "model": self.model_name,
+                            "created_at": datetime.utcnow(),
+                            "request_id": response_data.get("id", "unknown"),
+                            "request_type": "chat",
+                        }
+
+                        # Log asynchronously without waiting for completion
+                        await self.llm_usage_collection.insert_one(llm_usage)
+                    except Exception as log_error:
+                        console.print(
+                            f"[warning]Failed to log API usage: {str(log_error)}[/warning]"
+                        )
+
+                return response_data
         except httpx.HTTPStatusError as e:
-            console.print(f"[error]Error in Anthropic API: {e.response.text} - {str(e)}[/error]")
+            console.print(
+                f"[error]Error in Anthropic API: {e.response.text} - {str(e)}[/error]"
+            )
             return None
         except httpx.RequestError as e:
-            console.print(f"[error]Request Error in Anthropic API call: {str(e)}[/error]")
+            console.print(
+                f"[error]Request Error in Anthropic API call: {str(e)}[/error]"
+            )
             return None
         except httpx.HTTPError as e:
-            console.print(f"[error]Error in Anthropic API call HTTPError: {str(e)}[/error]")
+            console.print(
+                f"[error]Error in Anthropic API call HTTPError: {str(e)}[/error]"
+            )
             return None
         except Exception as e:
-            console.print(f"[error]Error in Anthropic API call: {str(e)}[/error]")
+            console.print(
+                f"[error]Error in Anthropic API call: {str(e)}[/error]"
+            )
             return None
 
     async def process_tool_calls(self, assistant_message, depth=0):
@@ -154,7 +230,7 @@ class AnthropicAgent:
                 Panel(
                     "Maximum tool call depth reached. Stopping to prevent infinite loops.",
                     title="[error]Error[/error]",
-                    border_style="red"
+                    border_style="red",
                 )
             )
             return {
@@ -193,6 +269,24 @@ class AnthropicAgent:
             tool_name = tool_call.get("name")
             tool_input = tool_call.get("input", {})
 
+            # Extract thinking text if present (looking for text blocks before this tool call)
+            thinking_text = ""
+            tool_index = content_blocks.index(tool_call)
+            # Check if there's a text block immediately before this tool call
+            if (
+                tool_index > 0
+                and content_blocks[tool_index - 1].get("type") == "text"
+            ):
+                text_block = content_blocks[tool_index - 1]
+                raw_text = text_block.get("text", "")
+                # Check if the text is enclosed in <thinking> tags
+                if "<thinking>" in raw_text and "</thinking>" in raw_text:
+                    thinking_text = raw_text.split("<thinking>")[1].split(
+                        "</thinking>"
+                    )[0]
+                else:
+                    thinking_text = raw_text
+
             # Add a permission check for run_terminal_cmd
             if tool_name == "run_terminal_command":
                 command = tool_input.get("command", "")
@@ -200,18 +294,35 @@ class AnthropicAgent:
                     Panel(
                         f"[bold yellow]The agent wants to run the following terminal command:[/bold yellow]\n[bold]{command}[/bold]",
                         title="[warning]Permission Required[/warning]",
-                        border_style="yellow"
+                        border_style="yellow",
                     )
                 )
-                
-                permission = input("Do you want to allow this command? (yes/no): ").strip().lower()
+
+                permission = (
+                    input("Do you want to allow this command? (yes/no): ")
+                    .strip()
+                    .lower()
+                )
                 if permission not in ["yes", "y"]:
                     # If permission denied, skip this tool call and notify the agent
-                    console.print("[error]Permission denied for running terminal command.[/error]")
+                    console.print(
+                        "[error]Permission denied for running terminal command.[/error]"
+                    )
                     tool_content = "ERROR: Permission denied for running terminal command. The user did not approve this command execution."
                     self.agent_memory.add_tool_call(tool_call, tool_content)
                     self.agent_memory.add_tool_result(tool_use_id, tool_content)
                     continue
+
+            # Display thinking if available
+            if thinking_text:
+                console.print()
+                console.print(
+                    Panel(
+                        thinking_text,
+                        title="[thinking]Assistant's Reasoning[/thinking]",
+                        border_style="yellow",
+                    )
+                )
 
             # Create a nice panel for the tool call
             console.print()
@@ -219,13 +330,15 @@ class AnthropicAgent:
                 Panel(
                     f"[bold]Arguments:[/bold]\n{json.dumps(tool_input, indent=2)}",
                     title=f"[tool]Using Tool: {tool_name}[/tool]",
-                    border_style="magenta"
+                    border_style="magenta",
                 )
             )
 
             # Call the MCP tool with a spinner
             try:
-                with console.status(f"[thinking]Executing {tool_name}...[/thinking]"):
+                with console.status(
+                    f"[thinking]Executing {tool_name}...[/thinking]"
+                ):
                     tool_result = await self.session.call_tool(
                         tool_name, tool_input
                     )
@@ -269,13 +382,19 @@ class AnthropicAgent:
                     console.print(
                         Panel(
                             Syntax(
-                                tool_content, 
-                                "python" if tool_content.strip().startswith("```python") else "json", 
+                                tool_content,
+                                (
+                                    "python"
+                                    if tool_content.strip().startswith(
+                                        "```python"
+                                    )
+                                    else "json"
+                                ),
                                 theme="monokai",
-                                word_wrap=True
+                                word_wrap=True,
                             ),
                             title="[success]Tool Result[/success]",
-                            border_style="green"
+                            border_style="green",
                         )
                     )
                 else:
@@ -284,7 +403,7 @@ class AnthropicAgent:
                         Panel(
                             tool_content,
                             title="[success]Tool Result[/success]",
-                            border_style="green"
+                            border_style="green",
                         )
                     )
 
@@ -300,8 +419,10 @@ class AnthropicAgent:
 
         # Make next call to Anthropic with tool results
         console.print()
-        console.print(f"[thinking]Generating response after tool calls (depth {depth})...[/thinking]")
-        
+        console.print(
+            f"[thinking]Generating response after tool calls (depth {depth})...[/thinking]"
+        )
+
         with console.status("[thinking]Thinking...[/thinking]"):
             next_response = await self.anthropic_api_call(
                 messages=self.agent_memory.get_conversation_messages(),
@@ -323,7 +444,7 @@ class AnthropicAgent:
                 Panel(
                     "Couldn't get a response from the LLM after tool calls.",
                     title="[error]Error[/error]",
-                    border_style="red"
+                    border_style="red",
                 )
             )
             return {
@@ -364,7 +485,9 @@ class AnthropicAgent:
         """Initialize the MCP session and connect to the server"""
         try:
             # Connect to MCP server
-            with console.status(f"[info]Connecting to MCP server via {transport_type}...[/info]"):
+            with console.status(
+                f"[info]Connecting to MCP server via {transport_type}...[/info]"
+            ):
                 if transport_type.lower() == "sse":
                     self.client_context = sse_client(server_url)
                     streams = await self.client_context.__aenter__()
@@ -376,25 +499,29 @@ class AnthropicAgent:
                 self.session = ClientSession(streams[0], streams[1])
                 await self.session.__aenter__()
                 await self.session.initialize()
-            
-            console.print("[success]✓ Connected to MCP server successfully![/success]")
+
+            console.print(
+                "[success]✓ Connected to MCP server successfully![/success]"
+            )
 
             # Get available tools
             with console.status("[info]Loading available tools...[/info]"):
                 tools = await self.session.list_tools()
 
             if not tools or not hasattr(tools, "tools") or not tools.tools:
-                console.print("[error]No tools available from the MCP server.[/error]")
+                console.print(
+                    "[error]No tools available from the MCP server.[/error]"
+                )
                 return False
 
             # Create a nice table to display available tools
             table = Table(title="Available Tools", border_style="bright_cyan")
             table.add_column("Tool Name", style="cyan")
             table.add_column("Description", style="green")
-            
+
             for tool in tools.tools:
                 table.add_row(tool.name, tool.description)
-            
+
             console.print(table)
 
             # Convert MCP tools to Anthropic format
@@ -417,7 +544,7 @@ class AnthropicAgent:
             )
             system_message = CODING_AGENT_SYSTEM_PROMPT.format(
                 tool_descriptions=tool_descriptions,
-                user_workspace=os.path.abspath("codebase")
+                user_workspace=os.path.abspath("codebase"),
             )
             # Initialize agent memory with system message
             console.print("[info]Initializing agent system prompt[/info]")
@@ -425,7 +552,9 @@ class AnthropicAgent:
             return True
 
         except Exception as e:
-            console.print(f"[error]Error initializing session: {str(e)}[/error]")
+            console.print(
+                f"[error]Error initializing session: {str(e)}[/error]"
+            )
             return False
 
     async def run_interactive_session(
@@ -441,10 +570,10 @@ class AnthropicAgent:
                 "Ask coding questions, request code explanations, or get help with your projects.",
                 title="[bold]🤖 Anthropic Agent[/bold]",
                 border_style="green",
-                width=100
+                width=100,
             )
         )
-        
+
         console.print(
             f"[info]Connecting to MCP server using {transport_type} transport at {server_url}...[/info]"
         )
@@ -457,12 +586,20 @@ class AnthropicAgent:
             # Interactive loop
             while True:
                 # Get user query with styled prompt
-                user_query = Prompt.ask("\n[user]What can I help you with?[/user]")
+                user_query = Prompt.ask(
+                    "\n[user]What can I help you with?[/user]"
+                )
                 if user_query.lower() in ("exit", "quit"):
                     break
 
                 # Add user message to the conversation visually
-                console.print(Panel(user_query, title="[user]You[/user]", border_style="blue"))
+                console.print(
+                    Panel(
+                        user_query,
+                        title="[user]You[/user]",
+                        border_style="blue",
+                    )
+                )
 
                 # Process the user query
                 enhanced_query = user_query
@@ -488,7 +625,7 @@ class AnthropicAgent:
                         Panel(
                             "I encountered an error and couldn't process your request.",
                             title="[error]Error[/error]",
-                            border_style="red"
+                            border_style="red",
                         )
                     )
                     # Add error message to memory
@@ -521,13 +658,17 @@ class AnthropicAgent:
                 # Display the final response in a nicely formatted way
                 # Check if response looks like markdown and render accordingly
                 response_text = result["message"]
-                if "```" in response_text or "#" in response_text or "*" in response_text:
+                if (
+                    "```" in response_text
+                    or "#" in response_text
+                    or "*" in response_text
+                ):
                     # Likely markdown content
                     console.print(
                         Panel(
                             Markdown(response_text),
                             title="[assistant]Assistant[/assistant]",
-                            border_style="green"
+                            border_style="green",
                         )
                     )
                 else:
@@ -536,16 +677,23 @@ class AnthropicAgent:
                         Panel(
                             response_text,
                             title="[assistant]Assistant[/assistant]",
-                            border_style="green"
+                            border_style="green",
                         )
                     )
 
         except KeyboardInterrupt:
-            console.print("\n[warning]Exiting due to keyboard interrupt...[/warning]")
+            console.print(
+                "\n[warning]Exiting due to keyboard interrupt...[/warning]"
+            )
         except Exception as e:
-            console.print(f"\n[error]Error in interactive session: {str(e)}[/error]")
+            console.print(
+                f"\n[error]Error in interactive session: {str(e)}[/error]"
+            )
             import traceback
-            console.print(Syntax(traceback.format_exc(), "python", theme="monokai"))
+
+            console.print(
+                Syntax(traceback.format_exc(), "python", theme="monokai")
+            )
         finally:
             # Properly clean up resources
             with console.status("[info]Cleaning up resources...[/info]"):
@@ -564,7 +712,9 @@ class AnthropicAgent:
             try:
                 await self.client_context.__aexit__(None, None, None)
             except Exception as e:
-                console.print(f"[error]Error closing client context: {str(e)}[/error]")
+                console.print(
+                    f"[error]Error closing client context: {str(e)}[/error]"
+                )
 
     @classmethod
     async def main_async(
@@ -598,10 +748,10 @@ class AnthropicAgent:
                 title="[bold]🚀 Starting Up[/bold]",
                 border_style="bright_blue",
                 expand=False,
-                padding=(1, 2)
+                padding=(1, 2),
             )
         )
-        
+
         asyncio.run(cls.main_async(server_url, transport))
 
 

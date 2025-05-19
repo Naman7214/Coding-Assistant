@@ -50,7 +50,7 @@ class FileDeletionService:
 
         try:
             abs_path = os.path.abspath(path)
-            
+
             # Check if path is safe
             is_safe, error_msg = is_safe_path(path)
             if not is_safe:

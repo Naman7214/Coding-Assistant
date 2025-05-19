@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     ANTHROPIC_MAX_RETRIES: int = 3
     MCP_BASE_URL: str = "http://0.0.0.0:8001/sse"
 
+    MONGODB_URL: str = "mongodb://localhost:27017"
+    MONGODB_DB_NAME: str = "code_assistant"
+    LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"
+
     class Config:
         env_file = ".env"
 

@@ -15,5 +15,5 @@ bson
 tiktoken
 prompt-toolkit
 rich
-crawl4ai
+Crawl4AI
 mcp[cli]

@@ -1,8 +1,8 @@
 import asyncio
 import json
 import logging
-import sys
 import os
+import sys
 from typing import Any, Dict, List
 
 import httpx
@@ -161,8 +161,12 @@ class AnthropicAgent:
                 print(f"The agent wants to run the following terminal command:")
                 print(f"{command}")
                 print("=================================================")
-                
-                permission = input("Do you want to allow this command? (yes/no): ").strip().lower()
+
+                permission = (
+                    input("Do you want to allow this command? (yes/no): ")
+                    .strip()
+                    .lower()
+                )
                 if permission not in ["yes", "y"]:
                     # If permission denied, skip this tool call and notify the agent
                     print("Permission denied for running terminal command.")
@@ -324,7 +328,7 @@ class AnthropicAgent:
             )
             system_message = CODING_AGENT_SYSTEM_PROMPT.format(
                 tool_descriptions=tool_descriptions,
-                user_workspace=os.path.abspath("codebase")
+                user_workspace=os.path.abspath("codebase"),
             )
             # Initialize agent memory with system message
             print(f"System message: {system_message}")
