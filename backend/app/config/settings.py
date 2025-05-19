@@ -13,7 +13,6 @@ class Settings(BaseSettings):
 
     # MEM0_API_KEY:  str
 
-
     # Pinecone settings
     PINECONE_CREATE_INDEX_URL: str = "https://api.pinecone.io/indexes"
     PINECONE_API_VERSION: str = "2025-01"
@@ -66,9 +65,7 @@ class Settings(BaseSettings):
     # CODEBASE_DIR: str = "/Users/krishgoyani/Developer/Code-Generation-Assistant/codebase"
     SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
 
-    CODEBASE_DIR: str = (
-        "/Users/vinithachilkamari/Developer/n8n_frontend"
-    )
+    CODEBASE_DIR: str = "/Users/vinithachilkamari/Developer/n8n_frontend"
 
     class Config:
         env_file = ".env"

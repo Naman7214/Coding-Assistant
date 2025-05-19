@@ -1,7 +1,9 @@
 from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
-from backend.app.usecases.codebase_indexing_usecase import CodebaseIndexingUseCase
+from backend.app.usecases.codebase_indexing_usecase import (
+    CodebaseIndexingUseCase,
+)
 
 
 class CodebaseIndexingController:

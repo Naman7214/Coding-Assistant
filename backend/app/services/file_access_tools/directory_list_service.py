@@ -4,10 +4,9 @@ from typing import Any, Dict, List
 
 from fastapi import Depends, HTTPException, status
 
+from backend.app.config.settings import settings
 from backend.app.models.domain.error import Error
 from backend.app.repositories.error_repo import ErrorRepo
-
-from backend.app.config.settings import settings
 
 
 class DirectoryListService:
@@ -22,9 +21,16 @@ class DirectoryListService:
     ) -> List[Dict[str, Any]]:
         try:
             dir_path = dir_path if dir_path else settings.CODEBASE_DIR
-            
+
             # Directories to exclude from listing
-            excluded_dirs = ['node_modules', 'venv', '.venv', 'env', '.env', '__pycache__']
+            excluded_dirs = [
+                "node_modules",
+                "venv",
+                ".venv",
+                "env",
+                ".env",
+                "__pycache__",
+            ]
 
             async def process_directory(
                 current_path: str,

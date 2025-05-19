@@ -4,16 +4,17 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Import codebase_indexing_routes if it exists in the backend structure
 from backend.app.apis import (
     code_base_search_route,
+    codebase_indexing_routes,
+    file_access_routes,
+    modification_routes,
     run_terminal_cmd_route,
     web_search_route,
-    modification_routes,
-    file_access_routes,
 )
-# Import codebase_indexing_routes if it exists in the backend structure
-from backend.app.apis import codebase_indexing_routes
 from backend.app.config.database import mongodb_database
+
 # Import ThreadContextMiddleware if it exists in the backend structure
 # from backend.app.middleware.codebase_context_middleware import ThreadContextMiddleware
 

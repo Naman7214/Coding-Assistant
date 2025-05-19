@@ -69,7 +69,10 @@ class CodebaseIndexingUseCase:
         self, data_batch, embed_model, dimension=settings.INDEXING_DIMENSION
     ):
         try:
-            inputs = [item.get("content", item.get("text", item.get("code", ""))) for item in data_batch]
+            inputs = [
+                item.get("content", item.get("text", item.get("code", "")))
+                for item in data_batch
+            ]
 
             chunks = [
                 inputs[i : i + self.chunk_size]
@@ -101,24 +104,35 @@ class CodebaseIndexingUseCase:
     async def _upsert_batch(self, index_host, batch, namespace_name):
         try:
             # Debug logging before upsert
-            loggers["pinecone"].info(f"Attempting to upsert batch of {len(batch)} vectors to Pinecone")
+            loggers["pinecone"].info(
+                f"Attempting to upsert batch of {len(batch)} vectors to Pinecone"
+            )
             if batch:
                 # Log a sample vector to help diagnose format issues
                 sample_vector = batch[0]
-                loggers["pinecone"].info(f"Sample vector ID: {sample_vector.get('id', 'No ID')}")
-                loggers["pinecone"].info(f"Sample vector values length: {len(sample_vector.get('values', [])) if 'values' in sample_vector else 'No values'}")
-                loggers["pinecone"].info(f"Sample vector metadata keys: {list(sample_vector.get('metadata', {}).keys())}")
-            
+                loggers["pinecone"].info(
+                    f"Sample vector ID: {sample_vector.get('id', 'No ID')}"
+                )
+                loggers["pinecone"].info(
+                    f"Sample vector values length: {len(sample_vector.get('values', [])) if 'values' in sample_vector else 'No values'}"
+                )
+                loggers["pinecone"].info(
+                    f"Sample vector metadata keys: {list(sample_vector.get('metadata', {}).keys())}"
+                )
+
             upsert_result = await self.pinecone_service.upsert_vectors(
                 index_host, batch, namespace_name
             )
-            
+
             # Debug logging after upsert
-            loggers["pinecone"].info(f"Pinecone upsert response: {upsert_result}")
+            loggers["pinecone"].info(
+                f"Pinecone upsert response: {upsert_result}"
+            )
             return upsert_result
         except Exception as e:
             loggers["pinecone"].error(f"Error in _upsert_batch: {str(e)}")
             import traceback
+
             loggers["pinecone"].error(f"Traceback: {traceback.format_exc()}")
             await self.error_repository.insert_error(
                 Error(
@@ -138,19 +152,25 @@ class CodebaseIndexingUseCase:
             embeddings = await self._get_embeddings_for_batch(
                 data_batch, embed_model, dimension
             )
-            
+
             # Add debug logging
-            loggers["pinecone"].info(f"Got {len(embeddings)} embeddings, formatting for upsert")
-            
+            loggers["pinecone"].info(
+                f"Got {len(embeddings)} embeddings, formatting for upsert"
+            )
+
             upsert_data = await self.pinecone_service.upsert_format(
                 data_batch, embeddings
             )
-            
+
             # Debug the formatted data
-            loggers["pinecone"].info(f"Created {len(upsert_data)} formatted vectors for upserting")
+            loggers["pinecone"].info(
+                f"Created {len(upsert_data)} formatted vectors for upserting"
+            )
             if not upsert_data:
-                loggers["pinecone"].warning("No formatted vectors were produced!")
-        
+                loggers["pinecone"].warning(
+                    "No formatted vectors were produced!"
+                )
+
             upsert_batches = [
                 upsert_data[i : i + self.upsert_batch_size]
                 for i in range(0, len(upsert_data), self.upsert_batch_size)
@@ -171,9 +191,11 @@ class CodebaseIndexingUseCase:
                 # Then check for upserted_count (your standardized format)
                 elif "upserted_count" in result:
                     total_upserted += result["upserted_count"]
-                
+
             # Log the actual results for debugging
-            loggers["pinecone"].info(f"Final upsert count: {total_upserted} from {len(batch_results)} batches")
+            loggers["pinecone"].info(
+                f"Final upsert count: {total_upserted} from {len(batch_results)} batches"
+            )
 
             return {
                 "upserted_count": total_upserted,

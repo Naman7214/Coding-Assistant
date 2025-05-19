@@ -1,7 +1,6 @@
 from fastapi import Depends, status
 from fastapi.responses import JSONResponse
 
-
 from backend.app.models.schemas.file_access_schemas import FilesDeleteRequest
 from backend.app.usecases.file_access_tools.file_deletion_usecase import (
     FileDeletionUseCase,
