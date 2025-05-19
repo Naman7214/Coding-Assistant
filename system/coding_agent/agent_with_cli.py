@@ -128,9 +128,13 @@ class AnthropicAgent:
 
         payload = {
             "model": self.model_name,
-            "max_tokens": params.get("max_tokens", 1024),
+            "max_tokens": params.get("max_tokens", 3000),
             "tools": anthropic_tools,
             "messages": anthropic_messages,
+            "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 2500
+            }
         }
 
         # Add system parameter if we have a system message
@@ -255,9 +259,23 @@ class AnthropicAgent:
         if not has_tool_calls:
             # Extract text from content blocks
             text_content = ""
+            thinking_text = None
             for block in content_blocks:
+                if block.get("type") == "thinking" and (block.get("thinking") or block.get("text") or block.get("content")):
+                    thinking_text = block.get("thinking") or block.get("text") or block.get("content")
                 if block.get("type") == "text":
                     text_content += block.get("text", "")
+
+            # Show thinking if present
+            if thinking_text:
+                console.print()
+                console.print(
+                    Panel(
+                        str(thinking_text),
+                        title="[thinking]Assistant's Reasoning[/thinking]",
+                        border_style="yellow",
+                    )
+                )
 
             # Add the assistant's final response to memory
             self.agent_memory.add_assistant_message(assistant_message)
