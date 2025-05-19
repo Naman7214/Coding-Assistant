@@ -20,8 +20,6 @@ class Settings(BaseSettings):
     PINECONE_QUERY_URL: str = "https://{}/query"
     PINECONE_LIST_INDEXES_URL: str = "https://api.pinecone.io/indexes"
     PINECONE_API_KEY: str
-    PINECONE_INDEX_NAME: str = "n8n-examples"
-    PINECONE_SIMILARITY_THRESHOLD: float = 0.56
     OPENAI_API_KEY: str
     ANTHROPIC_API_KEY: str
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
