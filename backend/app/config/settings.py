@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Chunking service settings
     CHUNKS_OUTPUT_PATH: str = "chunks"
     CHUNK_TOKEN_LIMIT: int = 500
+    CHUNK_OVERLAP: int = 50
     CHUNKS_OUTPUT_FILENAME: str = "mern_codebase_chunks.json"
     IGNORE_DIRECTORIES: list = [
         ".venv",
@@ -66,7 +67,7 @@ class Settings(BaseSettings):
     SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
 
     CODEBASE_DIR: str = (
-        "/Users/jaypanchal/hackathon2-final/Code-Generation-Assistant"
+        "/Users/vinithachilkamari/Developer/n8n_frontend"
     )
 
     class Config:

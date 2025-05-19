@@ -69,7 +69,7 @@ class CodebaseIndexingUseCase:
         self, data_batch, embed_model, dimension=settings.INDEXING_DIMENSION
     ):
         try:
-            inputs = [item.get("text", item.get("code")) for item in data_batch]
+            inputs = [item.get("content", item.get("text", item.get("code", ""))) for item in data_batch]
 
             chunks = [
                 inputs[i : i + self.chunk_size]
@@ -100,20 +100,35 @@ class CodebaseIndexingUseCase:
 
     async def _upsert_batch(self, index_host, batch, namespace_name):
         try:
+            # Debug logging before upsert
+            loggers["pinecone"].info(f"Attempting to upsert batch of {len(batch)} vectors to Pinecone")
+            if batch:
+                # Log a sample vector to help diagnose format issues
+                sample_vector = batch[0]
+                loggers["pinecone"].info(f"Sample vector ID: {sample_vector.get('id', 'No ID')}")
+                loggers["pinecone"].info(f"Sample vector values length: {len(sample_vector.get('values', [])) if 'values' in sample_vector else 'No values'}")
+                loggers["pinecone"].info(f"Sample vector metadata keys: {list(sample_vector.get('metadata', {}).keys())}")
+            
             upsert_result = await self.pinecone_service.upsert_vectors(
                 index_host, batch, namespace_name
             )
+            
+            # Debug logging after upsert
+            loggers["pinecone"].info(f"Pinecone upsert response: {upsert_result}")
             return upsert_result
         except Exception as e:
+            loggers["pinecone"].error(f"Error in _upsert_batch: {str(e)}")
+            import traceback
+            loggers["pinecone"].error(f"Traceback: {traceback.format_exc()}")
             await self.error_repository.insert_error(
                 Error(
                     tool_name="codebase_indexing",
-                    error_message=f"Error upserting batch : {str(e)}",
+                    error_message=f"Error upserting batch: {str(e)}",
                 )
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error upserting batch : {str(e)}",
+                detail=f"Error upserting batch: {str(e)}",
             )
 
     async def _process_and_upsert_batch(
@@ -123,11 +138,19 @@ class CodebaseIndexingUseCase:
             embeddings = await self._get_embeddings_for_batch(
                 data_batch, embed_model, dimension
             )
-
+            
+            # Add debug logging
+            loggers["pinecone"].info(f"Got {len(embeddings)} embeddings, formatting for upsert")
+            
             upsert_data = await self.pinecone_service.upsert_format(
                 data_batch, embeddings
             )
-
+            
+            # Debug the formatted data
+            loggers["pinecone"].info(f"Created {len(upsert_data)} formatted vectors for upserting")
+            if not upsert_data:
+                loggers["pinecone"].warning("No formatted vectors were produced!")
+        
             upsert_batches = [
                 upsert_data[i : i + self.upsert_batch_size]
                 for i in range(0, len(upsert_data), self.upsert_batch_size)
@@ -140,9 +163,17 @@ class CodebaseIndexingUseCase:
 
             batch_results = await asyncio.gather(*upsert_tasks)
 
-            total_upserted = sum(
-                result.get("upserted_count", 0) for result in batch_results
-            )
+            total_upserted = 0
+            for result in batch_results:
+                # First check for upsertedCount (from Pinecone API)
+                if "upsertedCount" in result:
+                    total_upserted += result["upsertedCount"]
+                # Then check for upserted_count (your standardized format)
+                elif "upserted_count" in result:
+                    total_upserted += result["upserted_count"]
+                
+            # Log the actual results for debugging
+            loggers["pinecone"].info(f"Final upsert count: {total_upserted} from {len(batch_results)} batches")
 
             return {
                 "upserted_count": total_upserted,
@@ -263,7 +294,7 @@ class CodebaseIndexingUseCase:
                 data = json.loads(file_content) if file_content.strip() else []
                 loggers["pinecone"].info(f"Loaded {len(data)} chunks from file")
 
-            namespace_name = "default"
+            namespace_name = "default1"
             index_name = f"{self.similarity_metric}-{self.dimension}"
             list_index_result = (
                 await self.pinecone_service.list_pinecone_indexes()

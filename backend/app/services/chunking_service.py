@@ -37,14 +37,47 @@ class ChunkingService:
         # Use settings values if not provided
         token_limit = token_limit or settings.CHUNK_TOKEN_LIMIT
         overlap = overlap or settings.CHUNK_OVERLAP
+        
+        # Ensure token_limit and overlap are valid
+        token_limit = max(100, int(token_limit)) if token_limit else 500
+        overlap = min(int(overlap or 0), token_limit // 2)  # Default to 0 if None, and cap at half token_limit
+        
+        print(f"Chunking with token_limit={token_limit}, overlap={overlap}")
 
         try:
             with open(file_path, "r", encoding="utf-8") as file:
                 content = file.read()
 
+            # If file is empty, return no chunks
+            if not content.strip():
+                print(f"File is empty: {file_path}")
+                return []
+
             # Split content by whitespace to count tokens approximately
             tokens = content.split()
             total_tokens = len(tokens)
+            
+            print(f"File {file_path} has {total_tokens} tokens")
+            
+            if total_tokens == 0:
+                return []
+                
+            # If file is smaller than token limit, create a single chunk
+            if total_tokens <= token_limit:
+                print(f"File fits in a single chunk: {file_path}")
+                # Return the whole file as one chunk
+                return [{
+                    "code": content,
+                    "metadata": {
+                        "file_path": file_path,
+                        "file_type": os.path.splitext(file_path)[1][1:].lower() or "unknown",
+                        "start_line": 1,
+                        "end_line": len(content.split('\n')),
+                        "start_token": 0,
+                        "end_token": total_tokens,
+                        "total_tokens": total_tokens,
+                    }
+                }]
 
             chunks = []
             line_mapping = {}
@@ -59,7 +92,10 @@ class ChunkingService:
                 current_token_idx += line_tokens
 
             # Create chunks with overlap
-            for start_idx in range(0, total_tokens, token_limit - overlap):
+            # If no overlap, use stride equal to token_limit
+            stride = token_limit - overlap if overlap > 0 else token_limit
+            
+            for start_idx in range(0, total_tokens, stride):
                 end_idx = min(start_idx + token_limit, total_tokens)
 
                 # Get corresponding code
@@ -74,30 +110,30 @@ class ChunkingService:
                 file_ext = os.path.splitext(file_path)[1].lower()
                 file_type = file_ext[1:] if file_ext else "unknown"
 
-                chunks.append(
-                    {
-                        "code": chunk_code,
-                        "metadata": {
-                            "file_path": file_path,
-                            "file_type": file_type,
-                            "start_line": start_line,
-                            "end_line": end_line,
-                            "start_token": start_idx,
-                            "end_token": end_idx,
-                            "total_tokens": total_tokens,
-                        },
-                    }
-                )
+                chunks.append({
+                    "code": chunk_code,
+                    "metadata": {
+                        "file_path": file_path,
+                        "file_type": file_type,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "start_token": start_idx,
+                        "end_token": end_idx,
+                        "total_tokens": total_tokens,
+                    },
+                })
 
                 # Break if we've reached the end
                 if end_idx >= total_tokens:
                     break
-
+                    
+            print(f"Created {len(chunks)} chunks for {file_path}")
             return chunks
+            
         except Exception as e:
-            loggers["ChunkLogger"].error(
-                f"Error in chunking for {file_path}: {str(e)}"
-            )
+            print(f"Error in chunking for {file_path}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             return []
 
     def chunk_codebase(self, file_path):
@@ -115,6 +151,7 @@ class ChunkingService:
 
             # Use chunking with settings values
             chunks = self.heuristic_chunking(file_path)
+            print(f"chunks: {chunks}")
             return chunks
 
         except Exception as e:
@@ -132,18 +169,42 @@ class ChunkingService:
             output_file (str): Path to the output JSON file.
         """
         try:
+
+            # Debug information
+            print(f"Saving {len(chunks)} chunks to {output_file}")
+            
+            # Ensure output directory exists
+            output_dir = os.path.dirname(output_file)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+                print(f"Created output directory: {output_dir}")
+
             # Ensure we have valid JSON content to write
             if not chunks:
                 loggers["ChunkLogger"].warning(
                     f"No chunks to save to {output_file}"
                 )
                 chunks = []  # Ensure we at least write an empty array, not null
+            try:
+                json_content = json.dumps(chunks, indent=4)
+                print(f"JSON content size: {len(json_content)} bytes")
+            except Exception as json_err:
+                print(f"JSON serialization error: {str(json_err)}")
+                # Try to identify problematic chunks
+                for i, chunk in enumerate(chunks):
+                    try:
+                        json.dumps(chunk)
+                    except Exception:
+                        print(f"Problem with chunk {i}")
+                        print(f"Chunk data: {str(chunk)[:200]}...")
+                raise
 
             # Write with explicit flush and close operations
             with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(chunks, f, indent=4)
+                f.write(json_content)
                 f.flush()
-                os.fsync(f.fileno())  # Force write to disk
+                os.fsync(f.fileno())
+            
             print(f"Chunks saved to {output_file}")
 
             # Verify the file exists and has content
@@ -167,60 +228,81 @@ class ChunkingService:
     def format_chunks_for_json(self, chunks):
         """Format chunks for JSON output with additional MERN metadata"""
         formatted_chunks = []
-
-        for chunk in chunks:
-            code = chunk["code"]
-            metadata = chunk["metadata"]
-            file_path = metadata["file_path"]
-            file_name = os.path.basename(file_path)
-
-            # Extract just the directory name, not the full path
-            full_directory = os.path.dirname(file_path)
-            directory_name = (
-                os.path.basename(full_directory) if full_directory else ""
-            )
-
-            # Get file extension/type
-            _, file_extension = os.path.splitext(file_path)
-            file_type = file_extension[1:] if file_extension else "unknown"
-
-            # Determine component type based on path or extension
-            component_type = "unknown"
-            if "components" in file_path:
-                component_type = "component"
-            elif "routes" in file_path or "pages" in file_path:
-                component_type = "page"
-            elif "api" in file_path:
-                component_type = "api"
-            elif "models" in file_path:
-                component_type = "model"
-            elif "controllers" in file_path:
-                component_type = "controller"
-            elif "hooks" in file_path:
-                component_type = "hook"
-
-            # Count tokens
-            token_count = len(code.split())
-
-            formatted_chunk = {
-                "id": hashlib.sha256(code.encode("utf-8")).hexdigest(),
-                "file_path": file_path,
-                "file_name": file_name,
-                "file_type": file_type,
-                "directory": directory_name,
-                "component_type": component_type,
-                "start_line": metadata["start_line"],
-                "end_line": metadata["end_line"],
-                "content": code,
-                "size": len(code),
-                "token_count": token_count,
-                "start_token": metadata.get("start_token"),
-                "end_token": metadata.get("end_token"),
-            }
-
-            formatted_chunks.append(formatted_chunk)
-
-        return formatted_chunks
+        
+        print(f"Formatting {len(chunks)} chunks for JSON")
+        
+        try:
+            for i, chunk in enumerate(chunks):
+                try:
+                    code = chunk["code"]
+                    metadata = chunk["metadata"]
+                    file_path = metadata["file_path"]
+                    file_name = os.path.basename(file_path)
+                    
+                    # Extract directory info safely
+                    full_directory = os.path.dirname(file_path)
+                    directory_name = os.path.basename(full_directory) if full_directory else ""
+                    
+                    # Get file extension
+                    _, file_extension = os.path.splitext(file_path)
+                    file_type = file_extension[1:] if file_extension else "unknown"
+                    
+                    # Detect component type
+                    component_type = "unknown"
+                    if "components" in file_path:
+                        component_type = "component"
+                    elif "routes" in file_path or "pages" in file_path:
+                        component_type = "page"
+                    elif "api" in file_path:
+                        component_type = "api"
+                    elif "models" in file_path:
+                        component_type = "model"
+                    elif "controllers" in file_path:
+                        component_type = "controller"
+                    elif "hooks" in file_path:
+                        component_type = "hook"
+                    
+                    # Count tokens
+                    token_count = len(code.split())
+                    
+                    # Limit content size to avoid potential issues with very large files
+                    if len(code) > 1_000_000:  # 1MB limit
+                        print(f"Warning: Large chunk detected ({len(code)} chars). Truncating...")
+                        code = code[:1_000_000] + "... [content truncated]"
+                    
+                    formatted_chunk = {
+                        "id": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+                        "file_path": file_path,
+                        "file_name": file_name,
+                        "file_type": file_type,
+                        "directory": directory_name,
+                        "component_type": component_type,
+                        "start_line": metadata["start_line"],
+                        "end_line": metadata["end_line"],
+                        "content": code,
+                        "size": len(code),
+                        "token_count": token_count,
+                        "start_token": metadata.get("start_token"),
+                        "end_token": metadata.get("end_token"),
+                    }
+                    
+                    # Test JSON serialization before adding
+                    json.dumps(formatted_chunk)
+                    
+                    formatted_chunks.append(formatted_chunk)
+                except Exception as chunk_err:
+                    print(f"Error formatting chunk {i}: {str(chunk_err)}")
+                    # Continue with other chunks
+                    
+            print(f"Successfully formatted {len(formatted_chunks)} chunks")
+            return formatted_chunks
+            
+        except Exception as e:
+            print(f"Error in format_chunks_for_json: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            # Return whatever chunks were successfully formatted
+            return formatted_chunks
 
     async def process_directory(self, directory_path, output_dir=None):
         # Use settings value if not provided
@@ -269,7 +351,7 @@ class ChunkingService:
                         file_path = os.path.join(root, file)
                         loggers["ChunkLogger"].info(f"Processing: {file_path}")
                         file_chunks = self.chunk_codebase(file_path)
-
+                        print(f"file_chunks: {file_chunks}")
                         if file_chunks:
                             loggers["ChunkLogger"].info(
                                 f"Found {len(file_chunks)} chunks in {file_path}"
@@ -280,12 +362,12 @@ class ChunkingService:
                                 f"No chunks extracted from {file_path}"
                             )
 
-            # ... rest of the method unchanged
-
             total_chunks = len(all_chunks)
             loggers["ChunkLogger"].info(
                 f"Total chunks extracted: {total_chunks}"
             )
+            print(f"Total chunks extracted: {total_chunks}")
+            print(f"all_chunks: {all_chunks}")
 
             if not all_chunks:
                 loggers["ChunkLogger"].warning("No chunks found in any files")
