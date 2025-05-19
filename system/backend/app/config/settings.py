@@ -33,6 +33,45 @@ class Settings(BaseSettings):
     HUGGINGFACE_API_KEY: str
     HUGGINGFACE_API_URL: str
 
+    # Chunking service settings
+    CHUNKS_OUTPUT_PATH: str = "chunks"
+    CHUNK_TOKEN_LIMIT: int = 500
+    CHUNK_OVERLAP: int = 50
+    CHUNKS_OUTPUT_FILENAME: str = "mern_codebase_chunks.json"
+    IGNORE_DIRECTORIES: list = [
+        ".venv",
+        "node_modules",
+        ".git",
+        "__pycache__",
+        "venv",
+        "env",
+        "dist",
+        "build",
+    ]
+    IGNORE_FILES: list = [
+        "README.md",
+        "readme.md",
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+    ]
+
+    # Codebase indexing settings
+    INDEXING_CHUNK_SIZE: int = 90
+    INDEXING_UPSERT_BATCH_SIZE: int = 90
+    INDEXING_PROCESS_BATCH_SIZE: int = 90
+    INDEXING_DIMENSION: int = 1024
+    INDEXING_SIMILARITY_METRIC: str = "dotproduct"
+    INDEXING_EMBED_MODEL_NAME: str = "voyage-code-3"
+    INDEXING_SEMAPHORE_VALUE: int = 5
+
+    # CODEBASE_DIR: str = "/Users/krishgoyani/Developer/Code-Generation-Assistant/codebase"
+    SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
+
+    CODEBASE_DIR: str = (
+        "/Users/vinithachilkamari/Developer/n8n_frontend/frontend"
+    )
+
     class Config:
         env_file = ".env"
 

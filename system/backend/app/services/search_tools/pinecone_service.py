@@ -161,8 +161,23 @@ class PineconeService:
             metadata["created_at"] = datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
+            # Generate a unique ID if _id doesn't exist
+            if "_id" in chunks[i]:
+                vector_id = chunks[i]["_id"]
+            else:
+                # Use a filename or path if available, otherwise generate a timestamp-based ID
+                if "path" in chunks[i]:
+                    vector_id = f"{chunks[i]['path']}-{i}"
+                elif "filename" in chunks[i]:
+                    vector_id = f"{chunks[i]['filename']}-{i}"
+                else:
+                    vector_id = f"chunk-{int(time.time())}-{i}"
+
+                # Add the generated ID back to metadata
+                metadata["generated_id"] = vector_id
+
             result = {
-                "id": chunks[i]["_id"],
+                "id": vector_id,
                 "values": vector_embeddings[i],
                 "metadata": metadata,
                 # "sparse_values": {

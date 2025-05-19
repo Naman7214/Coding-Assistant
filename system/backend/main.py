@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from system.backend.app.apis import (
     code_base_search_route,
+    codebase_indexing_routes,
     file_access_routes,
     modification_routes,
     run_terminal_cmd_route,
@@ -39,6 +40,13 @@ app.include_router(
 app.include_router(
     file_access_routes.router, prefix="/api/v1", tags=["file access tools"]
 )
+
+app.include_router(
+    codebase_indexing_routes.router,
+    prefix="/api/v1",
+    tags=["codebase indexing"],
+)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
