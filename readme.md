@@ -12,6 +12,9 @@ The Code Generation Assistant is a powerful AI agent system designed to help wit
 
 - Python 3.8+
 - pip
+- install ripgrep , for Mac : ```brew install ripgrep```
+- install fzf , for Mac : ```brew install fzf```
+
 
 ## Installation
 
