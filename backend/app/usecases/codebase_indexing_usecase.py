@@ -153,6 +153,10 @@ class CodebaseIndexingUseCase:
                 data_batch, embed_model, dimension
             )
 
+            # Add root directory path to each data item
+            for item in data_batch:
+                item["root_dir_path"] = self.codebase_path
+
             # Add debug logging
             loggers["pinecone"].info(
                 f"Got {len(embeddings)} embeddings, formatting for upsert"
@@ -297,8 +301,6 @@ class CodebaseIndexingUseCase:
                 f"Generated {len(chunks)} chunks from codebase"
             )
 
-            # Load the generated chunks
-            # data = chunks
             # Load the generated chunks
             loggers["pinecone"].info(
                 f"Reading chunks from file: {chunks['output_file']}"
