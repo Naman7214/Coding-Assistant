@@ -1,5 +1,6 @@
 import asyncio
 import re
+import os
 from typing import Any, Dict, List, Optional, Pattern, Set, Tuple
 
 
@@ -129,7 +130,7 @@ class RunTerminalCmdUsecase:
                     stderr=subprocess.PIPE,
                     text=True,
                     start_new_session=True,
-                    cwd=".",
+                    cwd=os.path.abspath("codebase"),
                     shell=True,  # Use shell to expand wildcards, variables, etc.
                 )
                 return {
@@ -143,7 +144,7 @@ class RunTerminalCmdUsecase:
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=".",
+                    cwd=os.path.abspath("codebase"),
                 )
 
                 stdout, stderr = await process.communicate()
