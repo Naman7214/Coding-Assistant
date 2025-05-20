@@ -345,7 +345,7 @@ class PineconeService:
         vector: list,
         include_metadata: bool,
         filter_dict: dict | None = None,
-        namespace: str = "ault",
+        namespace: str = "default",
     ):
 
         headers = {
@@ -355,7 +355,7 @@ class PineconeService:
         }
 
         payload = {
-            "namespace": "admin@gmail.com-observability_task",
+            "namespace": namespace,
             "vector": vector,
             "topK": top_k,
             "includeValues": False,

@@ -371,7 +371,7 @@ def main(port: int) -> int:
                                 "case_sensitive": {
                                     "type": "boolean",
                                     "description": "Whether the search should be case sensitive",
-                                    "ault": True,
+                                    "default": True,
                                 },
                                 "include_pattern": {
                                     "type": "string",
@@ -384,7 +384,7 @@ def main(port: int) -> int:
                                 "search_paths": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "description": "Paths to search in (aults to current directory)",
+                                    "description": "Paths to search in (defaults to current directory)",
                                 },
                             },
                         },

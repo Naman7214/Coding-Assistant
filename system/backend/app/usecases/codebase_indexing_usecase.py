@@ -330,7 +330,7 @@ class CodebaseIndexingUseCase:
                 data = json.loads(file_content) if file_content.strip() else []
                 loggers["pinecone"].info(f"Loaded {len(data)} chunks from file")
 
-            namespace_name = "temp_default"
+            namespace_name = "default"
             index_name = f"{self.similarity_metric}-{self.dimension}"
             list_index_result = (
                 await self.pinecone_service.list_pinecone_indexes()

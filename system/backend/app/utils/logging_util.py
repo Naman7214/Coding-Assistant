@@ -40,7 +40,7 @@ def setup_logger(
         name (str): The name of the logger.
         log_file (str): The name of the log file.
         log_dir (str): Directory where logs will be stored.
-        level (int): Logging level (ault: logging.INFO).
+        level (int): Logging level (default: logging.INFO).
 
     Returns:
         logging.Logger: Configured logger instance.

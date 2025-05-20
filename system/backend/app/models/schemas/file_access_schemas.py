@@ -26,7 +26,7 @@ class FilesDeleteRequest(BaseModel):
 class DirectoryListRequest(BaseModel):
     dir_path: str = Field(
         default=os.path.abspath("codebase"),
-        description="The path to the directory to list, aults to current directory if not provided",
+        description="The path to the directory to list, defaults to current directory if not provided",
     )
     recursive: bool = Field(
         default=True, description="Whether to list subdirectories recursively"
