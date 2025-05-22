@@ -96,3 +96,12 @@ The MCP server provides a standardized interface for the AI agent to interact wi
 ### AI Coding Agent
 
 The AI coding agent uses Claude 3.7 Sonnet to understand user queries and interact with the MCP server to execute appropriate tools based on the requirements.
+
+## List of Queries : 
+can you read the content of the main.py file since i won't be able to locate it.
+delete the markdown file since now i don't want it.
+what all things do I have in the models directory?
+is there file named generate_service or something similar?
+change the host from 0.0.0.0 to  192.168.17.184 in our main file.
+create a directory named frontend for me.
+how many times class word is being used?

@@ -132,6 +132,7 @@ class AnthropicAgent:
             "tools": anthropic_tools,
             "messages": anthropic_messages,
             "thinking": {"type": "enabled", "budget_tokens": 2500},
+            # "temperature": 0.0,
         }
 
         # Add system parameter if we have a system message

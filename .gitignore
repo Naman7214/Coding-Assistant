@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+codebase/
+/Code-Generation-Assistant/codebase
 # C extensions
 *.so
 
@@ -178,3 +180,34 @@ linters.sh
 codebase/
 struct_logs
 coding_agent/.env
+
+
+# Build outputs
+out/
+dist/
+*.vsix
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build artifacts for the webview UI
+webview-ui/build/
+webview-ui/node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor specific files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+
+# OS specific files
+.DS_Store
+Thumbs.db

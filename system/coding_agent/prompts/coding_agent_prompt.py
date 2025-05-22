@@ -80,7 +80,6 @@ When responding:
 </AGENTIC_CAPABILITIES>
 
 IMPORTANT WORKSPACE RESTRICTIONS:
-- You can only modify files within the users current working directory: {{user_workspace}}
 - System files in coding_agent, mcp_server, and backend directories are off-limits
 - All file operations and commands must respect these boundaries
 - File paths should be relative to the user's current working directory
