@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import AppStreaming from './AppStreaming';
 
 // Declare vscode for TypeScript
 declare global {
@@ -15,6 +15,6 @@ const root = ReactDOM.createRoot(
 
 root.render(
   <React.StrictMode>
-    <App />
+    <AppStreaming />
   </React.StrictMode>
 ); 

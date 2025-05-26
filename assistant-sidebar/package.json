@@ -15,7 +15,7 @@
     "Other"
   ],
   "activationEvents": [],
-  "main": "./out/extension.js",
+  "main": "./out/extension_streaming.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -43,6 +43,22 @@
       {
         "command": "assistant-sidebar.startAgentServer",
         "title": "Start Agent Server"
+      },
+      {
+        "command": "assistant-sidebar.startStreamingServer",
+        "title": "Start Streaming Agent Server"
+      },
+      {
+        "command": "assistant-sidebar.refreshConnection",
+        "title": "Refresh Agent Connection"
+      },
+      {
+        "command": "assistant-sidebar.showOutput",
+        "title": "Show Agent Output"
+      },
+      {
+        "command": "assistant-sidebar.askAgent",
+        "title": "Ask Agent"
       }
     ]
   },

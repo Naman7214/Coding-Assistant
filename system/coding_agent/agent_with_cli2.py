@@ -12,7 +12,7 @@ from config.settings import settings
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
-from memory.agent_memory import AgentMemory
+from memory.agent_memory2 import AgentMemory
 from motor.motor_asyncio import AsyncIOMotorClient
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
 from rich.console import Console
@@ -22,6 +22,7 @@ from rich.prompt import Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.theme import Theme
+import psutil  # For memory monitoring
 
 logger = getLogger(__name__)
 
@@ -46,12 +47,17 @@ console = Console(theme=custom_theme)
 
 
 class AnthropicAgent:
-    MAX_TOOL_CALL_DEPTH = 30  # Prevent infinite recursion
+    MAX_TOOL_CALL_DEPTH = 20  # Reduced from 30
     MAX_RETRIES = 3
+    CONTEXT_WINDOW_LIMIT = 28000  # Leave room for response
 
     def __init__(self, model_name="claude-3-7-sonnet-20250219"):
-        self.model_name = model_name #"claude-sonnet-4-20250514" #model_name
-        self.agent_memory = AgentMemory()
+        # ... existing code ...
+        self.model_name = model_name 
+        self.agent_memory = AgentMemory(
+            max_context_window=self.CONTEXT_WINDOW_LIMIT,
+            max_tool_result_length=1500  # Reduced for efficiency
+        )
         self.session = None
         self.client_context = None
         self.anthropic_tools = []
@@ -72,13 +78,10 @@ class AnthropicAgent:
             self.mongodb_client = None
             self.llm_usage_collection = None
 
-    async def anthropic_api_call(
-        self,
-        messages: List[Dict[str, Any]],
-        tools: List[Dict[str, Any]],
-        **params,
-    ):
-        """Call the Anthropic API"""
+        # ... rest of existing code ...
+
+    async def anthropic_api_call(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], **params):
+        """Enhanced API call with context monitoring"""
         url = settings.ANTHROPIC_BASE_URL
 
         headers = {
@@ -100,6 +103,15 @@ class AnthropicAgent:
                         "input_schema": function_info.get("parameters", {}),
                     }
                 )
+
+        # Monitor context size before sending
+        context_size = sum(len(str(msg)) for msg in messages)
+        if context_size > self.CONTEXT_WINDOW_LIMIT:
+            console.print(f"[warning]Context size ({context_size}) approaching limit. Compressing...[/warning]")
+            self.agent_memory._compress_old_conversations()
+            messages = self.agent_memory.get_conversation_messages()
+            # Recalculate context size after compression
+            context_size = sum(len(str(msg)) for msg in messages)
 
         # Extract system message if present
         system_content = None
@@ -129,11 +141,10 @@ class AnthropicAgent:
 
         payload = {
             "model": self.model_name,
-            "max_tokens": params.get("max_tokens", 3000),
+            "max_tokens": max(64000, min(params.get("max_tokens", 3000), 4000 - (context_size // 4))),  # Ensure at least 1
             "tools": anthropic_tools,
-            "messages": anthropic_messages,
-            "thinking": {"type": "enabled", "budget_tokens": 2500},
-            # "temperature": 0,
+            "messages": anthropic_messages,  # Use filtered messages, not original messages
+            "thinking": {"type": "enabled", "budget_tokens": 1500},  # Reduced thinking budget
         }
 
         # Add system parameter if we have a system message
@@ -203,9 +214,17 @@ class AnthropicAgent:
 
                 return response_data
         except httpx.HTTPStatusError as e:
+            error_text = e.response.text
             console.print(
-                f"[error]Error in Anthropic API: {e.response.text} - {str(e)}[/error]"
+                f"[error]Error in Anthropic API: {error_text} - {str(e)}[/error]"
             )
+            
+            # If it's a tool pairing error, show debug info
+            if "tool_use_id" in error_text and "tool_result" in error_text:
+                console.print("[warning]Tool pairing error detected. Debug info:[/warning]")
+                debug_info = self.agent_memory.debug_tool_pairing()
+                console.print(f"[info]{debug_info}[/info]")
+            
             return None
         except httpx.RequestError as e:
             console.print(
@@ -224,10 +243,9 @@ class AnthropicAgent:
             return None
 
     async def process_tool_calls(self, assistant_message, depth=0):
-        """
-        Process tool calls recursively, allowing the model to make multiple tool calls
-        until it provides a final answer. Updates agent memory with all actions taken.
-        """
+        """Enhanced tool call processing with better memory management"""
+        # ... existing depth check code ...
+
         if depth >= self.MAX_TOOL_CALL_DEPTH:
             console.print(
                 Panel(
@@ -242,8 +260,12 @@ class AnthropicAgent:
                 "[success]Session ended due to reaching MAX_TOOL_CALL_DEPTH[/success]"
             )
             sys.exit(0)
-
-        # Extract content blocks from Anthropic response
+        
+        # Periodic memory cleanup
+        if depth > 0 and depth % 5 == 0:
+            self.agent_memory.cleanup_session()
+            console.print(f"[info]Memory cleanup performed at depth {depth}[/info]")
+        
         content_blocks = assistant_message.get("content", [])
         has_tool_calls = False
         tool_calls = []
@@ -399,37 +421,22 @@ class AnthropicAgent:
                         tool_name, tool_input
                     )
 
-                # Process result
-                if tool_result:
-                    # Fix content.text access to handle different result types
-                    tool_content = "\n".join(
-                        [
-                            (
-                                content.text
-                                if hasattr(content, "text")
-                                else str(content)
-                            )
+                    if tool_result:
+                        tool_content = "\n".join([
+                            (content.text if hasattr(content, "text") else str(content))
                             for content in tool_result
-                        ]
-                    )
-
-                    # Limit content length to avoid issues with very large inputs
-                    original_length = len(tool_content)
-                    if original_length > 32000:  # Adjust threshold as needed
-                        tool_content = (
-                            tool_content[:32000]
-                            + f"\n[Content truncated from {original_length} to 32000 characters]"
+                        ])
+                        
+                        # Enhanced result processing
+                        original_length = len(tool_content)
+                        if original_length > 8000:  # Reduced threshold
+                            tool_content = self.agent_memory._process_tool_result(tool_content)
+                            console.print(f"[info]Tool result optimized: {original_length} -> {len(tool_content)} chars[/info]")
+                    else:
+                        tool_content = "No result from tool"
+                        logger.info(
+                            f"No response got from the tool might have error while using the tool"
                         )
-                        console.print(
-                            f"[warning]Truncated tool result from {original_length} to 32000 characters[/warning]"
-                        )
-                else:
-                    tool_content = "No result from tool"
-                    logger.info(
-                        f"No response got from the tool might have error while using the tool"
-                    )
-
-                # Record the tool call and result in agent memory
                 self.agent_memory.add_tool_call(tool_call, tool_content)
                 self.agent_memory.add_tool_result(tool_use_id, tool_content)
 
@@ -538,6 +545,7 @@ class AnthropicAgent:
 
         return {"message": final_response}, self.agent_memory
 
+        
     async def initialize_session(self, server_url, transport_type):
         """Initialize the MCP session and connect to the server"""
         try:
@@ -615,13 +623,10 @@ class AnthropicAgent:
             )
             return False
 
-    async def run_interactive_session(
-        self,
-        server_url: str = "http://0.0.0.0:8001/sse",
-        transport_type: str = "sse",
-    ):
-        """Run an interactive session with the LLM using MCP tools with agent memory"""
-        # Show a welcome banner
+
+    async def run_interactive_session(self, server_url: str = "http://0.0.0.0:8001/sse", transport_type: str = "sse"):
+        """Enhanced interactive session with performance monitoring"""
+        # ... existing welcome banner code ...
         console.print(
             Panel(
                 "[bold]Welcome to the Anthropic Coding Assistant[/bold]\n"
@@ -635,15 +640,17 @@ class AnthropicAgent:
         console.print(
             f"[info]Connecting to MCP server using {transport_type} transport at {server_url}...[/info]"
         )
-
+        
         try:
-            # Initialize the session
+            # ... existing initialization code ...
             if not await self.initialize_session(server_url, transport_type):
                 return
 
-            # Interactive loop
+            
+            # Interactive loop with performance monitoring
+            session_start = time.time()
             while True:
-                # Get user query with styled prompt
+                # ... existing user input code ...
                 user_query = Prompt.ask(
                     "\n[user]What can I help you with?[/user]"
                 )
@@ -662,17 +669,25 @@ class AnthropicAgent:
                         border_style="blue",
                     )
                 )
-
-                # Process the user query
+                
+                # Enhanced query processing
                 enhanced_query = user_query
 
-                # Add internal agent memory context
-                tool_usage_summary = self.agent_memory.get_tool_usage_summary()
+                
+                # Only add memory context if it's relevant and not too large
                 if self.agent_memory.total_tool_calls > 0:
-                    memory_context = f"\n--- Agent Memory Reflection ---\n{tool_usage_summary}\n--- End Memory Reflection ---\n\n"
-                    enhanced_query = f"{memory_context}{enhanced_query}"
-
-                # Add the user message to agent memory
+                    tool_summary = self.agent_memory.get_concise_tool_summary()
+                    if tool_summary:
+                        enhanced_query = f"[Tools used: {tool_summary}] {enhanced_query}"
+                
+                # Monitor memory usage periodically
+                if self.agent_memory.total_tool_calls % 10 == 0 and self.agent_memory.total_tool_calls > 0:
+                    stats = self.agent_memory.get_session_stats()
+                    memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
+                    console.print(f"[info]Session stats: {stats['total_tool_calls']} tools, "
+                                f"{stats['context_size']} context chars, {memory_mb:.1f}MB RAM[/info]")
+                
+                # ... rest of existing conversation processing ...
                 self.agent_memory.add_user_message(enhanced_query)
                 # First call to Anthropic with full conversation history
                 with console.status("[thinking]Thinking...[/thinking]"):
@@ -833,3 +848,6 @@ class AnthropicAgent:
 
 if __name__ == "__main__":
     AnthropicAgent.main()
+
+        
+        # ... rest of existing code ...
