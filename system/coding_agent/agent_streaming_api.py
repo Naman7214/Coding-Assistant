@@ -28,12 +28,19 @@ app.add_middleware(
 # Store a global instance of the agent
 agent_instance = None
 
+# Store pending permission requests
+pending_permissions = {}
+
 class QueryRequest(BaseModel):
     query: str
     target_file_path: Optional[str] = None
 
+class PermissionResponse(BaseModel):
+    permission_id: str
+    granted: bool
+
 class StreamEvent(BaseModel):
-    type: str  # "thinking", "assistant_response", "tool_selection", "tool_execution", "tool_result", "final_response"
+    type: str  # "thinking", "assistant_response", "tool_selection", "tool_execution", "tool_result", "final_response", "permission_request"
     content: str
     metadata: Optional[Dict[str, Any]] = None
     timestamp: float
@@ -182,6 +189,9 @@ async def stream_process_tool_calls(assistant_message: Dict[str, Any], depth: in
         tool_name = tool_call.get("name")
         tool_input = tool_call.get("input", {})
         
+        print(f"🔍 DEBUG: Processing tool call - Name: {tool_name}, ID: {tool_use_id}")
+        print(f"🔍 DEBUG: Tool input: {tool_input}")
+        
         # Stream tool selection
         yield create_stream_event(
             "tool_selection", 
@@ -194,15 +204,76 @@ async def stream_process_tool_calls(assistant_message: Dict[str, Any], depth: in
         )
         
         # Check for permission if needed (simplified for streaming)
+        print(f"🔍 DEBUG: Checking tool name: '{tool_name}' against 'run_terminal_command'")
         if tool_name == "run_terminal_command":
+            print(f"🔍 DEBUG: Permission check triggered for tool: {tool_name}")
             command = tool_input.get("command", "")
+            permission_id = f"perm_{tool_use_id}_{int(time.time())}"
+            
+            print(f"🔍 DEBUG: Command to execute: {command}")
+            print(f"🔍 DEBUG: Permission ID: {permission_id}")
+            
+            # Create a future to wait for permission response
+            permission_future = asyncio.Future()
+            pending_permissions[permission_id] = permission_future
+            
+            print(f"🔍 DEBUG: Sending permission_request event")
             yield create_stream_event(
-                "tool_execution",
-                f"Requesting permission to run: {command}",
-                {"requires_permission": True, "command": command}
+                "permission_request",
+                f"Permission required to run command: {command}",
+                {
+                    "requires_permission": True, 
+                    "command": command,
+                    "permission_id": permission_id,
+                    "tool_name": tool_name
+                }
             )
-            # For streaming API, we'll assume permission is granted
-            # In a real implementation, you'd wait for user confirmation
+            
+            try:
+                print(f"🔍 DEBUG: Waiting for permission response...")
+                # Wait for permission response (with timeout)
+                permission_granted = await asyncio.wait_for(permission_future, timeout=60.0)
+                
+                print(f"🔍 DEBUG: Permission response received: {permission_granted}")
+                
+                if not permission_granted:
+                    print(f"🔍 DEBUG: Permission denied, skipping tool execution")
+                    yield create_stream_event(
+                        "tool_result",
+                        "Permission denied by user",
+                        {
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_use_id,
+                            "error": True,
+                            "permission_denied": True
+                        }
+                    )
+                    # Record the denial in memory
+                    agent_instance.agent_memory.add_tool_call(tool_call, "Permission denied by user")
+                    agent_instance.agent_memory.add_tool_result(tool_use_id, "Permission denied by user")
+                    continue  # Skip to next tool call
+                    
+            except asyncio.TimeoutError:
+                print(f"🔍 DEBUG: Permission request timed out")
+                yield create_stream_event(
+                    "tool_result",
+                    "Permission request timed out",
+                    {
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_use_id,
+                        "error": True,
+                        "timeout": True
+                    }
+                )
+                # Record the timeout in memory
+                agent_instance.agent_memory.add_tool_call(tool_call, "Permission request timed out")
+                agent_instance.agent_memory.add_tool_result(tool_use_id, "Permission request timed out")
+                continue  # Skip to next tool call
+            finally:
+                # Clean up the pending permission
+                pending_permissions.pop(permission_id, None)
+        else:
+            print(f"🔍 DEBUG: No permission check needed for tool: {tool_name}")
         
         # Stream tool execution start
         yield create_stream_event(
@@ -325,6 +396,28 @@ async def stream_query(request: QueryRequest):
             "Content-Type": "text/event-stream",
         }
     )
+
+@app.post("/permission")
+async def handle_permission_response(response: PermissionResponse):
+    """Handle permission response from frontend"""
+    permission_id = response.permission_id
+    granted = response.granted
+    
+    print(f"🔍 DEBUG: Received permission response - ID: {permission_id}, Granted: {granted}")
+    print(f"🔍 DEBUG: Pending permissions: {list(pending_permissions.keys())}")
+    
+    if permission_id in pending_permissions:
+        # Resolve the future with the permission result
+        future = pending_permissions[permission_id]
+        if not future.done():
+            print(f"🔍 DEBUG: Resolving future with result: {granted}")
+            future.set_result(granted)
+        else:
+            print(f"🔍 DEBUG: Future was already resolved")
+        return {"status": "success", "message": f"Permission {'granted' if granted else 'denied'}"}
+    else:
+        print(f"🔍 DEBUG: Permission ID not found in pending permissions")
+        raise HTTPException(status_code=404, detail="Permission request not found or expired")
 
 @app.post("/health")
 async def health_check():

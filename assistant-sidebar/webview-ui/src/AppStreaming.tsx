@@ -31,6 +31,11 @@ const App: React.FC = () => {
   const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [currentThinking, setCurrentThinking] = useState<string>('');
   const [currentTool, setCurrentTool] = useState<string>('');
+  const [permissionRequest, setPermissionRequest] = useState<{
+    message: string;
+    command: string;
+    permissionId: string;
+  } | null>(null);
   const responseEndRef = useRef<HTMLDivElement>(null);
 
   // Connect to VS Code extension
@@ -97,6 +102,16 @@ const App: React.FC = () => {
       case 'streamingHealthStatus':
         setStreamingHealthy(message.isHealthy || false);
         setStreamingUrl(message.url || '');
+        break;
+        
+      case 'permissionRequest':
+        // Handle permission request from backend
+        console.log('🔍 DEBUG: Received permission request:', message);
+        setPermissionRequest({
+          message: message.content || '',
+          command: message.metadata?.command || '',
+          permissionId: message.metadata?.permission_id || ''
+        });
         break;
     }
   };
@@ -167,6 +182,22 @@ const App: React.FC = () => {
 
   const refreshHealth = () => {
     vscode.postMessage({ command: 'checkStreamingHealth' });
+  };
+
+  const handlePermissionResponse = (granted: boolean) => {
+    if (permissionRequest) {
+      console.log(`🔍 DEBUG: Sending permission response - ID: ${permissionRequest.permissionId}, Granted: ${granted}`);
+      
+      // Send response back to extension (which will forward to backend)
+      vscode.postMessage({
+        command: 'permissionResponse',
+        permissionId: permissionRequest.permissionId,
+        granted: granted
+      });
+      
+      // Clear the permission request
+      setPermissionRequest(null);
+    }
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -268,6 +299,36 @@ const App: React.FC = () => {
           {streamingUrl && ` (${streamingUrl})`}
         </small>
       </div>
+
+      {/* Permission Dialog Modal */}
+      {permissionRequest && (
+        <div className="permission-modal-overlay">
+          <div className="permission-modal">
+            <div className="permission-header">
+              <h3>⚠️ Permission Required</h3>
+            </div>
+            <div className="permission-content">
+              <p><strong>The agent wants to execute:</strong></p>
+              <code className="permission-command">{permissionRequest.command}</code>
+              <p className="permission-message">{permissionRequest.message}</p>
+            </div>
+            <div className="permission-actions">
+              <button 
+                className="permission-button deny-button"
+                onClick={() => handlePermissionResponse(false)}
+              >
+                Deny
+              </button>
+              <button 
+                className="permission-button allow-button"
+                onClick={() => handlePermissionResponse(true)}
+              >
+                Allow
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

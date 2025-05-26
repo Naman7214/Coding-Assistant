@@ -176,4 +176,100 @@
   opacity: 0.7;
   padding: 5px 0;
   flex-shrink: 0;
+}
+
+/* Permission Modal Styles */
+.permission-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.permission-modal {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.permission-header {
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.permission-header h3 {
+  margin: 0;
+  color: var(--vscode-errorForeground);
+  font-size: 18px;
+}
+
+.permission-content {
+  margin-bottom: 20px;
+}
+
+.permission-content p {
+  margin: 10px 0;
+  color: var(--vscode-foreground);
+}
+
+.permission-command {
+  display: block;
+  background: var(--vscode-textCodeBlock-background);
+  color: var(--vscode-textPreformat-foreground);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 13px;
+  margin: 10px 0;
+  word-break: break-all;
+  border: 1px solid var(--vscode-input-border);
+}
+
+.permission-message {
+  font-size: 14px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.permission-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.permission-button {
+  padding: 8px 16px;
+  border: 1px solid var(--vscode-button-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.deny-button {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.deny-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.allow-button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.allow-button:hover {
+  background: var(--vscode-button-hoverBackground);
 } 

@@ -164,16 +164,26 @@ export class AgentStreamingClient {
                 }
                 break;
 
-            case 'tool_execution':
-                if (metadata?.requires_permission) {
-                    // Show permission dialog
-                    const permission = await this.requestPermission(content);
-                    if (!permission) {
-                        this.appendToOutput(`[TOOL] Permission denied: ${content}`);
-                        return;
-                    }
+            case 'permission_request':
+                const command = metadata?.command;
+                const permissionId = metadata?.permission_id;
+                
+                this.updateStatus(`⚠️ Permission required`);
+                this.appendToOutput(`[PERMISSION] Requesting permission for: ${command}`);
+                
+                if (webview) {
+                    webview.postMessage({
+                        command: 'permissionRequest',
+                        content: content,
+                        metadata: metadata
+                    });
                 }
                 
+                // Don't handle permission here - let the frontend handle it
+                // The frontend will send the response back via the extension
+                break;
+
+            case 'tool_execution':
                 this.updateStatus(`⚙️ Executing...`);
                 this.appendToOutput(`[TOOL] ${content}`);
 
@@ -280,15 +290,29 @@ export class AgentStreamingClient {
         this.outputChannel.appendLine(`[${timestamp}] ${text}`);
     }
 
-    private async requestPermission(message: string): Promise<boolean> {
+    private async requestPermission(message: string, command: string): Promise<boolean> {
         const choice = await vscode.window.showWarningMessage(
-            `Agent wants to execute: ${message}`,
+            `Agent wants to execute: ${command}`,
             { modal: true },
             'Allow',
             'Deny'
         );
         
         return choice === 'Allow';
+    }
+
+    private async sendPermissionResponse(permissionId: string, granted: boolean): Promise<void> {
+        try {
+            await axios.post(`${this.baseUrl}/permission`, {
+                permission_id: permissionId,
+                granted: granted
+            }, {
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (error) {
+            console.error('Error sending permission response:', error);
+            throw error;
+        }
     }
 
     private async handleFileEdit(content: string, metadata: any): Promise<void> {
