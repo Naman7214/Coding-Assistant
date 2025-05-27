@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 import os
+import uuid
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -104,97 +105,152 @@ async def stream_agent_response(query: str, target_file_path: Optional[str] = No
         # Add the query to agent memory
         agent_instance.agent_memory.add_user_message(enhanced_query)
         
-        # Use the TRUE streaming method that streams tokens in real-time
+        # Use the same approach as the CLI version - process streaming tool calls
         yield create_stream_event("thinking", "Generating response with real-time streaming...")
         
-        # Stream the processing with TRUE streaming
-        async for stream_event in agent_instance.anthropic_streaming_api_call(
-            messages=agent_instance.agent_memory.get_conversation_messages(),
-            tools=agent_instance.anthropic_tools,
-        ):
-            event_type = stream_event.get("type")
-            data = stream_event.get("data", {})
-            
-            if event_type == "content_block_start":
-                content_block = data.get("content_block", {})
-                if content_block.get("type") == "thinking":
-                    yield create_stream_event("thinking", "Assistant is reasoning...")
-                elif content_block.get("type") == "text":
-                    yield create_stream_event("assistant_response", "")
-                elif content_block.get("type") == "tool_use":
-                    tool_name = content_block.get("name", "unknown")
-                    yield create_stream_event("tool_selection", f"Selected tool: {tool_name}", {
-                        "tool_name": tool_name
-                    })
-            
-            elif event_type == "content_block_delta":
-                delta = data.get("delta", {})
-                if delta.get("type") == "thinking_delta":
-                    thinking_text = delta.get("thinking", "")
-                    if thinking_text:
-                        yield create_stream_event("thinking", thinking_text)
-                elif delta.get("type") == "text_delta":
-                    text_chunk = delta.get("text", "")
-                    if text_chunk:
-                        yield create_stream_event("assistant_response", text_chunk)
-            
-            elif event_type == "message_stop":
-                # Get the complete message and process any tool calls
-                complete_message = stream_event.get("complete_message")
-                if complete_message:
-                    # Check for tool calls and process them
-                    content_blocks = complete_message.get("content", [])
-                    tool_calls = [block for block in content_blocks if block.get("type") == "tool_use"]
-                    
-                    if tool_calls:
-                        # Process tool calls
-                        assistant_message = {
-                            "role": "assistant",
-                            "content": content_blocks,
-                        }
-                        agent_instance.agent_memory.add_assistant_message(assistant_message)
-                        
-                        # Execute tools and continue streaming
-                        async for tool_event in process_tool_calls_streaming(tool_calls):
-                            yield tool_event
-                    else:
-                        # No tool calls, just final response
-                        text_content = ""
-                        for block in content_blocks:
-                            if block.get("type") == "text":
-                                text_content += block.get("text", "")
-                        
-                        if text_content:
-                            yield create_stream_event("final_response", text_content)
-                        
-                        # Add to memory
-                        assistant_message = {
-                            "role": "assistant", 
-                            "content": content_blocks
-                        }
-                        agent_instance.agent_memory.add_assistant_message(assistant_message)
-                break
-            
-            elif event_type == "error":
-                yield create_stream_event("error", f"Streaming error: {data.get('error', 'Unknown error')}")
-                return
+        # Process with streaming tool calls using the working method
+        async for event in process_streaming_tool_calls_fixed(depth=0):
+            yield event
                 
     except Exception as e:
         print(f"Error processing query: {str(e)}")
         import traceback
         traceback.print_exc()
-        yield create_stream_event("error", f"Error processing query: {str(e)}")
+        
+        # If we encounter an error about duplicate tool IDs, reset the agent
+        if "tool_use` ids must be unique" in str(e):
+            yield create_stream_event("error", f"Conversation history error detected. Resetting agent...")
+            await reset_agent()
+            yield create_stream_event("error", f"Agent reset complete. Please try your query again.")
+        else:
+            yield create_stream_event("error", f"Error processing query: {str(e)}")
 
-async def process_tool_calls_streaming(tool_calls) -> AsyncGenerator[str, None]:
-    """Process tool calls with streaming updates"""
+async def reset_agent():
+    """Reset the agent completely when conversation errors occur"""
     global agent_instance
     
+    # Clean up existing agent if any
+    if agent_instance:
+        try:
+            await agent_instance.cleanup()
+        except Exception as e:
+            print(f"Error cleaning up agent: {e}")
+    
+    # Create a fresh agent instance
+    try:
+        agent_instance = AnthropicStreamingAgent()
+        server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/sse")
+        transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
+        success = await agent_instance.initialize_session(server_url, transport_type)
+        if success:
+            print("✅ Agent reset successfully")
+        else:
+            print("❌ Failed to reset agent")
+    except Exception as e:
+        print(f"❌ Error creating new agent instance: {e}")
+        agent_instance = None
+
+async def process_streaming_tool_calls_fixed(depth=0):
+    """
+    Process tool calls with streaming, using the same approach as the working CLI version
+    """
+    global agent_instance
+    
+    MAX_TOOL_CALL_DEPTH = 30
+    
+    if depth >= MAX_TOOL_CALL_DEPTH:
+        yield create_stream_event("error", "Maximum tool call depth reached. Stopping to prevent infinite loops.")
+        return
+
+    # Stream the API call
+    complete_message = None
+    thinking_content = ""
+    text_content = ""
+    tool_calls = []
+    
+    yield create_stream_event("thinking", f"Generating response (depth {depth})...")
+
+    async for stream_event in agent_instance.anthropic_streaming_api_call(
+        messages=agent_instance.agent_memory.get_conversation_messages(),
+        tools=agent_instance.anthropic_tools,
+    ):
+        event_type = stream_event.get("type")
+        data = stream_event.get("data", {})
+        
+        if event_type == "content_block_start":
+            content_block = data.get("content_block", {})
+            if content_block.get("type") == "thinking":
+                yield create_stream_event("thinking", "Assistant is reasoning...")
+            elif content_block.get("type") == "text":
+                yield create_stream_event("assistant_response", "")
+            elif content_block.get("type") == "tool_use":
+                tool_name = content_block.get("name", "unknown")
+                yield create_stream_event("tool_selection", f"Selected tool: {tool_name}", {
+                    "tool_name": tool_name
+                })
+        
+        elif event_type == "content_block_delta":
+            delta = data.get("delta", {})
+            if delta.get("type") == "thinking_delta":
+                thinking_text = delta.get("thinking", "")
+                thinking_content += thinking_text
+                if thinking_text:
+                    yield create_stream_event("thinking", thinking_text)
+            elif delta.get("type") == "text_delta":
+                text_chunk = delta.get("text", "")
+                text_content += text_chunk
+                if text_chunk:
+                    yield create_stream_event("assistant_response", text_chunk)
+            elif delta.get("type") == "input_json_delta":
+                # Tool input is being streamed
+                yield create_stream_event("tool_execution", ".", {"status": "building_input"})
+        
+        elif event_type == "content_block_stop":
+            # Content block ended
+            pass
+        
+        elif event_type == "message_stop":
+            complete_message = stream_event.get("complete_message")
+            break
+    
+    if not complete_message:
+        yield create_stream_event("error", "Couldn't get a complete response from the LLM.")
+        return
+
+    # Create assistant message from complete response
+    assistant_message = {
+        "role": "assistant",
+        "content": complete_message.get("content", []),
+    }
+
+    # Extract content blocks from complete response
+    content_blocks = complete_message.get("content", [])
+    has_tool_calls = False
+    tool_calls = []
+
+    # Check for tool_use blocks in the content
+    for block in content_blocks:
+        if block.get("type") == "tool_use":
+            has_tool_calls = True
+            tool_calls.append(block)
+
+    # If no tool calls, just return the text response
+    if not has_tool_calls:
+        # Add the assistant's final response to memory
+        agent_instance.agent_memory.add_assistant_message(assistant_message)
+        if text_content:
+            yield create_stream_event("final_response", text_content)
+        return
+
+    # Add the assistant message with tool calls to memory
+    agent_instance.agent_memory.add_assistant_message(assistant_message)
+
+    # Process each tool call
     for tool_call in tool_calls:
         tool_use_id = tool_call.get("id")
         tool_name = tool_call.get("name")
         tool_input = tool_call.get("input", {})
-        
-        # Stream tool execution start
+
         yield create_stream_event(
             "tool_execution",
             f"Executing {tool_name}...",
@@ -205,7 +261,7 @@ async def process_tool_calls_streaming(tool_calls) -> AsyncGenerator[str, None]:
                 "status": "executing"
             }
         )
-        
+
         # Handle permission for terminal commands
         if tool_name == "run_terminal_command":
             command = tool_input.get("command", "")
@@ -259,7 +315,7 @@ async def process_tool_calls_streaming(tool_calls) -> AsyncGenerator[str, None]:
                 continue
             finally:
                 pending_permissions.pop(permission_id, None)
-        
+
         # Execute the tool
         try:
             if not agent_instance.session:
@@ -279,7 +335,7 @@ async def process_tool_calls_streaming(tool_calls) -> AsyncGenerator[str, None]:
                     tool_content = tool_content[:8000] + f"\n[Content truncated from {original_length} to 8000 characters]"
             else:
                 tool_content = "No result from tool"
-            
+
             # Stream tool result
             yield create_stream_event(
                 "tool_result",
@@ -291,11 +347,11 @@ async def process_tool_calls_streaming(tool_calls) -> AsyncGenerator[str, None]:
                     "truncated": original_length > 8000 if 'original_length' in locals() else False
                 }
             )
-            
-            # Record in memory
+
+            # Record the tool call and result in agent memory
             agent_instance.agent_memory.add_tool_call(tool_call, tool_content)
             agent_instance.agent_memory.add_tool_result(tool_use_id, tool_content)
-            
+
         except Exception as e:
             error_message = f"Error calling tool {tool_name}: {str(e)}"
             yield create_stream_event(
@@ -309,44 +365,10 @@ async def process_tool_calls_streaming(tool_calls) -> AsyncGenerator[str, None]:
             )
             agent_instance.agent_memory.add_tool_call(tool_call, f"ERROR: {str(e)}")
             agent_instance.agent_memory.add_tool_result(tool_use_id, error_message)
-    
-    # After all tools are executed, get the next response
-    yield create_stream_event("thinking", "Generating final response after tool execution...")
-    
-    # Stream the next response
-    async for stream_event in agent_instance.anthropic_streaming_api_call(
-        messages=agent_instance.agent_memory.get_conversation_messages(),
-        tools=agent_instance.anthropic_tools,
-    ):
-        event_type = stream_event.get("type")
-        data = stream_event.get("data", {})
-        
-        if event_type == "content_block_delta":
-            delta = data.get("delta", {})
-            if delta.get("type") == "text_delta":
-                text_chunk = delta.get("text", "")
-                if text_chunk:
-                    yield create_stream_event("assistant_response", text_chunk)
-        
-        elif event_type == "message_stop":
-            complete_message = stream_event.get("complete_message")
-            if complete_message:
-                # Extract final text
-                text_content = ""
-                for block in complete_message.get("content", []):
-                    if block.get("type") == "text":
-                        text_content += block.get("text", "")
-                
-                if text_content:
-                    yield create_stream_event("final_response", text_content)
-                
-                # Add to memory
-                assistant_message = {
-                    "role": "assistant",
-                    "content": complete_message.get("content", [])
-                }
-                agent_instance.agent_memory.add_assistant_message(assistant_message)
-            break
+
+    # Make next call to Anthropic with tool results (recursive call)
+    async for event in process_streaming_tool_calls_fixed(depth + 1):
+        yield event
 
 @app.post("/stream")
 async def stream_query(request: QueryRequest):
@@ -381,6 +403,71 @@ async def health_check():
     if agent_instance and agent_instance.session:
         return {"status": "healthy", "streaming": True}
     return {"status": "unhealthy", "streaming": False}
+
+@app.post("/reset")
+async def reset_agent_endpoint():
+    """API endpoint to reset the agent in case of errors"""
+    try:
+        await reset_agent()
+        return {"status": "success", "message": "Agent reset successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset agent: {str(e)}")
+
+@app.post("/sanitize")
+async def sanitize_conversation():
+    """API endpoint to sanitize the conversation history to remove duplicate tool IDs"""
+    global agent_instance
+    if not agent_instance:
+        raise HTTPException(status_code=400, detail="Agent not initialized")
+    
+    try:
+        original_length = len(agent_instance.agent_memory.full_history)
+        fixed = sanitize_conversation_history(agent_instance.agent_memory.full_history)
+        agent_instance.agent_memory.full_history = fixed
+        return {
+            "status": "success", 
+            "message": f"Conversation sanitized. Original length: {original_length}, New length: {len(fixed)}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sanitize conversation: {str(e)}")
+
+def sanitize_conversation_history(history):
+    """Remove duplicate tool IDs from conversation history"""
+    # Track tool IDs we've seen
+    seen_tool_ids = set()
+    sanitized_history = []
+    
+    for message in history:
+        # Handle system and user messages normally
+        if message.get("role") in ["system", "user"]:
+            sanitized_history.append(message)
+            continue
+        
+        # For assistant messages, check content blocks for tool_use blocks
+        if message.get("role") == "assistant" and "content" in message:
+            content_blocks = []
+            for block in message.get("content", []):
+                # If it's a tool_use block, check for duplicate ID
+                if block.get("type") == "tool_use" and "id" in block:
+                    tool_id = block.get("id")
+                    if tool_id in seen_tool_ids:
+                        # Generate a new unique ID
+                        new_id = f"fixed_tool_{uuid.uuid4().hex[:8]}"
+                        print(f"Fixing duplicate tool ID: {tool_id} -> {new_id}")
+                        block = block.copy()  # Create a copy to avoid modifying the original
+                        block["id"] = new_id
+                    seen_tool_ids.add(block.get("id"))
+                content_blocks.append(block)
+            
+            # Create a new message with fixed content blocks
+            fixed_message = message.copy()
+            fixed_message["content"] = content_blocks
+            sanitized_history.append(fixed_message)
+        else:
+            # Handle other message types normally
+            sanitized_history.append(message)
+    
+    return sanitized_history
 
 @app.get("/")
 async def root():

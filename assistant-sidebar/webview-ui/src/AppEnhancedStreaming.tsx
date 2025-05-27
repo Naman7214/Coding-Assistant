@@ -189,12 +189,6 @@ const AppEnhancedStreaming: React.FC = () => {
   const handleResponseUpdate = (message: any) => {
     setStreamingState(prev => {
       const newResponse = message.fullResponse || prev.currentResponse + (message.content || '');
-      console.log('Response Update:', {
-        hasFullResponse: !!message.fullResponse,
-        contentChunk: message.content?.substring(0, 50) || 'none',
-        previousLength: prev.currentResponse?.length || 0,
-        newLength: newResponse?.length || 0
-      });
       
       return {
         ...prev,
@@ -223,14 +217,6 @@ const AppEnhancedStreaming: React.FC = () => {
   const handleStreamComplete = (message: any) => {
     // Use functional state update to get the latest streaming state
     setStreamingState(currentState => {
-      // Debug logging
-      console.log('Stream Complete - Current State:', {
-        thinking: currentState.currentThinking?.length || 0,
-        tools: currentState.currentTools?.length || 0,
-        response: currentState.currentResponse?.length || 0,
-        responsePreview: currentState.currentResponse?.substring(0, 100)
-      });
-
       // Add the completed assistant message to chat history using the current state
       const assistantMessage: ChatMessage = {
         id: Date.now().toString(),
@@ -241,12 +227,6 @@ const AppEnhancedStreaming: React.FC = () => {
         tools: currentState.currentTools.length > 0 ? currentState.currentTools : undefined,
         isStreaming: false
       };
-
-      console.log('Adding to chat history:', {
-        contentLength: assistantMessage.content?.length || 0,
-        hasThinking: !!assistantMessage.thinking,
-        toolsCount: assistantMessage.tools?.length || 0
-      });
 
       setChatHistory(prev => [...prev, assistantMessage]);
       

@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 
 
 class AgentMemory:
@@ -45,6 +46,20 @@ class AgentMemory:
 
     def add_tool_result(self, tool_use_id, content):
         """Add a tool result to the conversation history"""
+        # Make sure we haven't already added a tool result with this ID
+        for message in self.full_history:
+            if message.get("role") == "user" and message.get("content"):
+                for block in message.get("content", []):
+                    if (
+                        block.get("type") == "tool_result" 
+                        and block.get("tool_use_id") == tool_use_id
+                    ):
+                        # We already have a result for this tool ID, let's use a new ID
+                        new_id = f"unique_{uuid.uuid4().hex[:8]}"
+                        print(f"WARNING: Duplicate tool result ID detected. Changing {tool_use_id} to {new_id}")
+                        tool_use_id = new_id
+                        break
+
         self.full_history.append(
             {
                 "role": "user",
