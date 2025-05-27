@@ -106,7 +106,6 @@ const App: React.FC = () => {
         
       case 'permissionRequest':
         // Handle permission request from backend
-        console.log('🔍 DEBUG: Received permission request:', message);
         setPermissionRequest({
           message: message.content || '',
           command: message.metadata?.command || '',
@@ -186,8 +185,6 @@ const App: React.FC = () => {
 
   const handlePermissionResponse = (granted: boolean) => {
     if (permissionRequest) {
-      console.log(`🔍 DEBUG: Sending permission response - ID: ${permissionRequest.permissionId}, Granted: ${granted}`);
-      
       // Send response back to extension (which will forward to backend)
       vscode.postMessage({
         command: 'permissionResponse',
@@ -309,8 +306,18 @@ const App: React.FC = () => {
             </div>
             <div className="permission-content">
               <p><strong>The agent wants to execute:</strong></p>
-              <code className="permission-command">{permissionRequest.command}</code>
+              <code className="permission-command" title="Scroll to see full command if truncated">
+                {permissionRequest.command}
+              </code>
+              {permissionRequest.command.length > 200 && (
+                <p style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)', fontStyle: 'italic' }}>
+                  ↕️ Scroll above to see the full command
+                </p>
+              )}
               <p className="permission-message">{permissionRequest.message}</p>
+              <p style={{ fontSize: '13px', color: 'var(--vscode-descriptionForeground)' }}>
+                <strong>Note:</strong> This command will be executed on your system. Please review it carefully before allowing.
+              </p>
             </div>
             <div className="permission-actions">
               <button 

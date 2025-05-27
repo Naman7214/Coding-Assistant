@@ -179,8 +179,6 @@ class AssistantViewProvider implements vscode.WebviewViewProvider {
 
   private async handlePermissionResponse(permissionId: string, granted: boolean) {
     try {
-      console.log(`🔍 DEBUG: Handling permission response - ID: ${permissionId}, Granted: ${granted}`);
-      
       // Forward the permission response to the streaming API
       const response = await axios.post(`${STREAMING_API_URL}/permission`, {
         permission_id: permissionId,
@@ -189,10 +187,8 @@ class AssistantViewProvider implements vscode.WebviewViewProvider {
         headers: { 'Content-Type': 'application/json' }
       });
       
-      console.log(`🔍 DEBUG: Permission response sent successfully:`, response.data);
       this.outputChannel.appendLine(`[PERMISSION] Response sent: ${granted ? 'Granted' : 'Denied'} for ${permissionId}`);
     } catch (error) {
-      console.error(`🔍 DEBUG: Error sending permission response:`, error);
       this.outputChannel.appendLine(`[PERMISSION] Error sending response: ${error}`);
       console.error('Error sending permission response:', error);
     }
