@@ -6,7 +6,7 @@ import * as path from 'path';
 import { getWebviewContent, getNonce } from './utilities';
 
 const AGENT_API_PORT = 5000; // Port for the Python agent API
-const AGENT_API_URL = 'http://192.168.17.182:5000'
+const AGENT_API_URL = 'http://0.0.0.0:5000'
 
 class AssistantViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'assistantView';

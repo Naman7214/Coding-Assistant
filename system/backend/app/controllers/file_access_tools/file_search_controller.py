@@ -15,7 +15,7 @@ class FileSearchController:
 
     async def execute(self, request: FileSearchRequest):
         response = await self.file_search_usecase.execute(
-            request.pattern, request.explanation
+            request.pattern, request.workspace_path, request.explanation
         )
 
         return JSONResponse(

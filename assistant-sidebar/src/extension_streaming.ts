@@ -8,8 +8,8 @@ import { AgentStreamingClient } from './streaming_client';
 
 const AGENT_API_PORT = 5000; // Port for the Python agent API (original)
 const STREAMING_API_PORT = 5001; // Port for the streaming API
-const AGENT_API_URL = 'http://192.168.17.182:5000';
-const STREAMING_API_URL = 'http://192.168.17.182:5001';
+const AGENT_API_URL = 'http://0.0.0.0:5000';
+const STREAMING_API_URL = 'http://0.0.0.0:5001';
 
 class AssistantViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'assistantView';

@@ -8,8 +8,8 @@ import { EnhancedStreamingClient } from './enhanced_streaming_client';
 
 const AGENT_API_PORT = 5000; // Port for the Python agent API (original)
 const STREAMING_API_PORT = 5001; // Port for the TRUE streaming API
-const AGENT_API_URL = 'http://192.168.17.182:5000';
-const STREAMING_API_URL = 'http://192.168.17.182:5001';
+const AGENT_API_URL = 'http://0.0.0.0:5000';
+const STREAMING_API_URL = 'http://0.0.0.0:5001';
 
 class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'enhancedAssistantView';
@@ -87,6 +87,16 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     const activeEditor = vscode.window.activeTextEditor;
     const targetFilePath = activeEditor?.document.uri.fsPath || '';
 
+    let workspacePath = '';
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+      workspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    } else {
+      const errorMessage = 'No workspace folder is open';
+      this.updateResponse(`Error: ${errorMessage}`);
+      this.outputChannel.appendLine(`Query error: ${errorMessage}`);
+      return;
+    }
+
     try {
       if (useStreaming && this.enhancedStreamingClient) {
         // Use TRUE streaming API with enhanced visualization
@@ -95,7 +105,8 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         await this.enhancedStreamingClient.streamQuery(
           {
             query: query,
-            target_file_path: targetFilePath
+            target_file_path: targetFilePath,
+            workspace_path: workspacePath
           },
           this._view.webview,
           // Custom event handler for additional processing
@@ -122,7 +133,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         this.outputChannel.appendLine(`Using original API for query: ${query}`);
         this.updateResponse('Processing your query with original API...');
         
-        const response = await this.callOriginalAgent(query, targetFilePath);
+        const response = await this.callOriginalAgent(query, targetFilePath, workspacePath);
         this.updateResponse(response);
       }
     } catch (error) {
@@ -180,12 +191,13 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
   
-  private async callOriginalAgent(query: string, targetFilePath: string): Promise<string> {
+  private async callOriginalAgent(query: string, targetFilePath: string, workspacePath: string): Promise<string> {
     try {
       // Call the original Python agent API
       const response = await axios.post(`${AGENT_API_URL}/query`, {
         query,
-        target_file_path: targetFilePath
+        target_file_path: targetFilePath,
+        workspace_path: workspacePath
       });
       
       return response.data.response || 'No response from agent';
@@ -310,9 +322,14 @@ export function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('enhanced-assistant-sidebar.startStreamingServer', async () => {
       try {
+        const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!workspacePath) {
+          throw new Error('No workspace folder is open');
+        }
+
         // Run a command to start the TRUE streaming agent server
         const terminal = vscode.window.createTerminal('Enhanced Streaming Agent Server');
-        terminal.sendText('cd system/coding_agent && python3 agent_streaming_api_v2.py');
+        terminal.sendText(`cd system/coding_agent && python3 agent_streaming_api.py --workspace_path ${workspacePath}`);
         terminal.show();
         vscode.window.showInformationMessage('Enhanced TRUE streaming agent server started');
         

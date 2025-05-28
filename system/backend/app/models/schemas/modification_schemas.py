@@ -28,6 +28,9 @@ class SearchReplaceRequest(BaseModel):
     options: Optional[SearchReplaceOptions] = Field(
         default=None, description="Search options"
     )
+    workspace_path: str = Field(
+        ..., description="The path to the workspace to search in"
+    )
     explanation: str = Field(
         ..., description="The explanation for the search and replace request"
     )

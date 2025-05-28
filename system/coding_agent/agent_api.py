@@ -29,6 +29,7 @@ agent_instance = None
 class QueryRequest(BaseModel):
     query: str
     target_file_path: Optional[str] = None
+    workspace_path: str
 
 class QueryResponse(BaseModel):
     response: str
@@ -44,7 +45,7 @@ async def startup_event():
         transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
         
         # Initialize the session but don't start the interactive loop
-        await agent_instance.initialize_session(server_url, transport_type)
+        await agent_instance.initialize_session(server_url, transport_type, "")
         print(f"✅ Agent initialized successfully with server: {server_url}")
     except Exception as e:
         print(f"❌ Failed to initialize agent: {e}")
@@ -67,9 +68,17 @@ async def process_query(request: QueryRequest):
             agent_instance = AnthropicAgent()
             server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/sse")
             transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
-            await agent_instance.initialize_session(server_url, transport_type)
+            
+            workspace_path = request.workspace_path
+            await agent_instance.initialize_session(server_url, transport_type, workspace_path)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to initialize agent: {str(e)}")
+        
+    else:
+        # Update workspace path if it's different from what's stored
+        if request.workspace_path and request.workspace_path != agent_instance.workspace_path:
+            agent_instance.workspace_path = request.workspace_path
+            print(f"✅ Updated workspace path to: {request.workspace_path}")
     
     try:
         # Store the current number of tool calls to track only new ones in this session
@@ -177,4 +186,4 @@ async def health_check():
 
 if __name__ == "__main__":
     # Run the FastAPI app with uvicorn
-    uvicorn.run(app, host="192.168.17.182", port=5000) 
+    uvicorn.run(app, host="0.0.0.0", port=5000) 

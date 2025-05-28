@@ -12,6 +12,7 @@ interface StreamEvent {
 interface QueryRequest {
     query: string;
     target_file_path?: string;
+    workspace_path: string;
 }
 
 interface ThinkingState {
@@ -54,7 +55,7 @@ export class EnhancedStreamingClient {
     };
 
     constructor(
-        baseUrl: string = "http://192.168.17.182:5001",
+        baseUrl: string = "http://0.0.0.0:5001",
         outputChannel: vscode.OutputChannel,
         statusBarItem: vscode.StatusBarItem
     ) {

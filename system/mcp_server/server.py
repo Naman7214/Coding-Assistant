@@ -285,7 +285,7 @@ def main(port: int) -> int:
                 description="PROPOSE a command to run on behalf of the user.\nIf you have this tool, note that you DO have the ability to run commands directly on the USER's system.\nIn using these tools, adhere to the following guidelines:\n1. Commands will be executed in a preined path set by the system.\n2. The state will persist between command executions (eg. if you cd in one step, that cwd is persisted next time you invoke this tool).\n3. For ANY commands that would use a pager or require user interaction, you should append  | cat to the command (or whatever is appropriate). Otherwise, the command will break. You MUST do this for: git, less, head, tail, more, etc.\n4. For commands that are long running/expected to run ininitely until interruption, please run them in the background. To run jobs in the background, set is_background to true rather than changing the details of the command.\n5. Dont include any newlines in the command.",
                 inputSchema={
                     "type": "object",
-                    "required": ["command", "is_background"],
+                    "required": ["command", "is_background", "workspace_path"],
                     "properties": {
                         "command": {
                             "type": "string",
@@ -299,10 +299,10 @@ def main(port: int) -> int:
                             "type": "boolean",
                             "description": "Whether the command should be run in the background",
                         },
-                        # "require_user_approval": {
-                        #     "type": "boolean",
-                        #     "description": "Whether the user must approve the command before it is executed. Only set this to false if the command is safe and if it matches the user's requirements for commands that should be executed automatically."
-                        # }
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "The path to the workspace to search in",
+                        },
                     },
                 },
             ),
@@ -335,10 +335,6 @@ def main(port: int) -> int:
                             "type": "string",
                             "description": "The path of the directory to list. If not provided, the current working directory is used.",
                         },
-                        # "recursive": {
-                        #     "type": "boolean",
-                        #     "description": "Whether to recursively list contents of subdirectories. Defaults to True"
-                        # },
                         "explanation": {
                             "type": "string",
                             "description": "A short explanation of why this directory listing is being performed and how it supports the overall goal.",
@@ -351,7 +347,7 @@ def main(port: int) -> int:
                 description="A tool for searching pattern in files and replace it with new text. this tool allows you to perform search and replace operation across files in codebase. you can specify file patterns to include/exclude and whether to do case-sensitive matching.",
                 inputSchema={
                     "type": "object",
-                    "required": ["query", "replacement", "explanation"],
+                    "required": ["query", "replacement", "explanation", "workspace_path"],
                     "properties": {
                         "query": {
                             "type": "string",
@@ -365,13 +361,17 @@ def main(port: int) -> int:
                             "type": "string",
                             "description": "One sentence explanation as to why this tool is being used, and how it contributes to the goal.",
                         },
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "The path to the workspace to search in",
+                        },
                         "options": {
                             "type": "object",
                             "properties": {
                                 "case_sensitive": {
                                     "type": "boolean",
                                     "description": "Whether the search should be case sensitive",
-                                    "ault": True,
+                                    "default": True,
                                 },
                                 "include_pattern": {
                                     "type": "string",
@@ -384,7 +384,7 @@ def main(port: int) -> int:
                                 "search_paths": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "description": "Paths to search in (aults to current directory)",
+                                    "description": "Paths to search in (defaults to current directory)",
                                 },
                             },
                         },
@@ -396,11 +396,15 @@ def main(port: int) -> int:
                 description="Fast file search based on fuzzy matching against file path. Use if you know part of the file path but don't know where it's located exactly. Response will be capped to 10 results. Make your query more specific if need to filter results further.",
                 inputSchema={
                     "type": "object",
-                    "required": ["query", "explanation"],
+                    "required": ["query", "explanation", "workspace_path"],
                     "properties": {
                         "query": {
                             "type": "string",
                             "description": "Fuzzy filename to search for",
+                        },
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "The path to the workspace to search in",
                         },
                         "explanation": {
                             "type": "string",

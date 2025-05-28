@@ -345,7 +345,7 @@ class PineconeService:
         vector: list,
         include_metadata: bool,
         filter_dict: dict | None = None,
-        namespace: str = "ault",
+        namespace: str = "default",
     ):
 
         headers = {

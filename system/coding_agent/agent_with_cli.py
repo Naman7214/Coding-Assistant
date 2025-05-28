@@ -55,6 +55,7 @@ class AnthropicAgent:
         self.session = None
         self.client_context = None
         self.anthropic_tools = []
+        self.workspace_path = None
         self.timeout = httpx.Timeout(
             connect=60.0,  # Time to establish a connection
             read=120.0,  # Time to read the response
@@ -395,6 +396,26 @@ class AnthropicAgent:
                     # Check if session exists before calling
                     if not self.session:
                         raise Exception("Session is not initialized")
+                    
+                    # Inject workspace_path for tools that require it
+                    tools_requiring_workspace_path = {
+                        "run_terminal_command", 
+                        "search_and_replace", 
+                        "search_files"
+                    }
+                    
+                    if tool_name in tools_requiring_workspace_path and self.workspace_path:
+                        # Only add workspace_path if it's not already in the tool_input
+                        if "workspace_path" not in tool_input:
+                            tool_input["workspace_path"] = self.workspace_path
+                            console.print(
+                                f"[info]Injected workspace_path for {tool_name}: {self.workspace_path}[/info]"
+                            )
+                            
+                    if tool_name == "list_directory" and self.workspace_path:
+                        if tool_input.get("dir_path") == ".":
+                            tool_input["dir_path"] = self.workspace_path
+                            
                     tool_result = await self.session.call_tool(
                         tool_name, tool_input
                     )
@@ -538,9 +559,16 @@ class AnthropicAgent:
 
         return {"message": final_response}, self.agent_memory
 
-    async def initialize_session(self, server_url, transport_type):
+    async def initialize_session(self, server_url, transport_type, workspace_path):
         """Initialize the MCP session and connect to the server"""
         try:
+            if workspace_path:
+                self.workspace_path = workspace_path
+                console.print(f"[info]Using workspace path: {workspace_path}[/info]")
+            else:
+                self.workspace_path = os.path.abspath("codebase")
+                console.print(f"[info]Using default workspace path: {self.workspace_path}[/info]")
+                
             # Connect to MCP server
             with console.status(
                 f"[info]Connecting to MCP server via {transport_type}...[/info]"
@@ -602,7 +630,7 @@ class AnthropicAgent:
             )
             system_message = CODING_AGENT_SYSTEM_PROMPT.format(
                 tool_descriptions=tool_descriptions,
-                user_workspace=os.path.abspath("codebase"),
+                user_workspace=self.workspace_path,
             )
             # Initialize agent memory with system message
             console.print("[info]Initializing agent system prompt[/info]")
@@ -626,7 +654,7 @@ class AnthropicAgent:
             Panel(
                 "[bold]Welcome to the Anthropic Coding Assistant[/bold]\n"
                 "Ask coding questions, request code explanations, or get help with your projects.",
-                title="[bold]🤖 Anthropic Agent[/bold]",
+                title="[bold]🤖 Anthropic Agent [/bold]",
                 border_style="green",
                 width=100,
             )
