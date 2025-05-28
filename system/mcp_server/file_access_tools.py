@@ -126,11 +126,11 @@ async def list_directory(
         return f"An error occured : {str(e)}"
 
 
-async def search_files(query: str, explanation: str) -> List[Dict[str, Any]]:
+async def search_files(query: str, workspace_path: str, explanation: str) -> List[Dict[str, Any]]:
 
     url = "http://127.0.0.1:8000/api/v1/search-files"
 
-    payload = {"pattern": query, "explanation": explanation}
+    payload = {"pattern": query, "workspace_path": workspace_path, "explanation": explanation}
 
     try:
         async with httpx.AsyncClient(verify=False, timeout=timeout) as client:

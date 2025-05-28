@@ -15,7 +15,7 @@ from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
 
 
 class AnthropicAgent:
-    MAX_TOOL_CALL_DEPTH = 25  # Prevent infinite recursion
+    MAX_TOOL_CALL_DEPTH = 50  # Prevent infinite recursion
     MAX_RETRIES = 3
 
     def __init__(self, model_name="claude-3-7-sonnet-20250219"):

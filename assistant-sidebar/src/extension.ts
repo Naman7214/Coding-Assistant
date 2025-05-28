@@ -6,7 +6,12 @@ import * as path from 'path';
 import { getWebviewContent, getNonce } from './utilities';
 
 const AGENT_API_PORT = 5000; // Port for the Python agent API
-const AGENT_API_URL = 'http://192.168.17.182:5000'
+const AGENT_API_URL = 'http://0.0.0.0:5000'
+
+interface WebviewMessage {
+  command: string;
+  text: string;
+}
 
 class AssistantViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'assistantView';
@@ -32,7 +37,7 @@ class AssistantViewProvider implements vscode.WebviewViewProvider {
 
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
-      async message => {
+      async (message: WebviewMessage) => {
         switch (message.command) {
           case 'sendQuery':
             // Show loading indicator
@@ -42,8 +47,16 @@ class AssistantViewProvider implements vscode.WebviewViewProvider {
               const activeEditor = vscode.window.activeTextEditor;
               const targetFilePath = activeEditor?.document.uri.fsPath || '';
               
-              // Call the agent with the query and current file path
-              const response = await this.callAgent(message.text, targetFilePath);
+              // Get the workspace folder path
+              let workspacePath = '';
+              if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                workspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+              } else {
+                throw new Error('No workspace folder is open');
+              }
+              
+              // Call the agent with the query, current file path, and workspace path
+              const response = await this.callAgent(message.text, targetFilePath, workspacePath);
               
               // Update the response in the webview
               this.updateResponse(response);
@@ -67,12 +80,15 @@ class AssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
   
-  private async callAgent(query: string, targetFilePath: string): Promise<string> {
+  private async callAgent(query: string, targetFilePath: string, workspacePath: string): Promise<string> {
     try {
-      // Call the Python agent API
+
+      console.log('Workspace path:', workspacePath);
+      // Call the Python agent API with workspace path
       const response = await axios.post(`${AGENT_API_URL}/query`, {
         query,
-        target_file_path: targetFilePath
+        target_file_path: targetFilePath,
+        workspace_path: workspacePath
       });
       
       return response.data.response || 'No response from agent';
@@ -83,6 +99,25 @@ class AssistantViewProvider implements vscode.WebviewViewProvider {
       }
       return `Error: ${error instanceof Error ? error.message : String(error)}`;
     }
+  }
+
+  private getWorkspaceInfo(): { workspacePath: string; openFiles: string[] } {
+    let workspacePath = '';
+    const openFiles: string[] = [];
+
+    // Get workspace path
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+      workspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    }
+
+    // Get list of open files
+    vscode.workspace.textDocuments.forEach(doc => {
+      if (doc.uri.scheme === 'file') {
+        openFiles.push(doc.uri.fsPath);
+      }
+    });
+
+    return { workspacePath, openFiles };
   }
 }
 
@@ -106,9 +141,15 @@ export function activate(context: vscode.ExtensionContext) {
     
     vscode.commands.registerCommand('assistant-sidebar.startAgentServer', async () => {
       try {
-        // Run a command to start the Python agent server
+        // Get workspace path
+        const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!workspacePath) {
+          throw new Error('No workspace folder is open');
+        }
+
+        // Run a command to start the Python agent server with workspace path
         const terminal = vscode.window.createTerminal('Agent Server');
-        terminal.sendText('cd system/coding_agent && python3 agent_api.py');
+        terminal.sendText(`cd system/coding_agent && python3 agent_api.py --workspace "${workspacePath}"`);
         terminal.show();
         vscode.window.showInformationMessage('Agent server started');
       } catch (error) {

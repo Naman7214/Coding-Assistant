@@ -299,10 +299,10 @@ def main(port: int) -> int:
                             "type": "boolean",
                             "description": "Whether the command should be run in the background",
                         },
-                        # "require_user_approval": {
-                        #     "type": "boolean",
-                        #     "description": "Whether the user must approve the command before it is executed. Only set this to false if the command is safe and if it matches the user's requirements for commands that should be executed automatically."
-                        # }
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "The path to the workspace to search in",
+                        },
                     },
                 },
             ),
@@ -335,10 +335,6 @@ def main(port: int) -> int:
                             "type": "string",
                             "description": "The path of the directory to list. If not provided, the current working directory is used.",
                         },
-                        # "recursive": {
-                        #     "type": "boolean",
-                        #     "description": "Whether to recursively list contents of subdirectories. Defaults to True"
-                        # },
                         "explanation": {
                             "type": "string",
                             "description": "A short explanation of why this directory listing is being performed and how it supports the overall goal.",
@@ -365,13 +361,17 @@ def main(port: int) -> int:
                             "type": "string",
                             "description": "One sentence explanation as to why this tool is being used, and how it contributes to the goal.",
                         },
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "The path to the workspace to search in",
+                        },
                         "options": {
                             "type": "object",
                             "properties": {
                                 "case_sensitive": {
                                     "type": "boolean",
                                     "description": "Whether the search should be case sensitive",
-                                    "ault": True,
+                                    "default": True,
                                 },
                                 "include_pattern": {
                                     "type": "string",
@@ -384,7 +384,7 @@ def main(port: int) -> int:
                                 "search_paths": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "description": "Paths to search in (aults to current directory)",
+                                    "description": "Paths to search in (defaults to current directory)",
                                 },
                             },
                         },
@@ -401,6 +401,10 @@ def main(port: int) -> int:
                         "query": {
                             "type": "string",
                             "description": "Fuzzy filename to search for",
+                        },
+                        "workspace_path": {
+                            "type": "string",
+                            "description": "The path to the workspace to search in",
                         },
                         "explanation": {
                             "type": "string",

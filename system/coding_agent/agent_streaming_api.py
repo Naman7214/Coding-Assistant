@@ -34,6 +34,7 @@ pending_permissions = {}
 class QueryRequest(BaseModel):
     query: str
     target_file_path: Optional[str] = None
+    workspace_path: str
 
 class PermissionResponse(BaseModel):
     permission_id: str
@@ -56,7 +57,7 @@ async def startup_event():
         transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
         
         # Initialize the session but don't start the interactive loop
-        await agent_instance.initialize_session(server_url, transport_type)
+        await agent_instance.initialize_session(server_url, transport_type, "")
         print(f"✅ Agent initialized successfully with server: {server_url}")
     except Exception as e:
         print(f"❌ Failed to initialize agent: {e}")
@@ -78,7 +79,7 @@ def create_stream_event(event_type: str, content: str, metadata: Optional[Dict[s
     )
     return f"data: {event.json()}\n\n"
 
-async def stream_agent_response(query: str, target_file_path: Optional[str] = None) -> AsyncGenerator[str, None]:
+async def stream_agent_response(query: str, workspace_path: str, target_file_path: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Stream the agent's response with incremental updates"""
     global agent_instance
     
@@ -88,11 +89,17 @@ async def stream_agent_response(query: str, target_file_path: Optional[str] = No
             agent_instance = AnthropicAgent()
             server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/sse")
             transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
-            await agent_instance.initialize_session(server_url, transport_type)
+            # Use workspace_path from request if available
+            await agent_instance.initialize_session(server_url, transport_type, workspace_path)
         except Exception as e:
             yield create_stream_event("error", f"Failed to initialize agent: {str(e)}")
             return
-    
+    else:
+        # Update workspace path if it's different from what's stored
+        if workspace_path and workspace_path != agent_instance.workspace_path:
+            agent_instance.workspace_path = workspace_path
+            print(f"✅ Updated workspace path to: {workspace_path}")
+
     try:
         # Enhance the query with file path context if available
         enhanced_query = query
@@ -191,6 +198,24 @@ async def stream_process_tool_calls(assistant_message: Dict[str, Any], depth: in
         
         print(f"🔍 DEBUG: Processing tool call - Name: {tool_name}, ID: {tool_use_id}")
         print(f"🔍 DEBUG: Tool input: {tool_input}")
+        
+        # Inject workspace_path for tools that require it
+        tools_requiring_workspace_path = {
+            "run_terminal_command", 
+            "search_and_replace", 
+            "search_files"
+        }
+        
+        if tool_name in tools_requiring_workspace_path and agent_instance.workspace_path:
+            # Only add workspace_path if it's not already in the tool_input
+            if "workspace_path" not in tool_input:
+                tool_input["workspace_path"] = agent_instance.workspace_path
+                print(f"✅ Injected workspace_path for {tool_name}: {agent_instance.workspace_path}")
+                
+        if tool_name == "list_directory" and agent_instance.workspace_path:
+            if tool_input.get("dir_path") == ".":
+                tool_input["dir_path"] = agent_instance.workspace_path
+                print(f"✅ Updated dir_path for {tool_name} from '.' to: {agent_instance.workspace_path}")
         
         # Stream tool selection
         yield create_stream_event(
@@ -388,7 +413,7 @@ async def stream_process_tool_calls(assistant_message: Dict[str, Any], depth: in
 async def stream_query(request: QueryRequest):
     """Stream the agent's response with incremental updates"""
     return StreamingResponse(
-        stream_agent_response(request.query, request.target_file_path),
+        stream_agent_response(request.query, request.workspace_path, request.target_file_path),
         media_type="text/plain",
         headers={
             "Cache-Control": "no-cache",
@@ -432,4 +457,4 @@ async def root():
 
 if __name__ == "__main__":
     # Run the FastAPI app with uvicorn
-    uvicorn.run(app, host="192.168.17.182", port=5001)  # Different port from original API 
+    uvicorn.run(app, host="0.0.0.0", port=5001)  # Different port from original API 

@@ -28,6 +28,7 @@ const App: React.FC = () => {
   const [streamingEnabled, setStreamingEnabled] = useState<boolean>(true);
   const [streamingHealthy, setStreamingHealthy] = useState<boolean>(false);
   const [streamingUrl, setStreamingUrl] = useState<string>('');
+  const [showDetailedEvents, setShowDetailedEvents] = useState<boolean>(false);
   const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [currentThinking, setCurrentThinking] = useState<string>('');
   const [currentTool, setCurrentTool] = useState<string>('');
@@ -124,7 +125,14 @@ const App: React.FC = () => {
       timestamp: Date.now()
     };
 
-    setStreamEvents(prev => [...prev, event]);
+    // Filter events based on user preference
+    const basicEventTypes = ['thinking', 'tool_selection'];
+    const allEventTypes = ['thinking', 'tool_selection', 'tool_execution', 'tool_result', 'assistant_response'];
+    const visibleEventTypes = showDetailedEvents ? allEventTypes : basicEventTypes;
+    
+    if (visibleEventTypes.includes(event.type)) {
+      setStreamEvents(prev => [...prev, event]);
+    }
 
     switch (event.type) {
       case 'thinking':
@@ -132,23 +140,29 @@ const App: React.FC = () => {
         break;
         
       case 'tool_selection':
-        setCurrentTool(event.metadata?.tool_name || 'Unknown tool');
+        setCurrentTool(`Selected: ${event.metadata?.tool_name || 'Unknown tool'}`);
+        // Show the explanation/reasoning for tool selection
+        if (event.metadata?.explanation) {
+          setCurrentThinking(`Tool reasoning: ${event.metadata.explanation}`);
+        }
         break;
         
       case 'tool_execution':
-        setCurrentTool(`Executing: ${event.metadata?.tool_name || 'Unknown tool'}`);
+        // Update status but filter visibility based on user preference
+        setCurrentTool(`Working with ${event.metadata?.tool_name || 'tool'}...`);
         break;
         
       case 'assistant_response':
-        // Append to response for real-time display
+        // Still append to response for real-time display
         setResponse(prev => prev + event.content);
         break;
         
       case 'tool_result':
+        // Update status but filter visibility based on user preference
         if (event.metadata?.error) {
-          setCurrentTool(`❌ ${event.metadata?.tool_name} failed`);
+          setCurrentTool(`Issue with ${event.metadata?.tool_name || 'tool'}`);
         } else {
-          setCurrentTool(`✅ ${event.metadata?.tool_name} completed`);
+          setCurrentTool(`Completed using ${event.metadata?.tool_name || 'tool'}`);
         }
         break;
     }
@@ -215,6 +229,13 @@ const App: React.FC = () => {
             title={`Streaming is ${streamingEnabled ? 'enabled' : 'disabled'}`}
           >
             {streamingEnabled ? '🔄' : '📝'} {streamingEnabled ? 'Streaming' : 'Original'}
+          </button>
+          <button 
+            className={`toggle-button ${showDetailedEvents ? 'enabled' : 'disabled'}`}
+            onClick={() => setShowDetailedEvents(!showDetailedEvents)}
+            title={`${showDetailedEvents ? 'Detailed' : 'Simplified'} view`}
+          >
+            {showDetailedEvents ? '🔍' : '👁️'} {showDetailedEvents ? 'Detailed' : 'Simple'}
           </button>
           <button 
             className="health-button"

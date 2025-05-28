@@ -90,6 +90,7 @@ class RunTerminalCmdUsecase:
         command: str,
         is_background: bool,
         explanation: Optional[str] = None,
+        workspace_path: str = None,
     ) -> Dict[str, Any]:
         """
         Run a terminal command on the user's system.
@@ -130,7 +131,7 @@ class RunTerminalCmdUsecase:
                     stderr=subprocess.PIPE,
                     text=True,
                     start_new_session=True,
-                    cwd=os.path.abspath("codebase"),
+                    cwd=workspace_path,
                     shell=True,  # Use shell to expand wildcards, variables, etc.
                 )
                 return {
@@ -144,7 +145,7 @@ class RunTerminalCmdUsecase:
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=os.path.abspath("codebase"),
+                    cwd=workspace_path,
                 )
 
                 stdout, stderr = await process.communicate()

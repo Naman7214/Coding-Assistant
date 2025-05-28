@@ -27,7 +27,7 @@ timeout = httpx.Timeout(
 async def run_terminal_command(
     command: str,
     is_background: bool,
-    # require_user_approval: bool,
+    workspace_path: str,
     explanation: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -36,7 +36,7 @@ async def run_terminal_command(
     Args:
         command: The terminal command to execute
         is_background: Whether the command should be run in the background
-        require_user_approval: Whether user approval is required
+        workspace_path: The path to the workspace to search in
         explanation: Explanation for why the command is needed
 
     Returns:
@@ -47,6 +47,7 @@ async def run_terminal_command(
     payload = {
         "cmd": command,
         "is_background": is_background,
+        "workspace_path": workspace_path,
     }
     if explanation:
         payload["explanation"] = explanation

@@ -47,7 +47,7 @@ console = Console(theme=custom_theme)
 
 
 class AnthropicAgent:
-    MAX_TOOL_CALL_DEPTH = 20  # Reduced from 30
+    MAX_TOOL_CALL_DEPTH = 50  # Reduced from 30
     MAX_RETRIES = 3
     CONTEXT_WINDOW_LIMIT = 28000  # Leave room for response
 
@@ -61,6 +61,7 @@ class AnthropicAgent:
         self.session = None
         self.client_context = None
         self.anthropic_tools = []
+        self.workspace_path = None  # Store workspace path for tool calls   
         self.timeout = httpx.Timeout(
             connect=60.0,  # Time to establish a connection
             read=120.0,  # Time to read the response
@@ -320,7 +321,7 @@ class AnthropicAgent:
             tool_input = tool_call.get("input", {})
 
             # Check if total tool calls will exceed 25
-            if self.agent_memory.total_tool_calls >= 25:
+            if self.agent_memory.total_tool_calls >= 50:
                 console.print(
                     Panel(
                         f"[bold yellow]The agent has already made 25 tool calls in this session.[/bold yellow]\nContinuing might lead to longer processing times.",
@@ -417,6 +418,26 @@ class AnthropicAgent:
                     # Check if session exists before calling
                     if not self.session:
                         raise Exception("Session is not initialized")
+                    
+                    # Inject workspace_path for tools that require it
+                    tools_requiring_workspace_path = {
+                        "run_terminal_command", 
+                        "search_and_replace", 
+                        "search_files"
+                    }
+                    
+                    if tool_name in tools_requiring_workspace_path and self.workspace_path:
+                        # Only add workspace_path if it's not already in the tool_input
+                        if "workspace_path" not in tool_input:
+                            tool_input["workspace_path"] = self.workspace_path
+                            console.print(
+                                f"[info]Injected workspace_path for {tool_name}: {self.workspace_path}[/info]"
+                            )
+                            
+                    if tool_name == "list_directory" and self.workspace_path:
+                        if tool_input.get("dir_path") == ".":
+                            tool_input["dir_path"] = self.workspace_path
+                            
                     tool_result = await self.session.call_tool(
                         tool_name, tool_input
                     )
@@ -546,9 +567,17 @@ class AnthropicAgent:
         return {"message": final_response}, self.agent_memory
 
         
-    async def initialize_session(self, server_url, transport_type):
+    async def initialize_session(self, server_url, transport_type, workspace_path):
         """Initialize the MCP session and connect to the server"""
         try:
+            # Store workspace path for tool calls
+            if workspace_path:
+                self.workspace_path = workspace_path
+                console.print(f"[info]Using workspace path: {workspace_path}[/info]")
+            else:
+                self.workspace_path = os.path.abspath("codebase")
+                console.print(f"[info]Using default workspace path: {self.workspace_path}[/info]")
+                
             # Connect to MCP server
             with console.status(
                 f"[info]Connecting to MCP server via {transport_type}...[/info]"

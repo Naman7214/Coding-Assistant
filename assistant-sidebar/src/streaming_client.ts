@@ -12,6 +12,7 @@ interface StreamEvent {
 interface QueryRequest {
     query: string;
     target_file_path?: string;
+    workspace_path?: string;
 }
 
 export class AgentStreamingClient {
@@ -20,7 +21,7 @@ export class AgentStreamingClient {
     private statusBarItem: vscode.StatusBarItem;
 
     constructor(
-        baseUrl: string = "http://192.168.17.182:5001",
+        baseUrl: string = "http://0.0.0.0:5001",
         outputChannel: vscode.OutputChannel,
         statusBarItem: vscode.StatusBarItem
     ) {
@@ -131,12 +132,15 @@ export class AgentStreamingClient {
         const { type, content, metadata } = event;
         const timestamp = new Date(event.timestamp * 1000).toLocaleTimeString();
 
+        // Define which events should be visible to the user
+        const userVisibleEvents = ['thinking', 'tool_selection', 'assistant_response', 'final_response', 'error', 'permission_request'];
+
         switch (type) {
             case 'thinking':
                 this.updateStatus(`🤔 ${content}`);
                 this.appendToOutput(`[THINKING] ${content}`);
                 
-                if (webview) {
+                if (webview && userVisibleEvents.includes(type)) {
                     webview.postMessage({
                         command: 'streamEvent',
                         type: 'thinking',
@@ -147,6 +151,7 @@ export class AgentStreamingClient {
 
             case 'tool_selection':
                 const toolName = metadata?.tool_name;
+                const explanation = metadata?.explanation;
                 this.updateStatus(`🔧 Using ${toolName}`);
                 this.appendToOutput(`[TOOL] Selected: ${toolName}`);
                 
@@ -154,11 +159,11 @@ export class AgentStreamingClient {
                     this.appendToOutput(`[TOOL] Arguments: ${JSON.stringify(metadata.tool_arguments, null, 2)}`);
                 }
 
-                if (webview) {
+                if (webview && userVisibleEvents.includes(type)) {
                     webview.postMessage({
                         command: 'streamEvent',
                         type: 'tool_selection',
-                        content: `Using tool: ${toolName}`,
+                        content: explanation ? `Using tool: ${toolName}\nReasoning: ${explanation}` : `Using tool: ${toolName}`,
                         metadata: metadata
                     });
                 }
@@ -171,7 +176,7 @@ export class AgentStreamingClient {
                 this.updateStatus(`⚠️ Permission required`);
                 this.appendToOutput(`[PERMISSION] Requesting permission for: ${command}`);
                 
-                if (webview) {
+                if (webview && userVisibleEvents.includes(type)) {
                     webview.postMessage({
                         command: 'permissionRequest',
                         content: content,
@@ -187,14 +192,7 @@ export class AgentStreamingClient {
                 this.updateStatus(`⚙️ Executing...`);
                 this.appendToOutput(`[TOOL] ${content}`);
 
-                if (webview) {
-                    webview.postMessage({
-                        command: 'streamEvent',
-                        type: 'tool_execution',
-                        content: content,
-                        metadata: metadata
-                    });
-                }
+                // Don't send execution details to webview - keep it internal
                 break;
 
             case 'tool_result':
@@ -213,21 +211,14 @@ export class AgentStreamingClient {
                     }
                 }
 
-                if (webview) {
-                    webview.postMessage({
-                        command: 'streamEvent',
-                        type: 'tool_result',
-                        content: content,
-                        metadata: metadata
-                    });
-                }
+                // Don't send tool results to webview - keep them internal
                 break;
 
             case 'assistant_response':
                 this.updateStatus(`🤖 Responding...`);
                 this.appendToOutput(`[ASSISTANT] ${content}`);
                 
-                if (webview) {
+                if (webview && userVisibleEvents.includes(type)) {
                     webview.postMessage({
                         command: 'streamEvent',
                         type: 'assistant_response',
@@ -240,7 +231,7 @@ export class AgentStreamingClient {
                 this.updateStatus(`✅ Complete`);
                 this.appendToOutput(`[COMPLETE] Response finished`);
                 
-                if (webview) {
+                if (webview && userVisibleEvents.includes(type)) {
                     webview.postMessage({
                         command: 'streamComplete',
                         content: content
@@ -258,7 +249,7 @@ export class AgentStreamingClient {
                 this.appendToOutput(`[ERROR] ${content}`);
                 vscode.window.showErrorMessage(content);
                 
-                if (webview) {
+                if (webview && userVisibleEvents.includes(type)) {
                     webview.postMessage({
                         command: 'streamError',
                         error: content
@@ -269,7 +260,8 @@ export class AgentStreamingClient {
             default:
                 this.appendToOutput(`[${type.toUpperCase()}] ${content}`);
                 
-                if (webview) {
+                // Only send unknown events to webview if they might be important
+                if (webview && !['tool_execution', 'tool_result'].includes(type)) {
                     webview.postMessage({
                         command: 'streamEvent',
                         type: type,
