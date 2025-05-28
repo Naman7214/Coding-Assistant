@@ -22,6 +22,7 @@ class SearchReplaceService:
         replacement: str,
         explanation: str,
         options: Optional[Dict[str, Any]] = None,
+        workspace_path: str = None,
     ) -> Dict[str, Any]:
         """
         Search for text and replace it in files.
@@ -38,7 +39,7 @@ class SearchReplaceService:
 
         if options is None:
             options = {
-                "search_paths": [os.path.abspath("codebase")],
+                "search_paths": [workspace_path],
             }
 
         case_sensitive = options.get("case_sensitive", True)
@@ -49,7 +50,7 @@ class SearchReplaceService:
         if search_paths:
             search_paths = [os.path.abspath(path) for path in search_paths]
         else:
-            search_paths = [os.path.abspath("codebase")]
+            search_paths = [workspace_path]
 
         safe_search_paths = []
         for path in search_paths:

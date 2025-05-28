@@ -46,7 +46,7 @@ console = Console(theme=custom_theme)
 
 
 class AnthropicAgent:
-    MAX_TOOL_CALL_DEPTH = 30  # Prevent infinite recursion
+    MAX_TOOL_CALL_DEPTH = 50  # Prevent infinite recursion
     MAX_RETRIES = 3
 
     def __init__(self, model_name="claude-3-7-sonnet-20250219"):
@@ -298,7 +298,7 @@ class AnthropicAgent:
             tool_input = tool_call.get("input", {})
 
             # Check if total tool calls will exceed 25
-            if self.agent_memory.total_tool_calls >= 25:
+            if self.agent_memory.total_tool_calls >= 50:
                 console.print(
                     Panel(
                         f"[bold yellow]The agent has already made 25 tool calls in this session.[/bold yellow]\nContinuing might lead to longer processing times.",

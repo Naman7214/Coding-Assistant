@@ -12,6 +12,7 @@ interface StreamEvent {
 interface QueryRequest {
     query: string;
     target_file_path?: string;
+    workspace_path: string;
 }
 
 interface ThinkingState {

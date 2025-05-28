@@ -22,7 +22,7 @@ class SearchReplaceController:
             options = request.options.model_dump()
 
         response = await self.search_replace_usecase.execute(
-            request.query, request.replacement, request.explanation, options
+            request.query, request.replacement, request.explanation, options, request.workspace_path
         )
 
         status_code = status.HTTP_200_OK

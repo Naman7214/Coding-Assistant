@@ -26,6 +26,7 @@ async def search_and_replace(
     query: str,
     replacement: str,
     explanation: str,
+    workspace_path: str,
     options: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -34,6 +35,8 @@ async def search_and_replace(
     Args:
         query: The text or regex pattern to search for
         replacement: The text to replace the matched content with
+        workspace_path: The path to the workspace
+        explanation: Explanation for why the search and replace is needed
         options: Dictionary containing search options
 
     Returns:
@@ -46,6 +49,7 @@ async def search_and_replace(
         "query": query,
         "replacement": replacement,
         "explanation": explanation,
+        "workspace_path": workspace_path,
     }
     if options:
         payload["options"] = options

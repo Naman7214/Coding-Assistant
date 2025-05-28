@@ -14,11 +14,11 @@ class FileSearchService:
         self.error_repo = error_repo
 
     async def search_files(
-        self, pattern: str, explanation: str
+        self, pattern: str, workspace_path: str, explanation: str
     ) -> List[Dict[str, Any]]:
         try:
 
-            current_dir = os.path.abspath("codebase")
+            current_dir = workspace_path
 
             # Directories to exclude from search
             exclude_dirs = [

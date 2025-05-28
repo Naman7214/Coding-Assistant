@@ -25,7 +25,7 @@ class FilesDeleteRequest(BaseModel):
 
 class DirectoryListRequest(BaseModel):
     dir_path: str = Field(
-        default=os.path.abspath("codebase"),
+        ...,
         description="The path to the directory to list, aults to current directory if not provided",
     )
     recursive: bool = Field(
@@ -39,6 +39,9 @@ class DirectoryListRequest(BaseModel):
 class FileSearchRequest(BaseModel):
     pattern: str = Field(
         ..., description="The pattern to search for in file names"
+    )
+    workspace_path: str = Field(
+        ..., description="The path to the workspace"
     )
     explanation: str = Field(
         ..., description="The explanation for the file search request"

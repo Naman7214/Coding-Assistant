@@ -47,7 +47,7 @@ console = Console(theme=custom_theme)
 
 
 class AnthropicStreamingAgent:
-    MAX_TOOL_CALL_DEPTH = 30  # Prevent infinite recursion
+    MAX_TOOL_CALL_DEPTH = 50  # Prevent infinite recursion
     MAX_RETRIES = 3
 
     def __init__(self, model_name="claude-3-7-sonnet-20250219"):
@@ -56,6 +56,7 @@ class AnthropicStreamingAgent:
         self.session = None
         self.client_context = None
         self.anthropic_tools = []
+        self.workspace_path = None
         self.timeout = httpx.Timeout(
             connect=60.0,  # Time to establish a connection
             read=300.0,  # Time to read the response - increased from 120 to 300 seconds
@@ -213,20 +214,21 @@ class AnthropicStreamingAgent:
                                                 current_content_blocks[index]["text"] += delta.get("text", "")
                                             elif delta.get("type") == "input_json_delta":
                                                 # Handle tool_use input deltas
-                                                console.print(f"[info]DEBUG: Received input_json_delta: {delta.get('partial_json', '')}[/info]")
+                                                console.print(f"[info]DEBUG: Received input_json_delta: {delta.get('partial_json', '')}[/info]", markup=False)
                                                 
                                                 # Always accumulate in partial_json for final parsing
                                                 if "partial_json" not in current_content_blocks[index]:
                                                     current_content_blocks[index]["partial_json"] = ""
                                                 current_content_blocks[index]["partial_json"] += delta.get("partial_json", "")
-                                                console.print(f"[info]DEBUG: Accumulated partial JSON: {current_content_blocks[index]['partial_json']}[/info]")
+                                                console.print(f"[info]DEBUG: Accumulated partial JSON: {current_content_blocks[index]['partial_json']}[/info]", markup=False)
                                                 
                                                 # Try to parse if it looks like complete JSON (optional, for real-time updates)
                                                 try:
                                                     if current_content_blocks[index]["partial_json"].strip().endswith("}"):
                                                         test_parse = json.loads(current_content_blocks[index]["partial_json"])
                                                         current_content_blocks[index]["input"] = test_parse
-                                                        console.print(f"[info]DEBUG: Successfully parsed intermediate input: {json.dumps(current_content_blocks[index]['input'], indent=2)}[/info]")
+                                                        console.print(f"[info]DEBUG: Successfully parsed intermediate input:[/info]")
+                                                        console.print(json.dumps(current_content_blocks[index]['input'], indent=2), markup=False)
                                                 except json.JSONDecodeError:
                                                     # Not complete yet, continue accumulating
                                                     pass
@@ -253,7 +255,7 @@ class AnthropicStreamingAgent:
                                                 console.print(f"[info]DEBUG: Finalizing tool_use block: {content_block.get('name', 'unknown')}[/info]")
                                                 # If we have partial_json, try to parse it as the final input
                                                 if "partial_json" in content_block:
-                                                    console.print(f"[info]DEBUG: Parsing final partial_json: {content_block['partial_json']}[/info]")
+                                                    console.print(f"[info]DEBUG: Parsing final partial_json: {content_block['partial_json']}[/info]", markup=False)
                                                     try:
                                                         # Strip whitespace and validate JSON
                                                         json_str = content_block["partial_json"].strip()
@@ -261,19 +263,21 @@ class AnthropicStreamingAgent:
                                                             parsed_input = json.loads(json_str)
                                                             content_block["input"] = parsed_input
                                                             del content_block["partial_json"]  # Clean up
-                                                            console.print(f"[info]DEBUG: Successfully parsed final input: {json.dumps(content_block['input'], indent=2)}[/info]")
+                                                            console.print(f"[info]DEBUG: Successfully parsed final input:[/info]")
+                                                            console.print(json.dumps(content_block['input'], indent=2), markup=False)
                                                         else:
                                                             console.print(f"[warning]Empty JSON string for tool {content_block.get('name', 'unknown')}[/warning]")
                                                             content_block["input"] = {}
                                                             del content_block["partial_json"]
                                                     except json.JSONDecodeError as e:
                                                         console.print(f"[error]Failed to parse tool input JSON for tool {content_block.get('name', 'unknown')}: {str(e)}[/error]")
-                                                        console.print(f"[error]Partial JSON was: {content_block['partial_json']}[/error]")
+                                                        console.print(f"[error]Partial JSON was: {content_block['partial_json']}[/error]", markup=False)
                                                         # Set empty input and clean up
                                                         content_block["input"] = {}
                                                         del content_block["partial_json"]
                                                 else:
-                                                    console.print(f"[info]DEBUG: Tool already has input: {json.dumps(content_block.get('input', {}), indent=2)}[/info]")
+                                                    console.print(f"[info]DEBUG: Tool already has input:[/info]")
+                                                    console.print(json.dumps(content_block.get('input', {}), indent=2), markup=False)
                                             
                                             complete_message["content"].append(content_block)
                                         yield {"type": "content_block_stop", "data": data}
@@ -524,11 +528,13 @@ class AnthropicStreamingAgent:
             console.print(f"[info]DEBUG: Processing tool call:[/info]")
             console.print(f"[info]  - Tool ID: {tool_use_id}[/info]")
             console.print(f"[info]  - Tool Name: {tool_name}[/info]")
-            console.print(f"[info]  - Tool Input: {json.dumps(tool_input, indent=2)}[/info]")
-            console.print(f"[info]  - Raw Tool Call: {json.dumps(tool_call, indent=2)}[/info]")
+            console.print("[info]  - Tool Input:[/info]")
+            console.print(json.dumps(tool_input, indent=2), markup=False)
+            console.print("[info]  - Raw Tool Call:[/info]")
+            console.print(json.dumps(tool_call, indent=2), markup=False)
 
             # Check if total tool calls will exceed 25
-            if self.agent_memory.total_tool_calls >= 25:
+            if self.agent_memory.total_tool_calls >= 50:
                 console.print(
                     Panel(
                         f"[bold yellow]The agent has already made 25 tool calls in this session.[/bold yellow]\nContinuing might lead to longer processing times.",
@@ -596,6 +602,25 @@ class AnthropicStreamingAgent:
                     # Check if session exists before calling
                     if not self.session:
                         raise Exception("Session is not initialized")
+                    
+                    tools_requiring_workspace_path = {
+                        "run_terminal_command", 
+                        "search_and_replace", 
+                        "search_files"
+                    }
+                    
+                    if tool_name in tools_requiring_workspace_path and self.workspace_path:
+                        # Only add workspace_path if it's not already in the tool_input
+                        if "workspace_path" not in tool_input:
+                            tool_input["workspace_path"] = self.workspace_path
+                            console.print(
+                                f"[info]Injected workspace_path for {tool_name}: {self.workspace_path}[/info]"
+                            )
+                            
+                    if tool_name == "list_directory" and self.workspace_path:
+                        if tool_input.get("dir_path") == ".":
+                            tool_input["dir_path"] = self.workspace_path
+                            
                     tool_result = await self.session.call_tool(
                         tool_name, tool_input
                     )
@@ -678,9 +703,16 @@ class AnthropicStreamingAgent:
         # Make next call to Anthropic with tool results (recursive call)
         return await self.process_streaming_tool_calls(depth + 1)
 
-    async def initialize_session(self, server_url, transport_type):
+    async def initialize_session(self, server_url, transport_type, workspace_path):
         """Initialize the MCP session and connect to the server"""
         try:
+            if workspace_path:
+                self.workspace_path = workspace_path
+                console.print(f"[info]Using workspace path: {workspace_path}[/info]")
+            else:
+                self.workspace_path = os.path.abspath("codebase")
+                console.print(f"[info]Using default workspace path: {self.workspace_path}[/info]")
+                
             # Connect to MCP server
             with console.status(
                 f"[info]Connecting to MCP server via {transport_type}...[/info]"
@@ -759,6 +791,7 @@ class AnthropicStreamingAgent:
         self,
         server_url: str = "http://0.0.0.0:8001/sse",
         transport_type: str = "sse",
+        workspace_path: str = None,
     ):
         """Run an interactive session with the LLM using MCP tools with agent memory and streaming"""
         # Show a welcome banner
@@ -779,7 +812,7 @@ class AnthropicStreamingAgent:
 
         try:
             # Initialize the session
-            if not await self.initialize_session(server_url, transport_type):
+            if not await self.initialize_session(server_url, transport_type, workspace_path):
                 return
 
             # Interactive loop

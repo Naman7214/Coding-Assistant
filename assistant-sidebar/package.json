@@ -169,7 +169,8 @@
     "build": "npm run compile",
     "dev": "npm run watch",
     "clean": "rimraf out",
-    "package-enhanced": "vsce package --out enhanced-assistant-sidebar.vsix"
+    "package-enhanced": "vsce package --out enhanced-assistant-sidebar.vsix",
+    "build-webview": "cd webview-ui && npm run build"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

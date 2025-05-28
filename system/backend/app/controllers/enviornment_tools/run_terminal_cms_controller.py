@@ -20,7 +20,7 @@ class RunTerminalCmdController:
 
     async def run_terminal_cmd(self, request: RunTerminalCommandRequest):
         result = await self.run_terminal_cmd_usecase.run_terminal_command(
-            request.cmd, request.is_background, request.explanation
+            request.cmd, request.is_background, request.explanation, request.workspace_path
         )
         return JSONResponse(
             content={
