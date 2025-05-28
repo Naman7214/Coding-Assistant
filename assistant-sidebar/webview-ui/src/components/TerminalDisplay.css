@@ -1,0 +1,129 @@
+.terminal-display {
+  background-color: var(--vscode-terminal-background, #1e1e1e);
+  color: var(--vscode-terminal-foreground, #cccccc);
+  font-family: 'Consolas', 'Courier New', monospace;
+  border-radius: 6px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  margin: 10px 0;
+  width: 100%;
+}
+
+.terminal-display.error {
+  border: 1px solid var(--vscode-errorForeground, #f48771);
+}
+
+.terminal-header {
+  background-color: var(--vscode-titleBar-activeBackground, #3c3c3c);
+  padding: 5px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  border-bottom: 1px solid var(--vscode-panel-border, #555);
+}
+
+.terminal-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-button {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.terminal-button.red {
+  background-color: #ff5f56;
+}
+
+.terminal-button.yellow {
+  background-color: #ffbd2e;
+}
+
+.terminal-button.green {
+  background-color: #27c93f;
+}
+
+.terminal-title {
+  font-size: 12px;
+  color: var(--vscode-titleBar-activeForeground, #cccccc);
+}
+
+.terminal-content {
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.terminal-command-line {
+  display: flex;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.terminal-prompt {
+  color: var(--vscode-terminal-ansiGreen, #6A9955);
+  margin-right: 8px;
+  font-weight: bold;
+}
+
+.terminal-command {
+  color: var(--vscode-terminal-ansiBrightCyan, #4EC9B0);
+  word-break: break-all;
+}
+
+.terminal-cursor {
+  display: inline-block;
+  color: var(--vscode-terminal-foreground, #cccccc);
+  background-color: var(--vscode-terminal-foreground, #cccccc);
+  width: 6px;
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+  opacity: 0.7;
+}
+
+.terminal-output {
+  color: var(--vscode-terminal-foreground, #cccccc);
+}
+
+.terminal-line {
+  min-height: 18px;
+}
+
+.terminal-loader {
+  display: flex;
+  justify-content: flex-start;
+  gap: 2px;
+}
+
+.loader-dot {
+  animation: loader 1.5s infinite;
+  opacity: 0.5;
+}
+
+.loader-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loader-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes loader {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+} 

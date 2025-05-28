@@ -130,7 +130,7 @@
       "properties": {
         "enhancedAssistantSidebar.streamingApiUrl": {
           "type": "string",
-          "default": "http://192.168.17.182:5001",
+          "default": "http://0.0.0.0:5001",
           "description": "URL for the enhanced TRUE streaming API server"
         },
         "enhancedAssistantSidebar.enableDetailedLogging": {

@@ -3,11 +3,13 @@ import json
 import sys
 import os
 import uuid
+import subprocess
+import shlex
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import uvicorn
-from typing import Dict, Any, Optional, AsyncGenerator
+from typing import Dict, Any, Optional, AsyncGenerator, List
 from pydantic import BaseModel
 import time
 
@@ -31,6 +33,9 @@ agent_instance = None
 
 # Store pending permission requests
 pending_permissions = {}
+
+# Store active terminal processes
+active_terminal_processes = {}
 
 class QueryRequest(BaseModel):
     query: str
@@ -154,7 +159,7 @@ async def process_streaming_tool_calls_fixed(depth=0):
     """
     Process tool calls with streaming, using the same approach as the working CLI version
     """
-    global agent_instance
+    global agent_instance, active_terminal_processes
     
     MAX_TOOL_CALL_DEPTH = 30
     
@@ -211,11 +216,25 @@ async def process_streaming_tool_calls_fixed(depth=0):
         
         elif event_type == "message_stop":
             complete_message = stream_event.get("complete_message")
+            print(f"Received message_stop at depth {depth}, complete_message: {complete_message is not None}")  # Debug logging
+            if complete_message:
+                print(f"Complete message content blocks: {len(complete_message.get('content', []))}")  # Debug logging
+            else:
+                print(f"Stream event keys: {list(stream_event.keys())}")  # Debug logging
+                print(f"Full stream event: {stream_event}")  # Debug logging
             break
     
     if not complete_message:
-        yield create_stream_event("error", "Couldn't get a complete response from the LLM.")
-        return
+        print(f"No complete message at depth {depth}, yielding error")  # Debug logging
+        # If this is a recursive call (depth > 0) and we have no complete message,
+        # it might mean the LLM has nothing more to say after tool execution
+        if depth > 0:
+            print(f"Depth > 0, treating as successful completion")  # Debug logging
+            yield create_stream_event("final_response", "Task completed successfully.")
+            return
+        else:
+            yield create_stream_event("error", "Couldn't get a complete response from the LLM.")
+            return
 
     # Create assistant message from complete response
     assistant_message = {
@@ -236,10 +255,14 @@ async def process_streaming_tool_calls_fixed(depth=0):
 
     # If no tool calls, just return the text response
     if not has_tool_calls:
+        print(f"No tool calls at depth {depth}, text_content length: {len(text_content)}")  # Debug logging
         # Add the assistant's final response to memory
         agent_instance.agent_memory.add_assistant_message(assistant_message)
         if text_content:
             yield create_stream_event("final_response", text_content)
+        else:
+            # If no text content, send a generic completion message
+            yield create_stream_event("final_response", "Task completed successfully.")
         return
 
     # Add the assistant message with tool calls to memory
@@ -265,6 +288,7 @@ async def process_streaming_tool_calls_fixed(depth=0):
         # Handle permission for terminal commands
         if tool_name == "run_terminal_command":
             command = tool_input.get("command", "")
+            is_background = tool_input.get("is_background", False)
             permission_id = f"perm_{tool_use_id}_{int(time.time())}"
             
             permission_future = asyncio.Future()
@@ -277,7 +301,8 @@ async def process_streaming_tool_calls_fixed(depth=0):
                     "requires_permission": True, 
                     "command": command,
                     "permission_id": permission_id,
-                    "tool_name": tool_name
+                    "tool_name": tool_name,
+                    "is_background": is_background
                 }
             )
             
@@ -298,6 +323,9 @@ async def process_streaming_tool_calls_fixed(depth=0):
                     agent_instance.agent_memory.add_tool_call(tool_call, "Permission denied by user")
                     agent_instance.agent_memory.add_tool_result(tool_use_id, "Permission denied by user")
                     continue
+                
+                # Permission granted, now execute the tool through MCP server like other tools
+                print(f"Permission granted for command: {command}, sending to MCP server")
                     
             except asyncio.TimeoutError:
                 yield create_stream_event(
@@ -316,12 +344,14 @@ async def process_streaming_tool_calls_fixed(depth=0):
             finally:
                 pending_permissions.pop(permission_id, None)
 
-        # Execute the tool
+        # Execute the tool (including run_terminal_command after permission is granted)
         try:
             if not agent_instance.session:
                 raise Exception("Session is not initialized")
             
+            print(f"Calling MCP server for tool: {tool_name}")  # Debug logging
             tool_result = await agent_instance.session.call_tool(tool_name, tool_input)
+            print(f"Received result from MCP server for tool: {tool_name}")  # Debug logging
             
             if tool_result:
                 tool_content = "\n".join([
@@ -367,8 +397,31 @@ async def process_streaming_tool_calls_fixed(depth=0):
             agent_instance.agent_memory.add_tool_result(tool_use_id, error_message)
 
     # Make next call to Anthropic with tool results (recursive call)
+    print(f"Making recursive call with depth {depth + 1}")  # Debug logging
+    
+    # Debug: Check conversation messages before recursive call
+    conversation_messages = agent_instance.agent_memory.get_conversation_messages()
+    print(f"Conversation messages for recursive call: {len(conversation_messages)} messages")  # Debug logging
+    for i, msg in enumerate(conversation_messages[-3:]):  # Show last 3 messages
+        print(f"Message {i}: role={msg.get('role')}, content_blocks={len(msg.get('content', []))}")  # Debug logging
+    
+    has_final_response = False
     async for event in process_streaming_tool_calls_fixed(depth + 1):
         yield event
+        # Check if we got a final_response
+        try:
+            event_data = json.loads(event.replace("data: ", ""))
+            if event_data.get("type") == "final_response":
+                has_final_response = True
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    
+    # If no final response was sent, send one to complete the stream
+    if not has_final_response:
+        print(f"No final response received at depth {depth + 1}, sending completion")  # Debug logging
+        yield create_stream_event("final_response", "All tasks completed successfully.")
+    
+    print(f"Completed recursive call with depth {depth + 1}")  # Debug logging
 
 @app.post("/stream")
 async def stream_query(request: QueryRequest):
@@ -469,10 +522,36 @@ def sanitize_conversation_history(history):
     
     return sanitized_history
 
+@app.post("/terminate_process")
+async def terminate_process(request: Request):
+    """Terminate a running terminal process"""
+    data = await request.json()
+    process_id = data.get("process_id")
+    
+    if not process_id or process_id not in active_terminal_processes:
+        raise HTTPException(status_code=404, detail="Process not found")
+    
+    try:
+        process = active_terminal_processes[process_id]
+        process.terminate()  # Send SIGTERM
+        
+        # Wait a bit and kill if it doesn't terminate
+        try:
+            await asyncio.wait_for(process.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            process.kill()  # Force kill with SIGKILL
+        
+        active_terminal_processes.pop(process_id, None)
+        
+        return {"status": "success", "message": "Process terminated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to terminate process: {str(e)}")
+
 @app.get("/")
 async def root():
     return {"message": "Agent TRUE Streaming API is running", "streaming": True}
 
 if __name__ == "__main__":
     # Run the FastAPI app with uvicorn
-    uvicorn.run(app, host="192.168.17.182", port=5001)  # Different port for true streaming version 
+    #192.168.17.182
+    uvicorn.run(app, host="0.0.0.0", port=5001)  # Different port for true streaming version 

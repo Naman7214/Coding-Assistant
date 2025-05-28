@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MarkdownRenderer from './components/MarkdownRenderer';
+import TerminalDisplay from './components/TerminalDisplay';
 import './AppEnhancedStreaming.css';
 
 // Declare vscode API
@@ -23,10 +24,19 @@ interface ChatMessage {
   isStreaming?: boolean;
 }
 
+interface TerminalState {
+  command?: string;
+  output: string;
+  isExecuting: boolean;
+  hasError: boolean;
+  processId?: string;
+}
+
 interface StreamingState {
   currentThinking: string;
   currentTools: ToolUsage[];
   currentResponse: string;
+  currentTerminal: TerminalState;
   isThinking: boolean;
   isStreaming: boolean;
 }
@@ -44,6 +54,11 @@ const AppEnhancedStreaming: React.FC = () => {
     currentThinking: '',
     currentTools: [],
     currentResponse: '',
+    currentTerminal: {
+      output: '',
+      isExecuting: false,
+      hasError: false
+    },
     isThinking: false,
     isStreaming: false
   });
@@ -104,6 +119,9 @@ const AppEnhancedStreaming: React.FC = () => {
         case 'enhancedStreamingHealthStatus':
           handleHealthStatus(message);
           break;
+        case 'terminalOutput':
+          handleTerminalOutput(message);
+          break;
       }
     };
 
@@ -127,6 +145,11 @@ const AppEnhancedStreaming: React.FC = () => {
       currentThinking: '',
       currentTools: [],
       currentResponse: '',
+      currentTerminal: {
+        output: '',
+        isExecuting: false,
+        hasError: false
+      },
       isThinking: false,
       isStreaming: true
     });
@@ -183,6 +206,14 @@ const AppEnhancedStreaming: React.FC = () => {
           : tool
       )
     }));
+    
+    // Clear permission request if this was a terminal command that completed
+    if (message.toolName === 'run_terminal_command' && permissionRequest) {
+      setTimeout(() => {
+        setPermissionRequest(null);
+      }, 500); // 0.5 second delay to show completion (reduced from 1 second)
+    }
+    
     updateEventStats();
   };
 
@@ -204,6 +235,32 @@ const AppEnhancedStreaming: React.FC = () => {
       message: message.content,
       command: message.commandToExecute
     });
+
+    // Update terminal state with command
+    setStreamingState(prev => ({
+      ...prev,
+      currentTerminal: {
+        ...prev.currentTerminal,
+        command: message.commandToExecute,
+        output: '',
+        isExecuting: false,
+        hasError: false
+      }
+    }));
+  };
+
+  const handleTerminalOutput = (message: any) => {
+    setStreamingState(prev => ({
+      ...prev,
+      currentTerminal: {
+        ...prev.currentTerminal,
+        output: message.fullOutput || prev.currentTerminal.output + (message.content || ''),
+        isExecuting: !message.isComplete,
+        hasError: message.isError || false,
+        processId: message.metadata?.process_id || prev.currentTerminal.processId
+      }
+    }));
+    updateEventStats();
   };
 
   const handleFinalResponse = (message: any) => {
@@ -235,11 +292,18 @@ const AppEnhancedStreaming: React.FC = () => {
         currentThinking: '',
         currentTools: [],
         currentResponse: '',
+        currentTerminal: {
+          output: '',
+          isExecuting: false,
+          hasError: false
+        },
         isThinking: false,
         isStreaming: false
       };
     });
     
+    // Clear any remaining permission request when stream completes
+    setPermissionRequest(null);
     setStatusMessage('Ready');
   };
 
@@ -258,10 +322,17 @@ const AppEnhancedStreaming: React.FC = () => {
       currentThinking: '',
       currentTools: [],
       currentResponse: '',
+      currentTerminal: {
+        output: '',
+        isExecuting: false,
+        hasError: false
+      },
       isThinking: false,
       isStreaming: false
     });
     
+    // Clear permission request on error
+    setPermissionRequest(null);
     setStatusMessage('Error occurred');
   };
 
@@ -271,6 +342,11 @@ const AppEnhancedStreaming: React.FC = () => {
       currentThinking: '',
       currentTools: [],
       currentResponse: '',
+      currentTerminal: {
+        output: '',
+        isExecuting: false,
+        hasError: false
+      },
       isThinking: false,
       isStreaming: false
     });
@@ -321,13 +397,32 @@ const AppEnhancedStreaming: React.FC = () => {
   const handlePermissionResponse = (granted: boolean) => {
     if (!permissionRequest) return;
     
+    // Update terminal state
+    setStreamingState(prev => ({
+      ...prev,
+      currentTerminal: {
+        ...prev.currentTerminal,
+        isExecuting: granted,
+        output: granted ? 'Executing command...' : 'Permission denied by user',
+        hasError: !granted
+      }
+    }));
+    
     vscode.postMessage({
       command: 'permissionResponse',
       permissionId: permissionRequest.id,
       granted: granted
     });
     
-    setPermissionRequest(null);
+    // Clear the permission request after a short delay if granted
+    // This allows users to see the command being executed briefly
+    if (granted) {
+      setTimeout(() => {
+        setPermissionRequest(null);
+      }, 1000); // 1 second delay (reduced from 1.5 seconds)
+    } else {
+      setPermissionRequest(null);
+    }
   };
 
   const clearState = () => {
@@ -362,6 +457,26 @@ const AppEnhancedStreaming: React.FC = () => {
       case 'error': return '❌';
       default: return '🔧';
     }
+  };
+
+  const terminateProcess = (processId: string) => {
+    if (!processId) return;
+    
+    vscode.postMessage({
+      command: 'terminateProcess',
+      processId: processId
+    });
+    
+    // Update UI to show termination in progress
+    setStreamingState(prev => ({
+      ...prev,
+      currentTerminal: {
+        ...prev.currentTerminal,
+        output: prev.currentTerminal.output + "\n[Terminating process...]\n",
+        isExecuting: false,
+        hasError: true
+      }
+    }));
   };
 
   return (
@@ -557,30 +672,94 @@ const AppEnhancedStreaming: React.FC = () => {
               <h3>⚠️ Permission Required</h3>
             </div>
             <div className="permission-content">
-              <p><strong>The agent wants to execute:</strong></p>
-              <code className="permission-command">
-                {permissionRequest.command}
-              </code>
+              <p><strong>The agent wants to execute this command:</strong></p>
+              
+              {/* Terminal Display for command */}
+              <TerminalDisplay
+                command={permissionRequest.command}
+                output={streamingState.currentTerminal.output}
+                isExecuting={streamingState.currentTerminal.isExecuting}
+                isError={streamingState.currentTerminal.hasError}
+                height="auto"
+                maxHeight="200px"
+              />
+              
               <p className="permission-message">{permissionRequest.message}</p>
               <p style={{ fontSize: '13px', color: 'var(--vscode-descriptionForeground)' }}>
                 <strong>Note:</strong> This command will be executed on your system. Please review it carefully.
               </p>
             </div>
             <div className="permission-actions">
-              <button 
-                className="permission-button deny-button"
-                onClick={() => handlePermissionResponse(false)}
-              >
-                Deny
-              </button>
-              <button 
-                className="permission-button allow-button"
-                onClick={() => handlePermissionResponse(true)}
-              >
-                Allow
-              </button>
+              {!streamingState.currentTerminal.isExecuting ? (
+                <>
+                  <button 
+                    className="permission-button deny-button"
+                    onClick={() => handlePermissionResponse(false)}
+                  >
+                    Deny
+                  </button>
+                  <button 
+                    className="permission-button allow-button"
+                    onClick={() => handlePermissionResponse(true)}
+                  >
+                    Allow
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button 
+                    className="permission-button close-button"
+                    onClick={() => setPermissionRequest(null)}
+                    title="Close this dialog to see the agent's response while command runs"
+                  >
+                    Minimize
+                  </button>
+                  
+                  {streamingState.currentTerminal.processId && (
+                    <button 
+                      className="permission-button deny-button"
+                      onClick={() => terminateProcess(streamingState.currentTerminal.processId!)}
+                    >
+                      Terminate Process
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Also show terminal output in the tools section */}
+      {streamingState.isStreaming && streamingState.currentTerminal.command && (
+        <div className="terminal-section">
+          <details open={streamingState.currentTerminal.isExecuting}>
+            <summary>
+              💻 Terminal Command 
+              {streamingState.currentTerminal.isExecuting && (
+                <>
+                  <span className="terminal-spinner">⚙️</span>
+                  {streamingState.currentTerminal.processId && (
+                    <button 
+                      className="terminate-button"
+                      onClick={() => terminateProcess(streamingState.currentTerminal.processId!)}
+                      title="Terminate this process"
+                    >
+                      ⚠️ Terminate
+                    </button>
+                  )}
+                </>
+              )}
+            </summary>
+            <TerminalDisplay
+              command={streamingState.currentTerminal.command}
+              output={streamingState.currentTerminal.output}
+              isExecuting={streamingState.currentTerminal.isExecuting}
+              isError={streamingState.currentTerminal.hasError}
+              height="auto"
+              maxHeight="250px"
+            />
+          </details>
         </div>
       )}
     </div>

@@ -255,35 +255,23 @@ class AnthropicStreamingAgent:
                                                 if "partial_json" in content_block:
                                                     console.print(f"[info]DEBUG: Parsing final partial_json: {content_block['partial_json']}[/info]")
                                                     try:
-                                                        parsed_input = json.loads(content_block["partial_json"])
-                                                        content_block["input"] = parsed_input
-                                                        del content_block["partial_json"]  # Clean up
-                                                        console.print(f"[info]DEBUG: Successfully parsed final input: {json.dumps(content_block['input'], indent=2)}[/info]")
-                                                    except json.JSONDecodeError:
-                                                        console.print(f"[warning]Failed to parse tool input JSON for tool {content_block.get('name', 'unknown')}[/warning]")
-                                                        console.print(f"[warning]Partial JSON was: {content_block['partial_json']}[/warning]")
-                                                        # Try to handle incomplete JSON by providing default values
-                                                        if content_block.get('name') == 'edit_file' and 'target_file_path' in content_block['partial_json']:
-                                                            console.print(f"[warning]Attempting to recover from incomplete edit_file JSON[/warning]")
-                                                            # Generate a new unique ID for the recovered tool call
-                                                            new_tool_id = f"recovered_tool_{uuid.uuid4().hex[:8]}"
-                                                            console.print(f"[info]Generating new unique tool ID for recovery: {new_tool_id}[/info]")
-                                                            
-                                                            # Save the original ID
-                                                            original_id = content_block.get("id")
-                                                            
-                                                            # Update the ID to be unique
-                                                            content_block["id"] = new_tool_id
-                                                            
-                                                            content_block["input"] = {
-                                                                "target_file_path": content_block['partial_json'].split('"target_file_path": "')[1].split('"')[0] if '"target_file_path": "' in content_block['partial_json'] else "",
-                                                                "instructions": "Create a file with the requested content",
-                                                                "code_edit": "# File content will be provided by agent"
-                                                            }
-                                                            
-                                                            console.print(f"[info]Recovered tool call with ID {original_id} -> {new_tool_id}[/info]")
+                                                        # Strip whitespace and validate JSON
+                                                        json_str = content_block["partial_json"].strip()
+                                                        if json_str:
+                                                            parsed_input = json.loads(json_str)
+                                                            content_block["input"] = parsed_input
+                                                            del content_block["partial_json"]  # Clean up
+                                                            console.print(f"[info]DEBUG: Successfully parsed final input: {json.dumps(content_block['input'], indent=2)}[/info]")
                                                         else:
+                                                            console.print(f"[warning]Empty JSON string for tool {content_block.get('name', 'unknown')}[/warning]")
                                                             content_block["input"] = {}
+                                                            del content_block["partial_json"]
+                                                    except json.JSONDecodeError as e:
+                                                        console.print(f"[error]Failed to parse tool input JSON for tool {content_block.get('name', 'unknown')}: {str(e)}[/error]")
+                                                        console.print(f"[error]Partial JSON was: {content_block['partial_json']}[/error]")
+                                                        # Set empty input and clean up
+                                                        content_block["input"] = {}
+                                                        del content_block["partial_json"]
                                                 else:
                                                     console.print(f"[info]DEBUG: Tool already has input: {json.dumps(content_block.get('input', {}), indent=2)}[/info]")
                                             
@@ -296,45 +284,9 @@ class AnthropicStreamingAgent:
                                         yield {"type": "message_delta", "data": data}
                                     
                                     elif event_type == "message_stop":
-                                        # Check for incomplete tool calls before finishing
-                                        for index, content_block in current_content_blocks.items():
-                                            if content_block.get("type") == "tool_use" and "partial_json" in content_block:
-                                                console.print(f"[warning]WARNING: Tool call for {content_block.get('name', 'unknown')} has incomplete JSON![/warning]")
-                                                console.print(f"[warning]Incomplete JSON: {content_block['partial_json']}[/warning]")
-                                                
-                                                # Try to salvage the tool call
-                                                if content_block.get('name') == 'edit_file':
-                                                    console.print(f"[warning]Attempting to salvage incomplete edit_file tool call[/warning]")
-                                                    try:
-                                                        # Extract what we can from the partial JSON
-                                                        partial = content_block['partial_json']
-                                                        if '"target_file_path": "' in partial:
-                                                            file_path = partial.split('"target_file_path": "')[1].split('"')[0]
-                                                            # Generate a new unique ID for the salvaged tool call
-                                                            new_tool_id = f"salvaged_tool_{uuid.uuid4().hex[:8]}"
-                                                            console.print(f"[info]Generating new unique tool ID: {new_tool_id}[/info]")
-                                                            
-                                                            # Create a completely new content block with the new ID
-                                                            salvaged_block = {
-                                                                "type": "tool_use",
-                                                                "id": new_tool_id,
-                                                                "name": content_block.get('name'),
-                                                                "input": {
-                                                                    "target_file_path": file_path,
-                                                                    "instructions": "Create file as requested by agent",
-                                                                    "code_edit": "# Content will be provided"
-                                                                }
-                                                            }
-                                                            
-                                                            # Add the new block to content and remove the original incomplete one
-                                                            complete_message["content"] = [
-                                                                block for block in complete_message["content"] 
-                                                                if not (block.get("type") == "tool_use" and block.get("id") == content_block.get("id"))
-                                                            ]
-                                                            complete_message["content"].append(salvaged_block)
-                                                            console.print(f"[info]Salvaged tool call with file path: {file_path} and new ID: {new_tool_id}[/info]")
-                                                    except Exception as e:
-                                                        console.print(f"[error]Failed to salvage tool call: {e}[/error]")
+                                        # The JSON parsing and validation already happens in content_block_stop
+                                        # No need to check current_content_blocks here as it contains the original
+                                        # blocks with partial_json, while complete_message["content"] has the cleaned blocks
                                         
                                         # Calculate API call duration
                                         duration = time.time() - start_time

@@ -29,9 +29,19 @@ interface ToolState {
     endTime?: number;
 }
 
+interface TerminalState {
+    command?: string;
+    output: string;
+    isExecuting: boolean;
+    hasError: boolean;
+    startTime?: number;
+    endTime?: number;
+}
+
 interface StreamingState {
     thinking: ThinkingState;
     currentTool: ToolState | null;
+    terminal: TerminalState;
     response: string;
     isComplete: boolean;
     hasError: boolean;
@@ -48,13 +58,18 @@ export class EnhancedStreamingClient {
             content: ""
         },
         currentTool: null,
+        terminal: {
+            output: "",
+            isExecuting: false,
+            hasError: false
+        },
         response: "",
         isComplete: false,
         hasError: false
     };
 
     constructor(
-        baseUrl: string = "http://192.168.17.182:5001",
+        baseUrl: string = "http://0.0.0.0:5001", //192.168.17.182
         outputChannel: vscode.OutputChannel,
         statusBarItem: vscode.StatusBarItem
     ) {
@@ -71,6 +86,11 @@ export class EnhancedStreamingClient {
                 content: ""
             },
             currentTool: null,
+            terminal: {
+                output: "",
+                isExecuting: false,
+                hasError: false
+            },
             response: "",
             isComplete: false,
             hasError: false
@@ -241,6 +261,10 @@ export class EnhancedStreamingClient {
                 await this.handlePermissionRequestEvent(content, metadata, webview, timestamp);
                 break;
 
+            case 'terminal_output':
+                await this.handleTerminalOutputEvent(content, metadata, webview, timestamp);
+                break;
+
             case 'final_response':
                 await this.handleFinalResponseEvent(content, metadata, webview, timestamp);
                 break;
@@ -250,7 +274,7 @@ export class EnhancedStreamingClient {
                 break;
 
             default:
-                this.appendToOutput(`[${timestamp}] UNKNOWN EVENT: ${type} - ${content}`);
+                this.appendToOutput(`[${timestamp}] UNHANDLED EVENT TYPE: ${type}`);
                 break;
         }
 
@@ -394,6 +418,15 @@ export class EnhancedStreamingClient {
         const command = metadata?.command;
         const permissionId = metadata?.permission_id;
         
+        // Update terminal state with the command to be executed
+        this.currentState.terminal = {
+            command: command,
+            output: "",
+            isExecuting: false,
+            hasError: false,
+            startTime: Date.now()
+        };
+        
         this.updateStatus(`⚠️ Permission required`);
         this.appendToOutput(`[${timestamp}] PERMISSION REQUEST: ${command}`);
         this.appendToOutput(`[${timestamp}] PERMISSION ID: ${permissionId}`);
@@ -404,6 +437,42 @@ export class EnhancedStreamingClient {
                 content: content,
                 commandToExecute: command,
                 permissionId: permissionId,
+                metadata: metadata
+            });
+        }
+    }
+
+    private async handleTerminalOutputEvent(content: string, metadata: any, webview?: vscode.Webview, timestamp?: string): Promise<void> {
+        const isError = metadata?.error || false;
+        const isComplete = metadata?.complete || false;
+        
+        // Update terminal state
+        this.currentState.terminal.output += content;
+        this.currentState.terminal.isExecuting = !isComplete;
+        this.currentState.terminal.hasError = isError;
+        
+        if (isComplete) {
+            this.currentState.terminal.endTime = Date.now();
+            const duration = this.currentState.terminal.startTime ? 
+                this.currentState.terminal.endTime - this.currentState.terminal.startTime : 0;
+                
+            this.updateStatus(isError ? 
+                `❌ Terminal command failed (${duration}ms)` : 
+                `✅ Terminal command completed (${duration}ms)`);
+                
+            this.appendToOutput(`[${timestamp}] TERMINAL COMMAND COMPLETED: ${this.currentState.terminal.command} (${duration}ms)`);
+        } else {
+            this.updateStatus(`⚙️ Executing terminal command...`);
+            this.appendToOutput(`[${timestamp}] TERMINAL OUTPUT: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
+        }
+        
+        if (webview) {
+            webview.postMessage({
+                command: 'terminalOutput',
+                content: content,
+                fullOutput: this.currentState.terminal.output,
+                isError: isError,
+                isComplete: isComplete,
                 metadata: metadata
             });
         }
@@ -451,6 +520,11 @@ export class EnhancedStreamingClient {
 
     async sendPermissionResponse(permissionId: string, granted: boolean): Promise<void> {
         try {
+            // Update terminal state if permission is granted
+            if (granted && this.currentState.terminal.command) {
+                this.currentState.terminal.isExecuting = true;
+            }
+            
             const response = await axios.post(`${this.baseUrl}/permission`, {
                 permission_id: permissionId,
                 granted: granted
@@ -461,6 +535,18 @@ export class EnhancedStreamingClient {
             
             this.appendToOutput(`[PERMISSION] Response sent: ${granted ? 'GRANTED' : 'DENIED'} for ${permissionId}`);
             this.appendToOutput(`[PERMISSION] Server response: ${JSON.stringify(response.data)}`);
+            
+            // If permission denied, reset terminal state
+            if (!granted) {
+                this.currentState.terminal = {
+                    command: this.currentState.terminal.command,
+                    output: "Permission denied by user",
+                    isExecuting: false,
+                    hasError: true,
+                    startTime: this.currentState.terminal.startTime,
+                    endTime: Date.now()
+                };
+            }
         } catch (error) {
             this.appendToOutput(`[PERMISSION] Error sending response: ${error}`);
             throw error;

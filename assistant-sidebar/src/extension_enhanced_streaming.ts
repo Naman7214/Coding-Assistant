@@ -9,7 +9,7 @@ import { EnhancedStreamingClient } from './enhanced_streaming_client';
 const AGENT_API_PORT = 5000; // Port for the Python agent API (original)
 const STREAMING_API_PORT = 5001; // Port for the TRUE streaming API
 const AGENT_API_URL = 'http://192.168.17.182:5000';
-const STREAMING_API_URL = 'http://192.168.17.182:5001';
+const STREAMING_API_URL = 'http://0.0.0.0:5001'; //192.168.17.182
 
 class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'enhancedAssistantView';
@@ -53,32 +53,40 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
       async message => {
-        switch (message.command) {
-          case 'sendQuery':
-            await this.handleEnhancedQuery(message.text, message.useStreaming);
-            return;
-          
-          case 'checkStreamingHealth':
-            await this.checkEnhancedStreamingHealth();
-            return;
-            
-          case 'permissionResponse':
-            await this.handlePermissionResponse(message.permissionId, message.granted);
-            return;
-
-          case 'clearState':
-            await this.clearStreamingState();
-            return;
-
-          case 'exportLogs':
-            await this.exportStreamingLogs();
-            return;
-        }
+        await this.handleMessage(message);
       }
     );
 
     // Check streaming server health on startup
     this.checkEnhancedStreamingHealth();
+  }
+
+  private async handleMessage(message: any) {
+    switch (message.command) {
+      case 'sendQuery':
+        await this.handleEnhancedQuery(message.text, message.useStreaming);
+        return;
+      
+      case 'checkStreamingHealth':
+        await this.checkEnhancedStreamingHealth();
+        return;
+        
+      case 'permissionResponse':
+        await this.handlePermissionResponse(message.permissionId, message.granted);
+        return;
+
+      case 'clearState':
+        await this.clearStreamingState();
+        return;
+
+      case 'exportLogs':
+        await this.exportStreamingLogs();
+        return;
+        
+      case 'terminateProcess':
+        await this.terminateProcess(message.processId);
+        return;
+    }
   }
 
   public async handleEnhancedQuery(query: string, useStreaming: boolean = true) {
@@ -271,6 +279,31 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to export logs: ${error}`);
       this.outputChannel.appendLine(`[EXPORT] Error: ${error}`);
+    }
+  }
+
+  private async terminateProcess(processId: string) {
+    if (!processId) {
+      this.outputChannel.appendLine('❌ No process ID provided for termination');
+      return;
+    }
+    
+    try {
+      if (this.enhancedStreamingClient) {
+        // Call the terminate process endpoint
+        const response = await axios.post(`${STREAMING_API_URL}/terminate_process`, {
+          process_id: processId
+        }, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000
+        });
+        
+        this.outputChannel.appendLine(`✅ Process termination request sent for ${processId}`);
+        this.outputChannel.appendLine(`Server response: ${JSON.stringify(response.data)}`);
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(`❌ Error terminating process: ${error}`);
+      console.error('Error terminating process:', error);
     }
   }
 

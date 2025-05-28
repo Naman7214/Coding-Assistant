@@ -296,6 +296,40 @@
   flex-shrink: 0;
 }
 
+/* Terminal Section */
+.terminal-section {
+  margin: 10px 0;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background-color: var(--vscode-editor-background);
+  overflow: hidden;
+}
+
+.terminal-section summary {
+  padding: 8px 12px;
+  background-color: var(--vscode-panelTitle-activeBorder);
+  cursor: pointer;
+  font-weight: 500;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.terminal-section details[open] summary {
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.terminal-spinner {
+  animation: spin 2s linear infinite;
+  display: inline-block;
+  margin-left: 5px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Permission Modal Styles */
 .permission-modal-overlay {
   position: fixed;
@@ -315,7 +349,7 @@
   background: var(--vscode-editor-background);
   border: 1px solid var(--vscode-panel-border);
   border-radius: 8px;
-  max-width: 600px;
+  max-width: 650px;
   width: 90%;
   max-height: 80vh;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
@@ -342,6 +376,7 @@
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  max-height: 60vh;
 }
 
 .permission-content p {
@@ -367,48 +402,73 @@
 }
 
 .permission-message {
-  font-size: 14px;
-  color: var(--vscode-descriptionForeground);
-  margin-top: 15px;
+  margin: 12px 0;
+  font-style: italic;
+  color: var(--vscode-editorInfo-foreground);
 }
 
 .permission-actions {
-  padding: 15px 20px 20px 20px;
   display: flex;
-  gap: 12px;
   justify-content: flex-end;
-  flex-shrink: 0;
+  gap: 10px;
+  margin-top: 20px;
   border-top: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-editor-background);
+  padding-top: 15px;
 }
 
 .permission-button {
-  padding: 10px 20px;
-  border: 1px solid var(--vscode-button-border);
+  padding: 6px 12px;
   border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
   font-weight: 500;
-  min-width: 90px;
-  transition: background-color 0.2s ease;
+  cursor: pointer;
+  min-width: 80px;
 }
 
 .deny-button {
-  background: var(--vscode-button-secondaryBackground);
+  background-color: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
+  border: 1px solid var(--vscode-button-secondaryBackground);
 }
 
 .deny-button:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background-color: var(--vscode-button-secondaryHoverBackground);
 }
 
 .allow-button {
-  background: var(--vscode-button-background);
+  background-color: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
+  border: 1px solid var(--vscode-button-background);
 }
 
 .allow-button:hover {
-  background: var(--vscode-button-hoverBackground);
+  background-color: var(--vscode-button-hoverBackground);
+}
+
+.close-button {
+  background-color: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: 1px solid var(--vscode-button-background);
+}
+
+.close-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Terminate Process Button */
+.terminate-button {
+  background-color: var(--vscode-editorError-foreground);
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-left: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.terminate-button:hover {
+  opacity: 0.9;
 }
 
 /* Scrollbar Styles */
