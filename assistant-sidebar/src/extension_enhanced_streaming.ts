@@ -105,6 +105,8 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    console.log('workspacePath:', workspacePath);
+
     try {
       if (useStreaming && this.enhancedStreamingClient) {
         // Use TRUE streaming API with enhanced visualization

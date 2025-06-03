@@ -10,7 +10,7 @@ from openai import OpenAI
 from system.backend.app.config.settings import settings
 from system.backend.app.models.domain.error import Error
 from system.backend.app.utils.path_validator import is_safe_path
-
+from system.backend.app.prompts.file_modification_prompt import FILE_MODIFICATION_PROMPT        
 
 class EditFileService:
     def __init__(self):
@@ -119,23 +119,9 @@ class EditFileService:
         try:
             load_dotenv()
 
-            TGI_USER_PROMPT_TEMPLATE = f"""<|im_start|>system
-                You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated.<|im_end|>
-                <|im_start|>user
-                Merge all changes from the <update> snippet into the <code> below.
-                - Preserve the code's structure, order, comments, and indentation exactly.
-                - Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
-                - Do not include any additional text, explanations, placeholders, ellipses, or code fences.
-
-                <code>{original_code}</code>
-
-                <update>{code_snippet}</update>
-
-                Provide the complete updated code.<|im_end|>
-                <|im_start|>assistant
-            """
-
-            user_query = TGI_USER_PROMPT_TEMPLATE
+            user_query = FILE_MODIFICATION_PROMPT.format(
+                original_code=original_code, code_snippet=code_snippet
+            )
 
             chat_completion = self.client.chat.completions.create(
                 model="tgi",

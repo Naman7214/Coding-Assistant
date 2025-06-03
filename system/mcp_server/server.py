@@ -19,20 +19,20 @@ from starlette.routing import Mount, Route
 
 
 load_dotenv()
-from system.mcp_server.enviornment_tools import run_terminal_command
-from system.mcp_server.external_tools import web_search
-from system.mcp_server.file_access_tools import (
+from system.mcp_server.tools.enviornment_tools import run_terminal_command
+from system.mcp_server.tools.external_tools import web_search
+from system.mcp_server.tools.file_access_tools import (
     delete_file,
     list_directory,
     read_file,
     search_files,
 )
-from system.mcp_server.modification_tools import (
+from system.mcp_server.tools.modification_tools import (
     edit_file,
     reapply,
     search_and_replace,
 )
-from system.mcp_server.search_tools import codebase_search, execute_grep_search
+from system.mcp_server.tools.search_tools import codebase_search, execute_grep_search
 
 logging.basicConfig(
     level=logging.INFO,
@@ -260,7 +260,7 @@ def main(port: int) -> int:
                         "file_path": {
                             "type": "string",
                             "title": "File Path",
-                            "description": "The path to the file to be read. This can be an absolute or relative path.",
+                            "description": "The path to the file to be read. This must be an absolute path.",
                         },
                         "start_line": {
                             "type": "integer",
@@ -315,7 +315,7 @@ def main(port: int) -> int:
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "The relative or absolute path to the file or directory that should be deleted.",
+                            "description": "The absolute path to the file or directory that should be deleted.",
                         },
                         "explanation": {
                             "type": "string",
@@ -329,7 +329,7 @@ def main(port: int) -> int:
                 description="List the contents of a directory. The quick tool to use for discovery, before using more targeted tools like semantic search or file reading. Useful to try to understand the file structure before diving deeper into specific files. Can be used to explore the codebase. The tool returns a JSON array of file paths.",
                 inputSchema={
                     "type": "object",
-                    "required": [],
+                    "required": ["dir_path", "explanation"],
                     "properties": {
                         "dir_path": {
                             "type": "string",
@@ -472,7 +472,7 @@ def main(port: int) -> int:
                     "properties": {
                         "target_file_path": {
                             "type": "string",
-                            "description": "The target file to modify. Always specify the target file as the first argument. You can use either a relative path in the workspace or an absolute path. If an absolute path is provided, it will be preserved as is.",
+                            "description": "The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is.",
                         },
                         "code_snippet": {
                             "type": "string",
@@ -498,7 +498,7 @@ def main(port: int) -> int:
                     "properties": {
                         "target_file_path": {
                             "type": "string",
-                            "description": "The target file to modify. Always specify the target file as the first argument. You can use either a relative path in the workspace or an absolute path. If an absolute path is provided, it will be preserved as is.",
+                            "description": "The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is.",
                         },
                         "code_snippet": {
                             "type": "string",

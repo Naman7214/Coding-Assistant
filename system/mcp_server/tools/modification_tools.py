@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
+from system.mcp_server.config.settings import settings
 
 load_dotenv()
 
@@ -43,7 +44,7 @@ async def search_and_replace(
         Dictionary with results of the operation
     """
 
-    url = "http://127.0.0.1:8000/api/v1/search-replace"
+    url = settings.SEARCH_AND_REPLACE_API
 
     payload = {
         "query": query,
@@ -73,7 +74,7 @@ async def search_and_replace(
 
 
 async def edit_file(target_file_path: str, code_snippet: str, explanation: str):
-    url = "http://127.0.0.1:8000/api/v1/edit-file"
+    url = settings.EDIT_FILE_API
     payload = {
         "target_file_path": target_file_path,
         "code_snippet": code_snippet,
@@ -97,7 +98,7 @@ async def edit_file(target_file_path: str, code_snippet: str, explanation: str):
 
 
 async def reapply(target_file_path: str, code_snippet: str, explanation: str):
-    url = "http://127.0.0.1:8000/api/v1/reapply"
+    url = settings.REAPPLY_API
     payload = {
         "target_file_path": target_file_path,
         "code_snippet": code_snippet,

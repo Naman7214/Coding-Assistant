@@ -57,6 +57,11 @@ class DirectoryListService:
                 "env",
                 ".env",
                 "__pycache__",
+                ".git",
+                ".DS_Store",
+                ".vscode",
+                ".idea",
+                "dist",
             ]
 
             async def process_directory(

@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
+from system.mcp_server.config.settings import settings
 
 # import aiofiles
 
@@ -42,7 +43,7 @@ async def run_terminal_command(
     Returns:
         A dictionary with the command output and execution status
     """
-    url = "http://127.0.0.1:8000/api/v1/run-terminal-cmd"
+    url = settings.RUN_CMD_API
 
     payload = {
         "cmd": command,

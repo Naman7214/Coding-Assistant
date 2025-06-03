@@ -9,6 +9,7 @@ from openai import OpenAI
 from system.backend.app.config.settings import settings
 from system.backend.app.models.domain.error import Error
 from system.backend.app.utils.path_validator import is_safe_path
+from system.backend.app.prompts.file_modification_prompt import FILE_MODIFICATION_PROMPT
 
 
 class ReapplyService:
@@ -111,6 +112,10 @@ class ReapplyService:
         """
         try:
             load_dotenv()
+
+            user_query = FILE_MODIFICATION_PROMPT.format(
+                original_code=original_code, code_snippet=code_snippet
+            )
 
             TGI_USER_PROMPT_TEMPLATE = f"""<|im_start|>system
                 You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated.<|im_end|>

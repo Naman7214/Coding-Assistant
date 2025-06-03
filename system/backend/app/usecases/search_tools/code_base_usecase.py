@@ -37,7 +37,7 @@ class CodeBaseSearchUsecase:
         self.index_host = (
             "dotproduct-1024-npedpix.svc.aped-4627-b74a.pinecone.io"
         )
-        self.llm_model = "claude-3-7-sonnet-20250219"  # Or the latest Claude 3.7 Sonnet model name
+        self.llm_model = "claude-sonnet-4-20250514"  # Or the latest Claude 3.7 Sonnet model name
         self.top_k = 20  # Number of results to retrieve from vector DB
         self.top_n = 10  # Number of results after reranking
         self.error_repo = error_repo

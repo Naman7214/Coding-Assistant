@@ -168,7 +168,7 @@ async def process_streaming_tool_calls_fixed(depth=0):
     """
     global agent_instance, active_terminal_processes
     
-    MAX_TOOL_CALL_DEPTH = 50
+    MAX_TOOL_CALL_DEPTH = 100
     
     if depth >= MAX_TOOL_CALL_DEPTH:
         yield create_stream_event("error", "Maximum tool call depth reached. Stopping to prevent infinite loops.")
@@ -450,6 +450,8 @@ async def process_streaming_tool_calls_fixed(depth=0):
 @app.post("/stream")
 async def stream_query(request: QueryRequest):
     """Stream the agent's response with TRUE real-time streaming"""
+    
+    print(f"workspace_path: {request.workspace_path}")
     return StreamingResponse(
         stream_agent_response(request.query, request.workspace_path, request.target_file_path),
         media_type="text/plain",

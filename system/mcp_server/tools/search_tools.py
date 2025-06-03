@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
+from system.mcp_server.config.settings import settings
 
 # import aiofiles
 
@@ -30,7 +31,7 @@ async def codebase_search(
     """
     Search the codebase for the given query.
     """
-    url = "http://127.0.0.1:8000/api/v1/code-base-search"
+    url = settings.CODEBASE_SEARCH_API
 
     payload = {
         "query": query,
@@ -77,7 +78,7 @@ async def execute_grep_search(
         A dictionary with the search results and metadata
     """
 
-    url = "http://127.0.0.1:8000/api/v1/grep-search"
+    url = settings.EXECUTE_GREP_SEARCH_API
 
     payload = {
         "query": query,

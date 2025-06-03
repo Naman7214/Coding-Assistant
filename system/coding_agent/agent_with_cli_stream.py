@@ -50,7 +50,7 @@ class AnthropicStreamingAgent:
     MAX_TOOL_CALL_DEPTH = 50  # Prevent infinite recursion
     MAX_RETRIES = 3
 
-    def __init__(self, model_name="claude-3-7-sonnet-20250219"):
+    def __init__(self, model_name="claude-sonnet-4-20250514"):
         self.model_name = model_name #"claude-sonnet-4-20250514" #model_name
         self.agent_memory = AgentMemory()
         self.session = None

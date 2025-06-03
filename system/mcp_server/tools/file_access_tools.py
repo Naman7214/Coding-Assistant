@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
+from system.mcp_server.config.settings import settings
 
 # import aiofiles
 
@@ -31,7 +32,7 @@ async def read_file(
     end_line: Optional[int] = None,
 ) -> Dict[str, Any]:
 
-    url = "http://127.0.0.1:8000/api/v1/read-file"
+    url = settings.READ_FILE_API
 
     payload = {"file_path": file_path, "explanation": explanation}
 
@@ -70,7 +71,7 @@ async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
         A dictionary with the deletion status and any error
     """
 
-    url = "http://127.0.0.1:8000/api/v1/delete-file"
+    url = settings.DELETE_FILE_API
 
     payload = {"path": path, "explanation": explanation}
 
@@ -99,7 +100,7 @@ async def list_directory(
     explanation: str = "",
 ) -> List[Dict[str, Any]]:
 
-    url = "http://127.0.0.1:8000/api/v1/list-directory"
+    url = settings.LIST_DIR_API
 
     payload = {
         "explanation": explanation,
@@ -128,7 +129,7 @@ async def list_directory(
 
 async def search_files(query: str, workspace_path: str, explanation: str) -> List[Dict[str, Any]]:
 
-    url = "http://127.0.0.1:8000/api/v1/search-files"
+    url = settings.SEARCH_FILES_API
 
     payload = {"pattern": query, "workspace_path": workspace_path, "explanation": explanation}
 

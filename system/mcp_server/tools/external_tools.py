@@ -3,6 +3,7 @@ import logging
 
 import httpx
 from dotenv import load_dotenv
+from system.mcp_server.config.settings import settings
 
 # import aiofiles
 
@@ -27,7 +28,7 @@ async def web_search(
     search_term: str, target_urls: list[str] = [], explanation: str = ""
 ) -> str:
 
-    url = "http://127.0.0.1:8000/api/v1/web-search"
+    url = settings.WEB_SEARCH_API
 
     payload = {
         "search_term": search_term,
