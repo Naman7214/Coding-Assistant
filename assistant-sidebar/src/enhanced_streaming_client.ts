@@ -1,5 +1,6 @@
-import * as vscode from 'vscode';
 import axios from 'axios';
+import * as vscode from 'vscode';
+import { SystemInfo, getSystemInfo } from './utilities';
 
 // Event types from the TRUE streaming API
 interface StreamEvent {
@@ -13,6 +14,7 @@ interface QueryRequest {
     query: string;
     target_file_path?: string;
     workspace_path: string;
+    system_info?: SystemInfo;
 }
 
 interface ThinkingState {
@@ -106,7 +108,14 @@ export class EnhancedStreamingClient {
         try {
             // Reset state for new query
             this.resetState();
-            
+
+            // Get system information and add to request
+            const systemInfo = await getSystemInfo();
+            const enhancedRequest = {
+                ...request,
+                system_info: systemInfo
+            };
+
             // Show initial status
             this.updateStatus("🚀 Starting TRUE streaming...");
             this.appendToOutput(`\n=== NEW QUERY ===`);
@@ -114,21 +123,25 @@ export class EnhancedStreamingClient {
             if (request.target_file_path) {
                 this.appendToOutput(`Target file: ${request.target_file_path}`);
             }
+            this.appendToOutput(`Workspace: ${systemInfo.workspacePath}`);
+            this.appendToOutput(`Platform: ${systemInfo.platform} ${systemInfo.osVersion}`);
+            this.appendToOutput(`Shell: ${systemInfo.defaultShell}`);
             this.appendToOutput(`Timestamp: ${new Date().toLocaleString()}`);
             this.appendToOutput(`=================\n`);
 
-            // Send initial message to webview
+            // Send initial message to webview with system info
             if (webview) {
                 webview.postMessage({
                     command: 'streamStart',
                     query: request.query,
                     targetFile: request.target_file_path,
+                    systemInfo: systemInfo,
                     state: this.currentState
                 });
             }
 
             // Use axios with responseType 'stream' for TRUE streaming
-            const response = await axios.post(`${this.baseUrl}/stream`, request, {
+            const response = await axios.post(`${this.baseUrl}/stream`, enhancedRequest, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'text/event-stream',
@@ -144,11 +157,11 @@ export class EnhancedStreamingClient {
             // Handle the TRUE streaming response
             let buffer = '';
             let eventCount = 0;
-            
+
             response.data.on('data', (chunk: Buffer) => {
                 buffer += chunk.toString();
                 const lines = buffer.split('\n');
-                
+
                 // Keep the last incomplete line in the buffer
                 buffer = lines.pop() || '';
 
@@ -157,13 +170,13 @@ export class EnhancedStreamingClient {
                         try {
                             const eventData: StreamEvent = JSON.parse(line.slice(6));
                             eventCount++;
-                            
+
                             // Handle the event and update state
                             this.handleStreamEvent(eventData, webview).catch(error => {
                                 console.error('Error handling stream event:', error);
                                 this.appendToOutput(`❌ Event handling error: ${error}`);
                             });
-                            
+
                             // Call custom event handler if provided
                             if (onEvent) {
                                 Promise.resolve(onEvent(eventData, this.currentState)).catch(error => {
@@ -186,7 +199,7 @@ export class EnhancedStreamingClient {
                 this.appendToOutput(`Total events processed: ${eventCount}`);
                 this.appendToOutput(`Final response length: ${this.currentState.response.length} characters`);
                 this.appendToOutput(`=======================\n`);
-                
+
                 if (webview) {
                     webview.postMessage({
                         command: 'streamComplete',
@@ -214,7 +227,7 @@ export class EnhancedStreamingClient {
             this.currentState.errorMessage = error instanceof Error ? error.message : String(error);
             this.updateStatus("❌ Streaming error");
             this.appendToOutput(`❌ ERROR: ${error}`);
-            
+
             if (webview) {
                 webview.postMessage({
                     command: 'streamError',
@@ -222,7 +235,7 @@ export class EnhancedStreamingClient {
                     state: this.currentState
                 });
             }
-            
+
             throw error;
         }
     }
@@ -319,7 +332,7 @@ export class EnhancedStreamingClient {
         // Stop thinking when response starts
         if (this.currentState.thinking.isThinking) {
             this.currentState.thinking.isThinking = false;
-            const thinkingDuration = this.currentState.thinking.startTime ? 
+            const thinkingDuration = this.currentState.thinking.startTime ?
                 Date.now() - this.currentState.thinking.startTime : 0;
             this.appendToOutput(`[${timestamp}] THINKING COMPLETE: ${thinkingDuration}ms, ${this.currentState.thinking.content.length} chars`);
         }
@@ -339,7 +352,7 @@ export class EnhancedStreamingClient {
 
     private async handleToolSelectionEvent(content: string, metadata: any, webview?: vscode.Webview, timestamp?: string): Promise<void> {
         const toolName = metadata?.tool_name || 'unknown';
-        
+
         this.currentState.currentTool = {
             name: toolName,
             status: 'selecting',
@@ -393,10 +406,10 @@ export class EnhancedStreamingClient {
             this.currentState.currentTool.status = isError ? 'error' : 'completed';
             this.currentState.currentTool.result = content;
             this.currentState.currentTool.endTime = Date.now();
-            
-            const duration = this.currentState.currentTool.startTime ? 
+
+            const duration = this.currentState.currentTool.startTime ?
                 this.currentState.currentTool.endTime - this.currentState.currentTool.startTime : 0;
-            
+
             this.appendToOutput(`[${timestamp}] TOOL ${isError ? 'ERROR' : 'COMPLETED'}: ${toolName} (${duration}ms)`);
             this.appendToOutput(`[${timestamp}] RESULT LENGTH: ${resultLength} characters`);
         }
@@ -418,7 +431,7 @@ export class EnhancedStreamingClient {
     private async handlePermissionRequestEvent(content: string, metadata: any, webview?: vscode.Webview, timestamp?: string): Promise<void> {
         const command = metadata?.command;
         const permissionId = metadata?.permission_id;
-        
+
         // Update terminal state with the command to be executed
         this.currentState.terminal = {
             command: command,
@@ -427,11 +440,11 @@ export class EnhancedStreamingClient {
             hasError: false,
             startTime: Date.now()
         };
-        
+
         this.updateStatus(`⚠️ Permission required`);
         this.appendToOutput(`[${timestamp}] PERMISSION REQUEST: ${command}`);
         this.appendToOutput(`[${timestamp}] PERMISSION ID: ${permissionId}`);
-        
+
         if (webview) {
             webview.postMessage({
                 command: 'permissionRequest',
@@ -446,27 +459,27 @@ export class EnhancedStreamingClient {
     private async handleTerminalOutputEvent(content: string, metadata: any, webview?: vscode.Webview, timestamp?: string): Promise<void> {
         const isError = metadata?.error || false;
         const isComplete = metadata?.complete || false;
-        
+
         // Update terminal state
         this.currentState.terminal.output += content;
         this.currentState.terminal.isExecuting = !isComplete;
         this.currentState.terminal.hasError = isError;
-        
+
         if (isComplete) {
             this.currentState.terminal.endTime = Date.now();
-            const duration = this.currentState.terminal.startTime ? 
+            const duration = this.currentState.terminal.startTime ?
                 this.currentState.terminal.endTime - this.currentState.terminal.startTime : 0;
-                
-            this.updateStatus(isError ? 
-                `❌ Terminal command failed (${duration}ms)` : 
+
+            this.updateStatus(isError ?
+                `❌ Terminal command failed (${duration}ms)` :
                 `✅ Terminal command completed (${duration}ms)`);
-                
+
             this.appendToOutput(`[${timestamp}] TERMINAL COMMAND COMPLETED: ${this.currentState.terminal.command} (${duration}ms)`);
         } else {
             this.updateStatus(`⚙️ Executing terminal command...`);
             this.appendToOutput(`[${timestamp}] TERMINAL OUTPUT: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
         }
-        
+
         if (webview) {
             webview.postMessage({
                 command: 'terminalOutput',
@@ -482,7 +495,7 @@ export class EnhancedStreamingClient {
     private async handleFinalResponseEvent(content: string, metadata: any, webview?: vscode.Webview, timestamp?: string): Promise<void> {
         this.currentState.response = content; // Final complete response
         this.currentState.isComplete = true;
-        
+
         this.updateStatus("✅ Response complete");
         this.appendToOutput(`[${timestamp}] FINAL RESPONSE: ${content.length} characters`);
 
@@ -498,7 +511,7 @@ export class EnhancedStreamingClient {
     private async handleErrorEvent(content: string, metadata: any, webview?: vscode.Webview, timestamp?: string): Promise<void> {
         this.currentState.hasError = true;
         this.currentState.errorMessage = content;
-        
+
         this.updateStatus("❌ Error occurred");
         this.appendToOutput(`[${timestamp}] ERROR: ${content}`);
 
@@ -525,7 +538,7 @@ export class EnhancedStreamingClient {
             if (granted && this.currentState.terminal.command) {
                 this.currentState.terminal.isExecuting = true;
             }
-            
+
             const response = await axios.post(`${this.baseUrl}/permission`, {
                 permission_id: permissionId,
                 granted: granted
@@ -533,10 +546,10 @@ export class EnhancedStreamingClient {
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 10000
             });
-            
+
             this.appendToOutput(`[PERMISSION] Response sent: ${granted ? 'GRANTED' : 'DENIED'} for ${permissionId}`);
             this.appendToOutput(`[PERMISSION] Server response: ${JSON.stringify(response.data)}`);
-            
+
             // If permission denied, reset terminal state
             if (!granted) {
                 this.currentState.terminal = {
@@ -559,12 +572,12 @@ export class EnhancedStreamingClient {
             const response = await axios.post(`${this.baseUrl}/health`, {}, {
                 timeout: 5000
             });
-            
+
             const isHealthy = response.data?.status === 'healthy';
             const isStreaming = response.data?.streaming === true;
-            
+
             this.appendToOutput(`[HEALTH] Status: ${response.data?.status}, Streaming: ${isStreaming}`);
-            
+
             return isHealthy && isStreaming;
         } catch (error) {
             this.appendToOutput(`[HEALTH] Check failed: ${error}`);

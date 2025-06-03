@@ -37,10 +37,24 @@ pending_permissions = {}
 # Store active terminal processes
 active_terminal_processes = {}
 
+class SystemInfo(BaseModel):
+    platform: str
+    osVersion: str
+    architecture: str
+    workspacePath: str
+    defaultShell: str
+    nodeVersion: str
+    vsCodeVersion: str
+    extensionVersion: str
+    environmentVariables: Dict[str, str]
+    workspaceName: Optional[str] = None
+    workspaceFolders: List[str]
+
 class QueryRequest(BaseModel):
     query: str
     target_file_path: Optional[str] = None
     workspace_path: str
+    system_info: Optional[SystemInfo] = None
 
 class PermissionResponse(BaseModel):
     permission_id: str
@@ -57,16 +71,9 @@ async def startup_event():
     global agent_instance
     agent_instance = AnthropicStreamingAgent()
     
-    # Initialize the agent session with MCP server
-    try:
-        server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/sse")
-        transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
-        
-        # Initialize the session but don't start the interactive loop
-        await agent_instance.initialize_session(server_url, transport_type, "")
-        print(f"✅ Streaming Agent initialized successfully with server: {server_url}")
-    except Exception as e:
-        print(f"❌ Failed to initialize streaming agent: {e}")
+    # Don't initialize the session here with blank system info
+    # The session will be initialized with proper system info when the first request comes in
+    print(f"✅ Streaming Agent instance created successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -85,9 +92,18 @@ def create_stream_event(event_type: str, content: str, metadata: Optional[Dict[s
     )
     return f"data: {event.json()}\n\n"
 
-async def stream_agent_response(query: str, workspace_path: str, target_file_path: Optional[str] = None) -> AsyncGenerator[str, None]:
+async def stream_agent_response(query: str, workspace_path: str, target_file_path: Optional[str] = None, system_info: Optional[SystemInfo] = None) -> AsyncGenerator[str, None]:
     """Stream the agent's response with TRUE real-time streaming"""
     global agent_instance
+    
+    print(f"🚀 Stream request received:")
+    print(f"   Query: {query[:100]}...")
+    print(f"   Workspace Path: {workspace_path}")
+    print(f"   Target File: {target_file_path}")
+    if system_info:
+        print(f"   System: {system_info.platform} {system_info.osVersion}")
+        print(f"   Shell: {system_info.defaultShell}")
+        print(f"   VS Code: {system_info.vsCodeVersion}")
     
     # Check if agent is initialized
     if not agent_instance or not agent_instance.session:
@@ -95,16 +111,56 @@ async def stream_agent_response(query: str, workspace_path: str, target_file_pat
             agent_instance = AnthropicStreamingAgent()
             server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/sse")
             transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
-            await agent_instance.initialize_session(server_url, transport_type, workspace_path)
+            print(f"🔧 Initializing new agent with workspace: {workspace_path}")
+            
+            # Convert SystemInfo to dict if provided
+            system_info_dict = system_info.dict() if system_info else None
+            
+            await agent_instance.initialize_session(server_url, transport_type, workspace_path, system_info_dict)
         except Exception as e:
             yield create_stream_event("error", f"Failed to initialize streaming agent: {str(e)}")
             return
     
     else:
-        # Update workspace path if it's different from what's stored
-        if workspace_path and workspace_path != agent_instance.workspace_path:
+        # Update workspace path and system info if they're different
+        workspace_changed = workspace_path and workspace_path != agent_instance.workspace_path
+        system_info_changed = system_info and system_info.dict() != agent_instance.system_info
+        
+        if workspace_changed:
             agent_instance.workspace_path = workspace_path
             print(f"✅ Updated workspace path to: {workspace_path}")
+        
+        if system_info_changed and system_info:
+            agent_instance.set_system_info(system_info.dict())
+            print(f"✅ Updated system info")
+        
+        # If workspace or system info changed, regenerate the system prompt
+        if workspace_changed or system_info_changed:
+            try:
+                # Get available tools to recreate the system prompt
+                if agent_instance.session:
+                    tools = await agent_instance.session.list_tools()
+                    if tools and hasattr(tools, "tools") and tools.tools:
+                        # Import the system prompt here to avoid circular imports
+                        from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
+                        
+
+                        
+                        # Format system info context
+                        system_info_context = agent_instance._format_system_info_context()
+                        
+                        # Create new system message with updated info
+                        system_message = CODING_AGENT_SYSTEM_PROMPT.format(
+                            system_info_context=system_info_context,
+                        )
+                        
+                        # Reinitialize agent memory with new system message
+                        agent_instance.agent_memory.initialize_with_system_message(system_message)
+                        print(f"✅ Regenerated system prompt with updated workspace and system info")
+                        
+            except Exception as e:
+                print(f"⚠️ Warning: Could not regenerate system prompt: {e}")
+                # Continue without regenerating - this is not critical for basic functionality
     
     try:
         # Enhance the query with file path context if available
@@ -112,7 +168,11 @@ async def stream_agent_response(query: str, workspace_path: str, target_file_pat
         if target_file_path:
             enhanced_query = f"Working with file: {target_file_path}\n\n{query}"
         
-        yield create_stream_event("thinking", "Processing your request...", {"query": query})
+        yield create_stream_event("thinking", "Processing your request...", {
+            "query": query, 
+            "workspace": workspace_path,
+            "system_info": system_info.dict() if system_info else None
+        })
         
         # Add the query to agent memory
         agent_instance.agent_memory.add_user_message(enhanced_query)
@@ -141,6 +201,10 @@ async def reset_agent():
     """Reset the agent completely when conversation errors occur"""
     global agent_instance
     
+    # Store the current workspace path and system info before cleanup
+    current_workspace_path = agent_instance.workspace_path if agent_instance else None
+    current_system_info = agent_instance.system_info if agent_instance else None
+    
     # Clean up existing agent if any
     if agent_instance:
         try:
@@ -153,9 +217,10 @@ async def reset_agent():
         agent_instance = AnthropicStreamingAgent()
         server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8001/sse")
         transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
-        success = await agent_instance.initialize_session(server_url, transport_type, "")
+        # Use the preserved workspace path and system info
+        success = await agent_instance.initialize_session(server_url, transport_type, current_workspace_path, current_system_info)
         if success:
-            print("✅ Agent reset successfully")
+            print("✅ Agent reset successfully with preserved system info")
         else:
             print("❌ Failed to reset agent")
     except Exception as e:
@@ -172,6 +237,11 @@ async def process_streaming_tool_calls_fixed(depth=0):
     
     if depth >= MAX_TOOL_CALL_DEPTH:
         yield create_stream_event("error", "Maximum tool call depth reached. Stopping to prevent infinite loops.")
+        return
+
+    # Check if agent_instance is available
+    if not agent_instance:
+        yield create_stream_event("error", "Agent instance is not available.")
         return
 
     # Stream the API call
@@ -449,18 +519,26 @@ async def process_streaming_tool_calls_fixed(depth=0):
 
 @app.post("/stream")
 async def stream_query(request: QueryRequest):
-    """Stream the agent's response with TRUE real-time streaming"""
-    
-    print(f"workspace_path: {request.workspace_path}")
-    return StreamingResponse(
-        stream_agent_response(request.query, request.workspace_path, request.target_file_path),
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Content-Type": "text/event-stream",
-        }
-    )
+    """Stream the agent's response to a query"""
+    try:
+        return StreamingResponse(
+            stream_agent_response(
+                request.query, 
+                request.workspace_path, 
+                request.target_file_path,
+                request.system_info
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    except Exception as e:
+        print(f"Error in stream_query: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/permission")
 async def handle_permission_response(response: PermissionResponse):

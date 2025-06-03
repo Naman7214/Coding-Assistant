@@ -1,10 +1,10 @@
-import * as vscode from 'vscode';
-import * as http from 'http';
 import axios from 'axios';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as path from 'path';
-import { getWebviewContent, getNonce } from './utilities';
+import * as vscode from 'vscode';
 import { EnhancedStreamingClient } from './enhanced_streaming_client';
+import { getWebviewContent } from './utilities';
 
 const AGENT_API_PORT = 5000; // Port for the Python agent API (original)
 const STREAMING_API_PORT = 5001; // Port for the TRUE streaming API
@@ -35,7 +35,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
-    
+
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri]
@@ -66,11 +66,11 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       case 'sendQuery':
         await this.handleEnhancedQuery(message.text, message.useStreaming);
         return;
-      
+
       case 'checkStreamingHealth':
         await this.checkEnhancedStreamingHealth();
         return;
-        
+
       case 'permissionResponse':
         await this.handlePermissionResponse(message.permissionId, message.granted);
         return;
@@ -82,7 +82,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       case 'exportLogs':
         await this.exportStreamingLogs();
         return;
-        
+
       case 'terminateProcess':
         await this.terminateProcess(message.processId);
         return;
@@ -98,10 +98,16 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     let workspacePath = '';
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
       workspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      this.outputChannel.appendLine(`[WORKSPACE] Using workspace path: ${workspacePath}`);
     } else {
-      const errorMessage = 'No workspace folder is open';
+      const errorMessage = 'No workspace folder is open. Please open a folder or workspace first.';
       this.updateResponse(`Error: ${errorMessage}`);
       this.outputChannel.appendLine(`Query error: ${errorMessage}`);
+      vscode.window.showErrorMessage(errorMessage, 'Open Folder').then(selection => {
+        if (selection === 'Open Folder') {
+          vscode.commands.executeCommand('vscode.openFolder');
+        }
+      });
       return;
     }
 
@@ -111,7 +117,8 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       if (useStreaming && this.enhancedStreamingClient) {
         // Use TRUE streaming API with enhanced visualization
         this.outputChannel.appendLine(`🚀 Using TRUE streaming API for query: ${query}`);
-        
+        this.outputChannel.appendLine(`📁 Workspace context: ${workspacePath}`);
+
         await this.enhancedStreamingClient.streamQuery(
           {
             query: query,
@@ -123,7 +130,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           async (event, state) => {
             // Log detailed event information
             this.outputChannel.appendLine(`[EVENT] ${event.type}: ${event.content.substring(0, 50)}...`);
-            
+
             // Handle specific events for enhanced UX
             if (event.type === 'thinking' && event.content.length > 100) {
               // Show progress for long thinking sessions
@@ -142,7 +149,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         // Fallback to original API
         this.outputChannel.appendLine(`Using original API for query: ${query}`);
         this.updateResponse('Processing your query with original API...');
-        
+
         const response = await this.callOriginalAgent(query, targetFilePath, workspacePath);
         this.updateResponse(response);
       }
@@ -159,7 +166,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
     try {
       const isHealthy = await this.enhancedStreamingClient.checkHealth();
-      
+
       this._view.webview.postMessage({
         command: 'enhancedStreamingHealthStatus',
         isHealthy: isHealthy,
@@ -182,7 +189,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       this.outputChannel.appendLine(`❌ Enhanced streaming health check failed: ${error}`);
       this.statusBarItem.text = '$(plug) Agent Server (Original)';
-      
+
       this._view.webview.postMessage({
         command: 'enhancedStreamingHealthStatus',
         isHealthy: false,
@@ -200,7 +207,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       });
     }
   }
-  
+
   private async callOriginalAgent(query: string, targetFilePath: string, workspacePath: string): Promise<string> {
     try {
       // Call the original Python agent API
@@ -209,7 +216,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         target_file_path: targetFilePath,
         workspace_path: workspacePath
       });
-      
+
       return response.data.response || 'No response from agent';
     } catch (error: unknown) {
       console.error('Error calling original agent API:', error);
@@ -240,7 +247,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     if (this.enhancedStreamingClient) {
       this.enhancedStreamingClient.resetCurrentState();
       this.outputChannel.appendLine('[STATE] Enhanced streaming state cleared');
-      
+
       if (this._view) {
         this._view.webview.postMessage({
           command: 'stateCleared'
@@ -263,7 +270,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
       // Get current state
       const currentState = this.enhancedStreamingClient?.getCurrentState();
-      
+
       const logContent = [
         '=== ENHANCED STREAMING LOGS ===',
         `Timestamp: ${new Date().toLocaleString()}`,
@@ -279,7 +286,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       ].join('\n');
 
       await fs.promises.writeFile(logFilePath, logContent);
-      
+
       vscode.window.showInformationMessage(
         `Enhanced streaming logs exported to: ${logFileName}`,
         'Open File'
@@ -301,7 +308,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       this.outputChannel.appendLine('❌ No process ID provided for termination');
       return;
     }
-    
+
     try {
       if (this.enhancedStreamingClient) {
         // Call the terminate process endpoint
@@ -311,7 +318,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           headers: { 'Content-Type': 'application/json' },
           timeout: 5000
         });
-        
+
         this.outputChannel.appendLine(`✅ Process termination request sent for ${processId}`);
         this.outputChannel.appendLine(`Server response: ${JSON.stringify(response.data)}`);
       }
@@ -329,22 +336,22 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Activating Enhanced Assistant Sidebar extension with TRUE streaming support');
-  
+
   // Create output channel for logging
   const outputChannel = vscode.window.createOutputChannel('Enhanced Agent Assistant');
-  
+
   // Create status bar item
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBarItem.text = '$(plug) Enhanced Agent Server';
   statusBarItem.tooltip = 'Enhanced Agent Server Status (TRUE Streaming)';
   statusBarItem.command = 'enhanced-assistant-sidebar.refreshConnection';
   statusBarItem.show();
-  
+
   const provider = new EnhancedAssistantViewProvider(context.extensionUri, outputChannel, statusBarItem);
-  
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
-      EnhancedAssistantViewProvider.viewType, 
+      EnhancedAssistantViewProvider.viewType,
       provider
     )
   );
@@ -354,7 +361,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('enhanced-assistant-sidebar.sendQuery', () => {
       vscode.window.showInformationMessage('Enhanced Send Query command executed');
     }),
-    
+
     vscode.commands.registerCommand('enhanced-assistant-sidebar.startStreamingServer', async () => {
       try {
         const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
@@ -362,18 +369,30 @@ export function activate(context: vscode.ExtensionContext) {
           throw new Error('No workspace folder is open');
         }
 
-        // Run a command to start the TRUE streaming agent server
+        outputChannel.appendLine(`[SERVER] Starting streaming server from workspace: ${workspacePath}`);
+
+        // Run the streaming agent server from the user's workspace directory
+        // The agent script should be accessible via relative path from the workspace
         const terminal = vscode.window.createTerminal('Enhanced Streaming Agent Server');
-        terminal.sendText(`cd system/coding_agent && python3 agent_streaming_api.py --workspace_path ${workspacePath}`);
+
+        // First change to the user's workspace, then run the agent script
+        // Assuming the extension is in the workspace under assistant-sidebar/
+        terminal.sendText(`cd "${workspacePath}"`);
+        terminal.sendText(`echo "Starting streaming server from: $(pwd)"`);
+        terminal.sendText(`python3 system/coding_agent/agent_streaming_api.py`);
         terminal.show();
-        vscode.window.showInformationMessage('Enhanced TRUE streaming agent server started');
-        
+
+        outputChannel.appendLine(`[SERVER] Terminal commands sent to start server from ${workspacePath}`);
+        vscode.window.showInformationMessage('Enhanced TRUE streaming agent server started from workspace');
+
         // Wait a bit and then check health
         setTimeout(() => {
           provider.refreshEnhancedStreamingConnection();
         }, 3000);
       } catch (error) {
-        vscode.window.showErrorMessage(`Failed to start enhanced streaming server: ${error instanceof Error ? error.message : String(error)}`);
+        const errorMessage = `Failed to start enhanced streaming server: ${error instanceof Error ? error.message : String(error)}`;
+        outputChannel.appendLine(`[SERVER ERROR] ${errorMessage}`);
+        vscode.window.showErrorMessage(errorMessage);
       }
     }),
 
@@ -391,7 +410,7 @@ export function activate(context: vscode.ExtensionContext) {
         prompt: 'What would you like to ask the enhanced agent?',
         placeHolder: 'Enter your question or request...'
       });
-      
+
       if (query) {
         // This will use the enhanced TRUE streaming API
         await provider.handleEnhancedQuery(query, true);
@@ -406,11 +425,25 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('enhanced-assistant-sidebar.exportLogs', async () => {
       // Export streaming logs
       outputChannel.appendLine('[COMMAND] Exporting enhanced streaming logs...');
+    }),
+
+    vscode.commands.registerCommand('enhanced-assistant-sidebar.openWorkspace', async () => {
+      // Command to help users open a workspace when debugging
+      const result = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Open Workspace Folder'
+      });
+
+      if (result && result[0]) {
+        await vscode.commands.executeCommand('vscode.openFolder', result[0]);
+      }
     })
   );
-  
+
   context.subscriptions.push(outputChannel, statusBarItem);
-  
+
   console.log('Enhanced Assistant Sidebar extension activated with TRUE streaming support');
 }
 

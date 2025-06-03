@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime
 from logging import getLogger
-from typing import Any, Dict, List, AsyncGenerator
+from typing import Any, Dict, List, AsyncGenerator, Optional
 
 import httpx
 from config.settings import settings
@@ -51,17 +51,18 @@ class AnthropicStreamingAgent:
     MAX_RETRIES = 3
 
     def __init__(self, model_name="claude-sonnet-4-20250514"):
-        self.model_name = model_name #"claude-sonnet-4-20250514" #model_name
+        self.model_name = model_name
         self.agent_memory = AgentMemory()
         self.session = None
         self.client_context = None
         self.anthropic_tools = []
         self.workspace_path = None
+        self.system_info = None  # Add system info storage
         self.timeout = httpx.Timeout(
-            connect=60.0,  # Time to establish a connection
-            read=300.0,  # Time to read the response - increased from 120 to 300 seconds
-            write=120.0,  # Time to send data
-            pool=60.0,  # Time to wait for a connection from the pool
+            connect=60.0,
+            read=300.0,
+            write=120.0,
+            pool=60.0,
         )
 
         try:
@@ -73,6 +74,27 @@ class AnthropicStreamingAgent:
             console.print(f"[error]MongoDB connection error: {str(e)}[/error]")
             self.mongodb_client = None
             self.llm_usage_collection = None
+
+    def set_system_info(self, system_info: dict):
+        """Set system information for the agent"""
+        self.system_info = system_info
+        console.print(f"[info]System info updated: {system_info.get('platform', 'unknown')} {system_info.get('osVersion', '')}[/info]")
+
+    def _format_system_info_context(self) -> str:
+        """Format system information for the prompt"""
+        if not self.system_info:
+            return "No system information available."
+        
+        context = f"""
+SYSTEM INFORMATION:
+- Platform: {self.system_info.get('platform', 'unknown')}
+- OS Version: {self.system_info.get('osVersion', 'unknown')}
+- Architecture: {self.system_info.get('architecture', 'unknown')}
+- Workspace Path: {self.system_info.get('workspacePath', 'unknown')}
+- Workspace Name: {self.system_info.get('workspaceName', 'N/A')}
+- Default Shell: {self.system_info.get('defaultShell', 'unknown')}
+"""
+        return context
 
     async def anthropic_streaming_api_call(
         self,
@@ -703,16 +725,16 @@ class AnthropicStreamingAgent:
         # Make next call to Anthropic with tool results (recursive call)
         return await self.process_streaming_tool_calls(depth + 1)
 
-    async def initialize_session(self, server_url, transport_type, workspace_path):
-        """Initialize the MCP session and connect to the server"""
+    async def initialize_session(self, server_url, transport_type, workspace_path, system_info=None):
+        """Initialize the MCP session with optional system information"""
         try:
-            if workspace_path:
-                self.workspace_path = workspace_path
-                console.print(f"[info]Using workspace path: {workspace_path}[/info]")
-            else:
-                self.workspace_path = os.path.abspath("codebase")
-                console.print(f"[info]Using default workspace path: {self.workspace_path}[/info]")
-                
+            # Store workspace path and system info
+            self.workspace_path = workspace_path or os.getcwd()
+            if system_info:
+                self.set_system_info(system_info)
+            
+            console.print(f"[info]Initializing session with workspace: {self.workspace_path}[/info]")
+            
             # Connect to MCP server
             with console.status(
                 f"[info]Connecting to MCP server via {transport_type}...[/info]"
@@ -767,17 +789,18 @@ class AnthropicStreamingAgent:
                         },
                     }
                 )
-
-            # Create system message with tool descriptions and agentic capabilities
-            tool_descriptions = "\n".join(
-                [f"{tool.name}: {tool.description}" for tool in tools.tools]
-            )
+            
+            # Format system info context
+            system_info_context = self._format_system_info_context()
+            
+            # Use the actual workspace path and system info
             system_message = CODING_AGENT_SYSTEM_PROMPT.format(
-                tool_descriptions=tool_descriptions,
-                user_workspace=os.path.abspath("codebase"),
+                system_info_context=system_info_context,
             )
+            print(f"[info]Using system information:\n{system_info_context}[/info]")
+            
             # Initialize agent memory with system message
-            console.print("[info]Initializing agent system prompt[/info]")
+            console.print("[info]Initializing agent system prompt with system information[/info]")
             self.agent_memory.initialize_with_system_message(system_message)
             return True
 
@@ -791,7 +814,7 @@ class AnthropicStreamingAgent:
         self,
         server_url: str = "http://0.0.0.0:8001/sse",
         transport_type: str = "sse",
-        workspace_path: str = None,
+        workspace_path: Optional[str] = None,
     ):
         """Run an interactive session with the LLM using MCP tools with agent memory and streaming"""
         # Show a welcome banner
@@ -913,9 +936,10 @@ class AnthropicStreamingAgent:
         cls,
         server_url: str = settings.MCP_BASE_URL,
         transport_type: str = "sse",
+        workspace_path: Optional[str] = None,
     ):
         agent = cls()
-        await agent.run_interactive_session(server_url, transport_type)
+        await agent.run_interactive_session(server_url, transport_type, workspace_path)
 
     @classmethod
     def main(cls):
