@@ -55,6 +55,7 @@ class QueryRequest(BaseModel):
     target_file_path: Optional[str] = None
     workspace_path: str
     system_info: Optional[SystemInfo] = None
+    workspace_context: Optional[Dict[str, Any]] = None
 
 class PermissionResponse(BaseModel):
     permission_id: str
@@ -92,7 +93,7 @@ def create_stream_event(event_type: str, content: str, metadata: Optional[Dict[s
     )
     return f"data: {event.json()}\n\n"
 
-async def stream_agent_response(query: str, workspace_path: str, target_file_path: Optional[str] = None, system_info: Optional[SystemInfo] = None) -> AsyncGenerator[str, None]:
+async def stream_agent_response(query: str, workspace_path: str,target_file_path: Optional[str] = None, system_info: Optional[SystemInfo] = None, workspace_context: Optional[Dict[str, Any]] = None) -> AsyncGenerator[str, None]:
     """Stream the agent's response with TRUE real-time streaming"""
     global agent_instance
     
@@ -105,6 +106,41 @@ async def stream_agent_response(query: str, workspace_path: str, target_file_pat
         print(f"   Shell: {system_info.defaultShell}")
         print(f"   VS Code: {system_info.vsCodeVersion}")
     
+    # Print workspace context if provided
+    print(f"   Workspace Context: {workspace_context}")
+    if workspace_context:
+        print(f"📁 Workspace Context Received:")
+        print(f"   Workspace Name: {workspace_context.get('workspaceName', 'Unknown')}")
+        print(f"   Current File: {workspace_context.get('currentFile', {}).get('relativePath', 'None') if workspace_context.get('currentFile') else 'None'}")
+        print(f"   Open Files: {len(workspace_context.get('openFiles', []))}")
+        print(f"   Total Open Files: {workspace_context.get('totalOpenFiles', 0)}")
+        print(f"   Recently Modified: {len(workspace_context.get('recentlyModifiedFiles', []))}")
+        
+        # Print open files summary
+        open_files = workspace_context.get('openFiles', [])
+        if open_files:
+            print(f"   📄 Open Files Details:")
+            for i, file_info in enumerate(open_files[:5]):  # Show first 5 files
+                print(f"     {i+1}. {file_info.get('relativePath', 'Unknown')} ({file_info.get('languageId', 'Unknown')})")
+                if file_info.get('isDirty'):
+                    print(f"        ⚠️  File has unsaved changes")
+            if len(open_files) > 5:
+                print(f"     ... and {len(open_files) - 5} more files")
+        
+        # Print git info if available
+        git_info = workspace_context.get('gitInfo')
+        if git_info:
+            print(f"   🔧 Git Info:")
+            print(f"     Branch: {git_info.get('branch', 'Unknown')}")
+            print(f"     Has Changes: {git_info.get('hasChanges', False)}")
+            changed_files = git_info.get('changedFiles', [])
+            if changed_files:
+                print(f"     Changed Files: {', '.join(changed_files[:3])}")
+                if len(changed_files) > 3:
+                    print(f"       ... and {len(changed_files) - 3} more")
+    else:
+        print(f"   📁 No workspace context provided")
+
     # Check if agent is initialized
     if not agent_instance or not agent_instance.session:
         try:
@@ -526,7 +562,8 @@ async def stream_query(request: QueryRequest):
                 request.query, 
                 request.workspace_path, 
                 request.target_file_path,
-                request.system_info
+                request.system_info,
+                request.workspace_context,
             ),
             media_type="text/event-stream",
             headers={

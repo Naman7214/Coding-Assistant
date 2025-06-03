@@ -41,40 +41,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-timeout = httpx.Timeout(
-    connect=60.0,  # Time to establish a connection
-    read=150.0,  # Time to read the response
-    write=150.0,  # Time to send data
-    pool=60.0,  # Time to wait for a connection from the pool
-)
-
-prune_filter = PruningContentFilter(
-    threshold_type="dynamic",
-)
-
-md_generator = DefaultMarkdownGenerator(
-    content_filter=prune_filter,
-    options={
-        "ignore_links": True,
-        "escape_html": True,
-        "ignore_images": True,
-        "skip_internal_links": True,
-    },
-)
-crawler_cfg = CrawlerRunConfig(
-    exclude_external_links=True,
-    exclude_social_media_links=True,
-    exclude_external_images=True,
-    verbose=False,
-    cache_mode=CacheMode.DISABLED,
-    markdown_generator=md_generator,
-)
-browser_conf = BrowserConfig(text_mode=True, light_mode=True, verbose=False)
-
-# Initialize tiktoken encoder
-encoding = tiktoken.get_encoding("cl100k_base")  # GPT-4 encoding
-
-
 @click.command()
 @click.option("--port", default=8001, help="Port to listen on for SSE")
 def main(port: int) -> int:

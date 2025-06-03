@@ -15,6 +15,7 @@ interface QueryRequest {
     target_file_path?: string;
     workspace_path: string;
     system_info?: SystemInfo;
+    workspace_context?: Record<string, any>; // Lightweight workspace context
 }
 
 interface ThinkingState {

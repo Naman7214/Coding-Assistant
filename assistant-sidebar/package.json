@@ -25,7 +25,9 @@
     "coding",
     "productivity"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension_enhanced_streaming.js",
   "contributes": {
     "viewsContainers": {
@@ -82,6 +84,21 @@
         "command": "enhanced-assistant-sidebar.exportLogs",
         "title": "Export Enhanced Streaming Logs",
         "icon": "$(export)"
+      },
+      {
+        "command": "enhanced-assistant-sidebar.refreshContext",
+        "title": "Refresh Workspace Context",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "enhanced-assistant-sidebar.exportContext",
+        "title": "Export Workspace Context",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "enhanced-assistant-sidebar.openWorkspace",
+        "title": "Open Workspace Folder",
+        "icon": "$(folder-opened)"
       }
     ],
     "menus": {
@@ -92,14 +109,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "enhanced-assistant-sidebar.clearState",
+          "command": "enhanced-assistant-sidebar.refreshContext",
           "when": "view == enhancedAssistantView",
           "group": "navigation@2"
         },
         {
-          "command": "enhanced-assistant-sidebar.showOutput",
+          "command": "enhanced-assistant-sidebar.clearState",
           "when": "view == enhancedAssistantView",
           "group": "navigation@3"
+        },
+        {
+          "command": "enhanced-assistant-sidebar.showOutput",
+          "when": "view == enhancedAssistantView",
+          "group": "navigation@4"
         }
       ],
       "commandPalette": [
@@ -113,6 +135,18 @@
         },
         {
           "command": "enhanced-assistant-sidebar.startStreamingServer",
+          "when": "true"
+        },
+        {
+          "command": "enhanced-assistant-sidebar.refreshContext",
+          "when": "true"
+        },
+        {
+          "command": "enhanced-assistant-sidebar.exportContext",
+          "when": "true"
+        },
+        {
+          "command": "enhanced-assistant-sidebar.openWorkspace",
           "when": "true"
         }
       ]
@@ -152,6 +186,30 @@
           "type": "boolean",
           "default": true,
           "description": "Track and display tool usage and arguments"
+        },
+        "enhancedAssistantSidebar.includeAllOpenFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include all open files in workspace context"
+        },
+        "enhancedAssistantSidebar.maxFileSize": {
+          "type": "number",
+          "default": 1048576,
+          "description": "Maximum file size in bytes to include in context (1MB default)"
+        },
+        "enhancedAssistantSidebar.excludePatterns": {
+          "type": "array",
+          "default": [
+            "node_modules",
+            ".git",
+            "*.log"
+          ],
+          "description": "File patterns to exclude from workspace context"
+        },
+        "enhancedAssistantSidebar.includeGitInfo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include git repository information in workspace context"
         }
       }
     }
@@ -201,4 +259,4 @@
     "react-syntax-highlighter": "^15.6.1",
     "remark-gfm": "^4.0.1"
   }
-} 
+}
