@@ -15,7 +15,6 @@ interface QueryRequest {
     target_file_path?: string;
     workspace_path: string;
     system_info?: SystemInfo;
-    workspace_context?: Record<string, any>; // Lightweight workspace context
 }
 
 interface ThinkingState {
@@ -104,7 +103,8 @@ export class EnhancedStreamingClient {
     async streamQuery(
         request: QueryRequest,
         webview?: vscode.Webview,
-        onEvent?: (event: StreamEvent, state: StreamingState) => void | Promise<void>
+        onEvent?: (event: StreamEvent, state: StreamingState) => void | Promise<void>,
+        headers?: Record<string, string>
     ): Promise<void> {
         try {
             // Reset state for new query
@@ -117,6 +117,18 @@ export class EnhancedStreamingClient {
                 system_info: systemInfo
             };
 
+            // Prepare headers with workspace ID if available from vscode workspace
+            const requestHeaders = {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
+                ...headers // Include any additional headers passed in (including X-Workspace-ID)
+            };
+
+            // Workspace ID should be provided in headers for new SQLite-based context system
+            if (!requestHeaders['X-Workspace-ID']) {
+                this.appendToOutput(`⚠️ No workspace ID provided - agent will have limited context`);
+            }
+
             // Show initial status
             this.updateStatus("🚀 Starting TRUE streaming...");
             this.appendToOutput(`\n=== NEW QUERY ===`);
@@ -128,6 +140,12 @@ export class EnhancedStreamingClient {
             this.appendToOutput(`Platform: ${systemInfo.platform} ${systemInfo.osVersion}`);
             this.appendToOutput(`Shell: ${systemInfo.defaultShell}`);
             this.appendToOutput(`Timestamp: ${new Date().toLocaleString()}`);
+
+            // Log workspace ID if present
+            if (requestHeaders['X-Workspace-ID']) {
+                this.appendToOutput(`Workspace ID: ${requestHeaders['X-Workspace-ID']}`);
+            }
+
             this.appendToOutput(`=================\n`);
 
             // Send initial message to webview with system info
@@ -143,10 +161,7 @@ export class EnhancedStreamingClient {
 
             // Use axios with responseType 'stream' for TRUE streaming
             const response = await axios.post(`${this.baseUrl}/stream`, enhancedRequest, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream',
-                },
+                headers: requestHeaders,
                 responseType: 'stream',
                 timeout: 300000 // 5 minutes timeout for long operations
             });

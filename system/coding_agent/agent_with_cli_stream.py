@@ -24,6 +24,9 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.theme import Theme
 
+# Import the new HTTP context adapter instead of SQLite-based ContextRetriever
+from context.http_context_adapter import ContextRetriever
+
 logger = getLogger(__name__)
 
 
@@ -57,7 +60,9 @@ class AnthropicStreamingAgent:
         self.client_context = None
         self.anthropic_tools = []
         self.workspace_path = None
+        self.workspace_id = None  # Add workspace_id property
         self.system_info = None  # Add system info storage
+        self.context_retriever = ContextRetriever()  # Initialize with default path
         self.timeout = httpx.Timeout(
             connect=60.0,
             read=300.0,
@@ -80,6 +85,11 @@ class AnthropicStreamingAgent:
         self.system_info = system_info
         console.print(f"[info]System info updated: {system_info.get('platform', 'unknown')} {system_info.get('osVersion', '')}[/info]")
 
+    def set_workspace_id(self, workspace_id: str):
+        """Set workspace ID for context retrieval"""
+        self.workspace_id = workspace_id
+        console.print(f"[info]Workspace ID set: {workspace_id}[/info]")
+
     def _format_system_info_context(self) -> str:
         """Format system information for the prompt"""
         if not self.system_info:
@@ -95,6 +105,102 @@ SYSTEM INFORMATION:
 - Default Shell: {self.system_info.get('defaultShell', 'unknown')}
 """
         return context
+
+    async def get_workspace_context(self) -> Optional[str]:
+        """Retrieve workspace context using the workspace ID"""
+        if not self.workspace_id:
+            console.print("[warning]No workspace ID available for context retrieval[/warning]")
+            return None
+
+        try:
+            # Get workspace context from SQLite database
+            workspace_context = self.context_retriever.get_workspace_context(self.workspace_id)
+            
+            if workspace_context:
+                console.print(f"[success]Retrieved workspace context from {workspace_context['source']}[/success]")
+                console.print(f"[info]Context contains {workspace_context['token_count']} tokens[/info]")
+                
+                console.print(f"[info]Workspace Context:\n{workspace_context}[/info]")
+                
+                # Format context for the agent
+                return self._format_workspace_context_for_agent(workspace_context)
+            else:
+                console.print("[warning]No workspace context available[/warning]")
+                return None
+                
+        except Exception as e:
+            console.print(f"[error]Failed to retrieve workspace context: {e}[/error]")
+            return None
+
+    def _format_workspace_context_for_agent(self, workspace_context: Dict[str, Any]) -> str:
+        """Format workspace context for inclusion in agent memory"""
+        try:
+            workspace_info = workspace_context.get('workspace_info', {})
+            context_data = workspace_context.get('context_data', {})
+            
+            # Build formatted context string
+            formatted_context = f"""
+=== WORKSPACE CONTEXT ===
+Workspace: {workspace_info.get('name', 'Unknown')} ({workspace_info.get('path', 'Unknown')})
+Source: {workspace_context.get('source', 'unknown')}
+Token Count: {workspace_context.get('token_count', 0)}
+
+"""
+            
+            # Add workspace summary if available
+            if 'summary' in context_data:
+                summary = context_data['summary']
+                formatted_context += f"""
+FILES & STRUCTURE:
+- Total Files: {summary.get('total_files', 0)}
+- Languages: {', '.join(summary.get('languages', []))}
+- Most Accessed Files: {len(summary.get('most_accessed_files', []))} files tracked
+
+"""
+            
+            # Add recent files if available
+            files = context_data.get('files', [])
+            if files:
+                formatted_context += f"""
+RECENT FILES (Top 10):
+"""
+                for i, file_info in enumerate(files[:10]):
+                    formatted_context += f"  {i+1}. {file_info.get('relative_path', 'Unknown')} ({file_info.get('language_id', 'Unknown')})\n"
+                
+                if len(files) > 10:
+                    formatted_context += f"  ... and {len(files) - 10} more files\n"
+            
+            # Add full context data if from cached session
+            if workspace_context.get('source') == 'cached_session' and 'activeFile' in context_data:
+                active_file = context_data.get('activeFile')
+                if active_file:
+                    formatted_context += f"""
+ACTIVE FILE:
+- Path: {active_file.get('relativePath', 'Unknown')}
+- Language: {active_file.get('languageId', 'Unknown')}
+- Lines: {active_file.get('lineCount', 0)}
+- Dirty: {active_file.get('isDirty', False)}
+
+"""
+                
+                # Add git context if available
+                git_context = context_data.get('gitContext', {})
+                if git_context.get('isRepo'):
+                    formatted_context += f"""
+GIT CONTEXT:
+- Branch: {git_context.get('branch', 'Unknown')}
+- Has Changes: {git_context.get('hasChanges', False)}
+- Changed Files: {len(git_context.get('changedFiles', []))}
+- Recent Commits: {len(git_context.get('recentCommits', []))}
+
+"""
+            
+            formatted_context += "=== END WORKSPACE CONTEXT ===\n"
+            return formatted_context
+            
+        except Exception as e:
+            console.print(f"[error]Failed to format workspace context: {e}[/error]")
+            return f"Error formatting workspace context: {e}"
 
     async def anthropic_streaming_api_call(
         self,
@@ -649,17 +755,15 @@ SYSTEM INFORMATION:
 
                 # Process result
                 if tool_result:
-                    # Fix content.text access to handle different result types
-                    tool_content = "\n".join(
-                        [
-                            (
-                                content.text
-                                if hasattr(content, "text")
-                                else str(content)
-                            )
-                            for content in tool_result
-                        ]
-                    )
+                    # Handle MCP tool result format - simple string conversion
+                    try:
+                        if isinstance(tool_result, list):
+                            tool_content = "\n".join(str(item) for item in tool_result)
+                        else:
+                            tool_content = str(tool_result)
+                    except Exception as e:
+                        console.print(f"[error]Error processing tool result: {e}[/error]")
+                        tool_content = f"Tool completed (result processing error: {e})"
 
                     # Limit content length to avoid issues with very large inputs
                     original_length = len(tool_content)
@@ -725,15 +829,19 @@ SYSTEM INFORMATION:
         # Make next call to Anthropic with tool results (recursive call)
         return await self.process_streaming_tool_calls(depth + 1)
 
-    async def initialize_session(self, server_url, transport_type, workspace_path, system_info=None):
-        """Initialize the MCP session with optional system information"""
+    async def initialize_session(self, server_url, transport_type, workspace_path, system_info=None, workspace_id=None):
+        """Initialize the MCP session with optional system information and workspace ID"""
         try:
-            # Store workspace path and system info
+            # Store workspace path, system info, and workspace ID
             self.workspace_path = workspace_path or os.getcwd()
             if system_info:
                 self.set_system_info(system_info)
+            if workspace_id:
+                self.set_workspace_id(workspace_id)
             
             console.print(f"[info]Initializing session with workspace: {self.workspace_path}[/info]")
+            if workspace_id:
+                console.print(f"[info]Workspace ID: {workspace_id}[/info]")
             
             # Connect to MCP server
             with console.status(
@@ -793,14 +901,24 @@ SYSTEM INFORMATION:
             # Format system info context
             system_info_context = self._format_system_info_context()
             
+            # Get workspace context if workspace ID is available
+            workspace_context = await self.get_workspace_context() if workspace_id else ""
+            
             # Use the actual workspace path and system info
             system_message = CODING_AGENT_SYSTEM_PROMPT.format(
                 system_info_context=system_info_context,
             )
-            print(f"[info]Using system information:\n{system_info_context}[/info]")
+            
+            # Add workspace context to system message if available
+            if workspace_context:
+                system_message += f"\n\n{workspace_context}"
+            
+            console.print(f"[info]Using system information:\n{system_info_context}[/info]")
+            if workspace_context:
+                console.print("[info]Workspace context loaded and added to system prompt[/info]")
             
             # Initialize agent memory with system message
-            console.print("[info]Initializing agent system prompt with system information[/info]")
+            console.print("[info]Initializing agent system prompt with system information and workspace context[/info]")
             self.agent_memory.initialize_with_system_message(system_message)
             return True
 

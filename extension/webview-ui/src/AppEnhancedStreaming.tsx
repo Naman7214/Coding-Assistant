@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import './AppEnhancedStreaming.css';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import TerminalDisplay from './components/TerminalDisplay';
-import './AppEnhancedStreaming.css';
 
 // Declare vscode API
 declare const vscode: any;
@@ -41,14 +41,27 @@ interface StreamingState {
   isStreaming: boolean;
 }
 
+interface ContextManagerStatus {
+  ready: boolean;
+  initializing: boolean;
+  error?: string;
+}
+
 const AppEnhancedStreaming: React.FC = () => {
   const [query, setQuery] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'healthy' | 'unhealthy'>('unknown');
   const [statusMessage, setStatusMessage] = useState('Checking connection...');
-  
+
+  // Context manager status
+  const [contextManagerStatus, setContextManagerStatus] = useState<ContextManagerStatus>({
+    ready: false,
+    initializing: true,
+    error: undefined
+  });
+
   // Chat history
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  
+
   // Current streaming state
   const [streamingState, setStreamingState] = useState<StreamingState>({
     currentThinking: '',
@@ -81,7 +94,7 @@ const AppEnhancedStreaming: React.FC = () => {
     // Listen for messages from the extension
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
-      
+
       switch (message.command) {
         case 'streamStart':
           handleStreamStart(message);
@@ -122,11 +135,14 @@ const AppEnhancedStreaming: React.FC = () => {
         case 'terminalOutput':
           handleTerminalOutput(message);
           break;
+        case 'contextManagerReady':
+          handleContextManagerReady(message);
+          break;
       }
     };
 
     window.addEventListener('message', handleMessage);
-    
+
     // Initial health check
     vscode.postMessage({ command: 'checkStreamingHealth' });
 
@@ -139,6 +155,24 @@ const AppEnhancedStreaming: React.FC = () => {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, streamingState.currentResponse]);
+
+  const handleContextManagerReady = (message: any) => {
+    setContextManagerStatus({
+      ready: message.ready,
+      initializing: false,
+      error: message.error
+    });
+
+    if (message.ready) {
+      setStatusMessage('Context manager ready');
+
+      // Automatically trigger initial context collection when context manager becomes ready
+      // This ensures workspace context is available immediately when the UI loads
+      vscode.postMessage({ command: 'collectContext' });
+    } else {
+      setStatusMessage(`Context manager error: ${message.error}`);
+    }
+  };
 
   const handleStreamStart = (message: any) => {
     setStreamingState({
@@ -173,7 +207,7 @@ const AppEnhancedStreaming: React.FC = () => {
       status: 'selecting',
       timestamp: Date.now()
     };
-    
+
     setStreamingState(prev => ({
       ...prev,
       currentTools: [...prev.currentTools, newTool]
@@ -184,7 +218,7 @@ const AppEnhancedStreaming: React.FC = () => {
   const handleToolExecution = (message: any) => {
     setStreamingState(prev => ({
       ...prev,
-      currentTools: prev.currentTools.map(tool => 
+      currentTools: prev.currentTools.map(tool =>
         tool.name === message.toolName && tool.status === 'selecting'
           ? { ...tool, status: 'executing', arguments: message.arguments }
           : tool
@@ -196,31 +230,31 @@ const AppEnhancedStreaming: React.FC = () => {
   const handleToolResult = (message: any) => {
     setStreamingState(prev => ({
       ...prev,
-      currentTools: prev.currentTools.map(tool => 
+      currentTools: prev.currentTools.map(tool =>
         tool.name === message.toolName && tool.status === 'executing'
-          ? { 
-              ...tool, 
-              status: message.isError ? 'error' : 'completed',
-              result: message.content 
-            }
+          ? {
+            ...tool,
+            status: message.isError ? 'error' : 'completed',
+            result: message.content
+          }
           : tool
       )
     }));
-    
+
     // Clear permission request if this was a terminal command that completed
     if (message.toolName === 'run_terminal_command' && permissionRequest) {
       setTimeout(() => {
         setPermissionRequest(null);
       }, 500); // 0.5 second delay to show completion (reduced from 1 second)
     }
-    
+
     updateEventStats();
   };
 
   const handleResponseUpdate = (message: any) => {
     setStreamingState(prev => {
       const newResponse = message.fullResponse || prev.currentResponse + (message.content || '');
-      
+
       return {
         ...prev,
         currentResponse: newResponse
@@ -286,7 +320,7 @@ const AppEnhancedStreaming: React.FC = () => {
       };
 
       setChatHistory(prev => [...prev, assistantMessage]);
-      
+
       // Return reset state
       return {
         currentThinking: '',
@@ -301,7 +335,7 @@ const AppEnhancedStreaming: React.FC = () => {
         isStreaming: false
       };
     });
-    
+
     // Clear any remaining permission request when stream completes
     setPermissionRequest(null);
     setStatusMessage('Ready');
@@ -317,7 +351,7 @@ const AppEnhancedStreaming: React.FC = () => {
     };
 
     setChatHistory(prev => [...prev, errorMessage]);
-    
+
     setStreamingState({
       currentThinking: '',
       currentTools: [],
@@ -330,7 +364,7 @@ const AppEnhancedStreaming: React.FC = () => {
       isThinking: false,
       isStreaming: false
     });
-    
+
     // Clear permission request on error
     setPermissionRequest(null);
     setStatusMessage('Error occurred');
@@ -356,7 +390,7 @@ const AppEnhancedStreaming: React.FC = () => {
 
   const handleHealthStatus = (message: any) => {
     setConnectionStatus(message.isHealthy ? 'healthy' : 'unhealthy');
-    setStatusMessage(message.isHealthy ? 'Enhanced TRUE Streaming Ready' : 
+    setStatusMessage(message.isHealthy ? 'Enhanced TRUE Streaming Ready' :
       (message.error || 'Enhanced streaming unavailable'));
   };
 
@@ -367,7 +401,7 @@ const AppEnhancedStreaming: React.FC = () => {
 
   const sendQuery = () => {
     if (!query.trim() || streamingState.isStreaming) return;
-    
+
     // Add user message to chat history
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -375,15 +409,15 @@ const AppEnhancedStreaming: React.FC = () => {
       content: query.trim(),
       timestamp: Date.now()
     };
-    
+
     setChatHistory(prev => [...prev, userMessage]);
-    
+
     vscode.postMessage({
       command: 'sendQuery',
       text: query,
       useStreaming: true
     });
-    
+
     setQuery('');
   };
 
@@ -396,7 +430,7 @@ const AppEnhancedStreaming: React.FC = () => {
 
   const handlePermissionResponse = (granted: boolean) => {
     if (!permissionRequest) return;
-    
+
     // Update terminal state
     setStreamingState(prev => ({
       ...prev,
@@ -407,13 +441,13 @@ const AppEnhancedStreaming: React.FC = () => {
         hasError: !granted
       }
     }));
-    
+
     vscode.postMessage({
       command: 'permissionResponse',
       permissionId: permissionRequest.id,
       granted: granted
     });
-    
+
     // Clear the permission request after a short delay if granted
     // This allows users to see the command being executed briefly
     if (granted) {
@@ -461,12 +495,12 @@ const AppEnhancedStreaming: React.FC = () => {
 
   const terminateProcess = (processId: string) => {
     if (!processId) return;
-    
+
     vscode.postMessage({
       command: 'terminateProcess',
       processId: processId
     });
-    
+
     // Update UI to show termination in progress
     setStreamingState(prev => ({
       ...prev,
@@ -485,13 +519,20 @@ const AppEnhancedStreaming: React.FC = () => {
       <div className="streaming-header">
         <span>🚀 Enhanced Agent Assistant</span>
         <div className="header-controls">
-          <button 
+          <button
             className="health-button"
             onClick={refreshConnection}
             title={`Enhanced Streaming: ${connectionStatus}`}
           >
             {getStatusIcon()}
           </button>
+          {/* Context Manager Status Indicator */}
+          <span
+            className={`context-status ${contextManagerStatus.ready ? 'ready' : contextManagerStatus.initializing ? 'initializing' : 'error'}`}
+            title={contextManagerStatus.error || (contextManagerStatus.ready ? 'Context manager ready' : 'Context manager initializing...')}
+          >
+            {contextManagerStatus.ready ? '🟢' : contextManagerStatus.initializing ? '🟡' : '🔴'} Context
+          </span>
           <button onClick={clearState} className="toggle-button">
             🗑️ Clear
           </button>
@@ -501,22 +542,46 @@ const AppEnhancedStreaming: React.FC = () => {
         </div>
       </div>
 
+      {/* Context Manager Status Message */}
+      {!contextManagerStatus.ready && (
+        <div className={`context-status-message ${contextManagerStatus.error ? 'error' : 'initializing'}`}>
+          {contextManagerStatus.initializing ? (
+            <span>🔧 Initializing context manager for workspace analysis...</span>
+          ) : contextManagerStatus.error ? (
+            <span>❌ Context manager failed to initialize: {contextManagerStatus.error}</span>
+          ) : null}
+        </div>
+      )}
+
       {/* Query input section */}
-      <textarea 
-        className="streaming-query-input" 
-        placeholder="Ask the enhanced agent anything..." 
+      <textarea
+        className="streaming-query-input"
+        placeholder={
+          contextManagerStatus.ready
+            ? "Ask the enhanced agent anything..."
+            : contextManagerStatus.initializing
+              ? "Initializing context manager, please wait..."
+              : "Context manager initialization failed"
+        }
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        disabled={streamingState.isStreaming}
+        disabled={streamingState.isStreaming || !contextManagerStatus.ready}
       />
-      
-      <button 
-        className="streaming-send-button" 
+
+      <button
+        className="streaming-send-button"
         onClick={sendQuery}
-        disabled={streamingState.isStreaming || !query.trim()}
+        disabled={streamingState.isStreaming || !query.trim() || !contextManagerStatus.ready}
+        title={
+          !contextManagerStatus.ready
+            ? "Context manager must be ready before sending queries"
+            : streamingState.isStreaming
+              ? "Processing current query..."
+              : "Send query to agent"
+        }
       >
-        {streamingState.isStreaming ? 'Processing...' : '📤 Send'}
+        {streamingState.isStreaming ? 'Processing...' : !contextManagerStatus.ready ? '⏳ Waiting...' : '📤 Send'}
       </button>
 
       {/* Chat Thread */}
@@ -529,7 +594,7 @@ const AppEnhancedStreaming: React.FC = () => {
               </span>
               <span className="message-time">{formatTimestamp(message.timestamp)}</span>
             </div>
-            
+
             <div className="message-content">
               {message.type === 'user' ? (
                 <div className="user-message">{message.content}</div>
@@ -544,7 +609,7 @@ const AppEnhancedStreaming: React.FC = () => {
                       </div>
                     </details>
                   )}
-                  
+
                   {/* Tools Section */}
                   {message.tools && message.tools.length > 0 && (
                     <details className="tools-section">
@@ -576,7 +641,7 @@ const AppEnhancedStreaming: React.FC = () => {
                       </div>
                     </details>
                   )}
-                  
+
                   {/* Response Content */}
                   <div className="response-content">
                     <MarkdownRenderer markdown={message.content} />
@@ -586,7 +651,7 @@ const AppEnhancedStreaming: React.FC = () => {
             </div>
           </div>
         ))}
-        
+
         {/* Current Streaming Message */}
         {streamingState.isStreaming && (
           <div className="chat-message assistant streaming">
@@ -594,7 +659,7 @@ const AppEnhancedStreaming: React.FC = () => {
               <span className="message-type">🤖 Assistant</span>
               <span className="message-time">Streaming...</span>
             </div>
-            
+
             <div className="message-content">
               <div className="assistant-message">
                 {/* Current Thinking */}
@@ -609,7 +674,7 @@ const AppEnhancedStreaming: React.FC = () => {
                     </div>
                   </details>
                 )}
-                
+
                 {/* Current Tools */}
                 {streamingState.currentTools.length > 0 && (
                   <details className="tools-section" open>
@@ -641,7 +706,7 @@ const AppEnhancedStreaming: React.FC = () => {
                     </div>
                   </details>
                 )}
-                
+
                 {/* Current Response */}
                 {streamingState.currentResponse && (
                   <div className="response-content">
@@ -652,14 +717,14 @@ const AppEnhancedStreaming: React.FC = () => {
             </div>
           </div>
         )}
-        
+
         <div ref={chatEndRef} />
       </div>
 
       {/* Health status footer */}
       <div className="streaming-footer">
         <small>
-          Enhanced Streaming: {connectionStatus === 'healthy' ? '🟢 Available' : '🔴 Unavailable'} 
+          Enhanced Streaming: {connectionStatus === 'healthy' ? '🟢 Available' : '🔴 Unavailable'}
           | Events: {eventCount} | Last: {lastEventTime}
         </small>
       </div>
@@ -673,7 +738,7 @@ const AppEnhancedStreaming: React.FC = () => {
             </div>
             <div className="permission-content">
               <p><strong>The agent wants to execute this command:</strong></p>
-              
+
               {/* Terminal Display for command */}
               <TerminalDisplay
                 command={permissionRequest.command}
@@ -683,7 +748,7 @@ const AppEnhancedStreaming: React.FC = () => {
                 height="auto"
                 maxHeight="200px"
               />
-              
+
               <p className="permission-message">{permissionRequest.message}</p>
               <p style={{ fontSize: '13px', color: 'var(--vscode-descriptionForeground)' }}>
                 <strong>Note:</strong> This command will be executed on your system. Please review it carefully.
@@ -692,13 +757,13 @@ const AppEnhancedStreaming: React.FC = () => {
             <div className="permission-actions">
               {!streamingState.currentTerminal.isExecuting ? (
                 <>
-                  <button 
+                  <button
                     className="permission-button deny-button"
                     onClick={() => handlePermissionResponse(false)}
                   >
                     Deny
                   </button>
-                  <button 
+                  <button
                     className="permission-button allow-button"
                     onClick={() => handlePermissionResponse(true)}
                   >
@@ -707,16 +772,16 @@ const AppEnhancedStreaming: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <button 
+                  <button
                     className="permission-button close-button"
                     onClick={() => setPermissionRequest(null)}
                     title="Close this dialog to see the agent's response while command runs"
                   >
                     Minimize
                   </button>
-                  
+
                   {streamingState.currentTerminal.processId && (
-                    <button 
+                    <button
                       className="permission-button deny-button"
                       onClick={() => terminateProcess(streamingState.currentTerminal.processId!)}
                     >
@@ -735,12 +800,12 @@ const AppEnhancedStreaming: React.FC = () => {
         <div className="terminal-section">
           <details open={streamingState.currentTerminal.isExecuting}>
             <summary>
-              💻 Terminal Command 
+              💻 Terminal Command
               {streamingState.currentTerminal.isExecuting && (
                 <>
                   <span className="terminal-spinner">⚙️</span>
                   {streamingState.currentTerminal.processId && (
-                    <button 
+                    <button
                       className="terminate-button"
                       onClick={() => terminateProcess(streamingState.currentTerminal.processId!)}
                       title="Terminate this process"
