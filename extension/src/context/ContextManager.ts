@@ -471,11 +471,10 @@ export class ContextManager extends EventEmitter {
 
         this.workspaceMetadata = {
             path: workspaceFolder.uri.fsPath,
-            name: workspaceFolder.name,
             folders: [workspaceFolder.uri.fsPath],
-            languages: Array.from(languages),
-            mainLanguage: languages.size > 0 ? Array.from(languages)[0] : undefined,
-            packageManagers
+            languages: [],
+            mainLanguage: undefined,
+            packageManagers: []
         };
     }
 
@@ -554,92 +553,58 @@ export class ContextManager extends EventEmitter {
 
         // Build processed context
         const processedContext: ProcessedContext = {
-            workspace: this.workspaceMetadata || {
-                path: '',
-                name: '',
-                folders: [],
-                languages: [],
-                packageManagers: []
+            workspace: {
+                path: this.workspaceMetadata?.path || '',
+                folders: this.workspaceMetadata?.folders || [],
+                languages: this.workspaceMetadata?.languages || [],
+                packageManagers: this.workspaceMetadata?.packageManagers || []
             },
             activeFile: activeFileData ? {
-                path: activeFileData.file.path,
-                relativePath: activeFileData.file.relativePath,
-                languageId: activeFileData.file.languageId,
-                isDirty: activeFileData.file.isDirty,
-                isUntitled: false,
-                lineCount: activeFileData.file.lineCount,
-                fileSize: activeFileData.file.fileSize,
-                lastModified: Date.now(),
+                path: activeFileData.file?.path || '',
+                relativePath: activeFileData.file?.relativePath || '',
+                languageId: activeFileData.file?.languageId || '',
+                lineCount: activeFileData.file?.lineCount || 0,
+                fileSize: activeFileData.file?.fileSize || 0,
+                lastModified: activeFileData.file?.lastModified || new Date().toISOString(),
                 accessFrequency: 1,
-                cursorPosition: new vscode.Position(
-                    activeFileData.cursor.line,
-                    activeFileData.cursor.character
-                ),
-                selection: activeFileData.cursor.selection,
-                visibleRanges: activeFileData.viewport.visibleRanges,
-                content: activeFileData.file.content
+                cursorPosition: activeFileData.cursor ? new vscode.Position(
+                    Math.max(0, (activeFileData.cursor.line || 1) - 1), // Convert back to 0-indexed for VSCode
+                    Math.max(0, (activeFileData.cursor.character || 1) - 1)
+                ) : new vscode.Position(0, 0),
+                selection: activeFileData.cursor?.selection || new vscode.Selection(0, 0, 0, 0),
+                visibleRanges: activeFileData.viewport?.visibleRanges || []
             } : null,
-            openFiles: openFilesData?.files.map((file: any) => ({
-                path: file.path,
-                relativePath: file.relativePath,
-                languageId: file.languageId,
-                isDirty: file.isDirty,
-                isUntitled: false,
-                lineCount: file.lineCount,
-                fileSize: file.fileSize,
-                lastModified: Date.now(),
+            openFiles: openFilesData?.files ? openFilesData.files.map((file: any) => ({
+                path: file.path || '',
+                relativePath: file.relativePath || '',
+                languageId: file.languageId || '',
+                lineCount: file.lineCount || 0,
+                fileSize: file.fileSize || 0,
+                lastModified: file.lastModified || new Date().toISOString(),
                 accessFrequency: 1
-            })) || [],
-            projectStructure: projectStructureData ? {
-                directories: projectStructureData.structure.directories.map((dir: any) => ({
-                    path: dir.path,
-                    relativePath: dir.relativePath,
-                    fileCount: dir.fileCount,
-                    totalSize: 0, // Would need to calculate
-                    lastModified: Date.now(),
-                    importance: dir.importance
-                })),
-                dependencies: projectStructureData.dependencies.map((dep: any) => ({
-                    fromFile: dep.fromFile,
-                    toFile: dep.toFile,
-                    importType: dep.type as 'import' | 'require' | 'include',
-                    lineNumber: 0, // Would need to track
-                    isExternal: false,
-                    packageName: undefined
-                })),
-                configFiles: projectStructureData.structure.files
-                    .filter((file: any) => file.type === 'config')
-                    .map((file: any) => file.relativePath),
-                mainEntryPoints: projectStructureData.packageInfo.mainFiles || [],
-                testFiles: projectStructureData.structure.files
-                    .filter((file: any) => file.type === 'test')
-                    .map((file: any) => file.relativePath)
-            } : {
-                directories: [],
-                dependencies: [],
-                configFiles: [],
-                mainEntryPoints: [],
-                testFiles: []
-            },
+            })) : [],
+            projectStructure: projectStructureData?.treeStructure || '',
             gitContext: gitContextData ? {
-                branch: gitContextData.repository.currentBranch,
-                hasChanges: gitContextData.status.hasUncommittedChanges,
-                changedFiles: gitContextData.status.changedFiles.map((file: any) => file.path),
-                recentCommits: gitContextData.history.recentCommits.map((commit: any) => ({
-                    hash: commit.hash,
-                    message: commit.message,
-                    author: commit.author,
-                    date: commit.date,
-                    filesChanged: commit.filesChanged
-                })),
-                uncommittedChanges: gitContextData.status.changedFiles.map((file: any) => ({
-                    filePath: file.path,
-                    changeType: this.parseChangeType(file.status),
-                    linesAdded: file.linesAdded,
-                    linesDeleted: file.linesDeleted
-                })),
-                remoteUrl: gitContextData.repository.remoteUrl,
-                isRepo: gitContextData.repository.isRepo
+                branch: gitContextData.repository?.currentBranch || '',
+                hasChanges: gitContextData.status?.hasUncommittedChanges || false,
+                changedFiles: gitContextData.status?.changedFiles?.map((file: any) => file.path) || [],
+                recentCommits: gitContextData.history?.recentCommits?.map((commit: any) => ({
+                    hash: commit.hash || '',
+                    message: commit.message || '',
+                    author: commit.author || '',
+                    date: commit.date || new Date(),
+                    filesChanged: commit.filesChanged || []
+                })) || [],
+                uncommittedChanges: gitContextData.status?.changedFiles?.map((file: any) => ({
+                    filePath: file.path || '',
+                    changeType: this.parseChangeType(file.status) || 'modified',
+                    linesAdded: file.linesAdded || 0,
+                    linesDeleted: file.linesDeleted || 0
+                })) || [],
+                stagedDiff: gitContextData.diff?.stagedChanges || '',
+                unstagedDiff: gitContextData.diff?.unstagedChanges || '',
+                remoteUrl: gitContextData.repository?.remoteUrl,
+                isRepo: gitContextData.repository?.isRepo || false
             } : {
                 branch: '',
                 hasChanges: false,
@@ -677,7 +642,11 @@ export class ContextManager extends EventEmitter {
     /**
      * Parse git change type to our format
      */
-    private parseChangeType(gitStatus: string): 'added' | 'modified' | 'deleted' | 'renamed' {
+    private parseChangeType(gitStatus: string | null | undefined): 'added' | 'modified' | 'deleted' | 'renamed' {
+        if (!gitStatus || typeof gitStatus !== 'string') {
+            return 'modified';
+        }
+
         if (gitStatus.includes('added')) return 'added';
         if (gitStatus.includes('deleted')) return 'deleted';
         if (gitStatus.includes('renamed')) return 'renamed';
@@ -695,26 +664,37 @@ export class ContextManager extends EventEmitter {
     ): number {
         let tokens = 0;
 
-        if (activeFileData) {
-            // Roughly 4 characters per token
-            tokens += Math.ceil(activeFileData.file.content.length / 4);
+        if (activeFileData?.file) {
+            // Roughly 4 characters per token for the active file content
+            // Since we don't include content anymore, estimate based on file size
+            tokens += Math.ceil((activeFileData.file.fileSize || 0) / 4);
+
+            // Add tokens for surrounding lines context
+            if (activeFileData.context?.surroundingLines) {
+                const contextText = activeFileData.context.surroundingLines.join('\n');
+                tokens += Math.ceil(contextText.length / 4);
+            }
         }
 
-        if (openFilesData) {
+        if (openFilesData?.files && Array.isArray(openFilesData.files)) {
             // Estimate metadata tokens
             tokens += openFilesData.files.length * 50; // ~50 tokens per file metadata
         }
 
-        if (projectStructureData) {
+        if (projectStructureData?.treeStructure) {
             // Project structure tokens
-            tokens += projectStructureData.structure.files.length * 20; // ~20 tokens per file
-            tokens += projectStructureData.dependencies.length * 10; // ~10 tokens per dependency
+            tokens += Math.ceil(projectStructureData.treeStructure.length / 4);
         }
 
         if (gitContextData) {
             // Git context tokens
-            tokens += gitContextData.history.recentCommits.length * 30; // ~30 tokens per commit
-            tokens += Math.ceil((gitContextData.diff.stagedChanges.length + gitContextData.diff.unstagedChanges.length) / 4);
+            if (gitContextData.history?.recentCommits && Array.isArray(gitContextData.history.recentCommits)) {
+                tokens += gitContextData.history.recentCommits.length * 30; // ~30 tokens per commit
+            }
+
+            const stagedChanges = gitContextData.diff?.stagedChanges || '';
+            const unstagedChanges = gitContextData.diff?.unstagedChanges || '';
+            tokens += Math.ceil((stagedChanges.length + unstagedChanges.length) / 4);
         }
 
         return tokens;

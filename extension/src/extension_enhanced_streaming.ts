@@ -109,8 +109,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       this.notifyWebviewContextManagerReady(true);
 
       // Update status bar
-      this.statusBarItem.text = '$(check) Enhanced Assistant Ready';
-      this.statusBarItem.tooltip = `Enhanced Assistant Ready\nContext API: http://localhost:${this.contextApiServer.getPort()}`;
+      this.updateStatusBar();
 
     } catch (error) {
       this.outputChannel.appendLine(`[Extension] Failed to initialize context systems: ${error}`);
@@ -461,18 +460,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           },
           requestHeaders
         );
-      } else {
-        // Fallback to original API
-        this.outputChannel.appendLine(`⚠️ Using fallback API`);
-        this.updateResponse('🔄 Processing with standard API...');
-
-        const response = await this.callOriginalAgent(
-          query,
-          fullContext.activeFile?.path || '',
-          fullContext.workspace.path,
-          fullContext
-        );
-        this.updateResponse(response);
       }
 
     } catch (error) {
@@ -488,12 +475,10 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
    */
   private getContextSummary(context: ProcessedContext): string {
     return [
-      `Workspace: ${context.workspace.name} (${context.workspace.path})`,
+      `Workspace: ${context.workspace.path}`,
       `Current file: ${context.activeFile?.relativePath || 'none'}`,
       `Open files: ${context.openFiles.length}`,
-      `Project directories: ${context.projectStructure.directories.length}`,
-      `Project files: ${context.projectStructure.dependencies.length}`,
-      `Dependencies: ${context.projectStructure.dependencies.length}`,
+      `Project structure: ${context.projectStructure.length > 0 ? 'Available' : 'Not available'}`,
       `Git branch: ${context.gitContext.branch || 'none'}`,
       `Git changes: ${context.gitContext.hasChanges ? 'yes' : 'no'}`,
       `Recent commits: ${context.gitContext.recentCommits.length}`,
@@ -550,29 +535,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async callOriginalAgent(
-    query: string,
-    targetFilePath: string,
-    workspacePath: string,
-    fullContext: ProcessedContext
-  ): Promise<string> {
-    try {
-      const response = await axios.post(`${AGENT_API_URL}/query`, {
-        query,
-        target_file_path: targetFilePath,
-        workspace_path: workspacePath,
-        workspace_id: this.contextManager?.getWorkspaceId()
-      });
-
-      return response.data.response || 'No response from agent';
-    } catch (error: unknown) {
-      console.error('Error calling original agent API:', error);
-      if (axios.isAxiosError(error) && error.code === 'ECONNREFUSED') {
-        return 'Agent server is not running. Please start the agent server first.';
-      }
-      return `Error: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  }
 
   public async refreshEnhancedStreamingConnection() {
     await this.checkEnhancedStreamingHealth();
@@ -853,9 +815,15 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     try {
       this.outputChannel.appendLine('[Extension] Starting cleanup...');
 
-      // Stop context API server
+      // Cleanup enhanced streaming client
+      if (this.enhancedStreamingClient) {
+        this.outputChannel.appendLine('[Extension] Cleaning up streaming client...');
+        this.enhancedStreamingClient.resetCurrentState();
+      }
+
+      // Cleanup context API server
       if (this.contextApiServer) {
-        this.outputChannel.appendLine('[Extension] Stopping Context API server...');
+        this.outputChannel.appendLine('[Extension] Stopping context API server...');
         await this.contextApiServer.stop();
         this.contextApiServer.dispose();
         this.contextApiServer = null;
@@ -866,17 +834,29 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         this.outputChannel.appendLine('[Extension] Disposing context manager...');
         this.contextManager.dispose();
         this.contextManager = null;
+        this.isContextManagerReady = false;
       }
 
-      // Cleanup workspace watchers
-      this.workspaceDisposables.forEach(disposable => disposable.dispose());
+      // Cleanup workspace event listeners
+      for (const disposable of this.workspaceDisposables) {
+        disposable.dispose();
+      }
       this.workspaceDisposables = [];
 
-      this.isContextManagerReady = false;
       this.outputChannel.appendLine('[Extension] Cleanup completed');
 
     } catch (error) {
       this.outputChannel.appendLine(`[Extension] Error during cleanup: ${error}`);
+    }
+  }
+
+  private updateStatusBar() {
+    if (this.isContextManagerReady) {
+      this.statusBarItem.text = '$(plug) Enhanced Agent Server (TRUE Streaming + Context Collection)';
+      this.statusBarItem.tooltip = 'Enhanced Agent Server Status (TRUE Streaming + Context Collection)';
+    } else {
+      this.statusBarItem.text = '$(plug) Enhanced Agent Server';
+      this.statusBarItem.tooltip = 'Enhanced Agent Server Status (Original)';
     }
   }
 }

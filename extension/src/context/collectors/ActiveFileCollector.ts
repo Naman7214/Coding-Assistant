@@ -61,10 +61,10 @@ export class ActiveFileCollector extends BaseCollector {
                 return null;
             }
 
-            // Gather file information
+            // Gather file information (without content)
             const fileInfo = await this.gatherFileInfo(activeEditor, document);
 
-            // Gather cursor and selection context
+            // Gather cursor and selection context (fix cursor position)
             const cursorContext = await this.gatherCursorContext(activeEditor, document);
 
             // Gather viewport context
@@ -86,7 +86,6 @@ export class ActiveFileCollector extends BaseCollector {
                 {
                     filePath: document.uri.fsPath,
                     languageId: document.languageId,
-                    isDirty: document.isDirty,
                     timestamp: Date.now()
                 }
             );
@@ -105,7 +104,7 @@ export class ActiveFileCollector extends BaseCollector {
     getMetadata(): CollectorMetadata {
         return {
             name: this.name,
-            description: 'Collects detailed context about the currently active file including cursor position, selection, and surrounding code',
+            description: 'Collects context about the currently active file including cursor position, selection, and surrounding code',
             version: '1.0.0',
             dependencies: ['vscode.window', 'vscode.workspace'],
             configurable: true,
@@ -115,7 +114,7 @@ export class ActiveFileCollector extends BaseCollector {
     }
 
     /**
-     * Gather basic file information
+     * Gather basic file information (without content)
      */
     private async gatherFileInfo(
         editor: vscode.TextEditor,
@@ -123,21 +122,28 @@ export class ActiveFileCollector extends BaseCollector {
     ): Promise<ActiveFileCollectorData['file']> {
         const workspacePath = this.getWorkspacePath();
         const relativePath = this.getRelativePath(document.uri.fsPath);
-        const content = document.getText();
+
+        // Get file stats for lastModified
+        let lastModified: string;
+        try {
+            const stats = await vscode.workspace.fs.stat(document.uri);
+            lastModified = new Date(stats.mtime).toISOString();
+        } catch {
+            lastModified = new Date().toISOString();
+        }
 
         return {
             path: document.uri.fsPath,
             relativePath,
-            content,
             languageId: document.languageId,
-            isDirty: document.isDirty,
             lineCount: document.lineCount,
-            fileSize: Buffer.byteLength(content, 'utf8')
+            fileSize: Buffer.byteLength(document.getText(), 'utf8'),
+            lastModified
         };
     }
 
     /**
-     * Gather cursor and selection context
+     * Gather cursor and selection context (fix cursor position - VSCode is 0-indexed, display is 1-indexed)
      */
     private async gatherCursorContext(
         editor: vscode.TextEditor,
@@ -147,8 +153,8 @@ export class ActiveFileCollector extends BaseCollector {
         const position = selection.active;
 
         return {
-            line: position.line,
-            character: position.character,
+            line: position.line + 1, // VSCode uses 0-indexed, display uses 1-indexed
+            character: position.character + 1, // VSCode uses 0-indexed, display uses 1-indexed
             selection: new vscode.Range(selection.start, selection.end)
         };
     }

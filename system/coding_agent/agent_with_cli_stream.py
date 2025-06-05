@@ -24,7 +24,6 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.theme import Theme
 
-# Import the new HTTP context adapter instead of SQLite-based ContextRetriever
 from context.http_context_adapter import ContextRetriever
 
 logger = getLogger(__name__)

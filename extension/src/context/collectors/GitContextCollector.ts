@@ -305,7 +305,7 @@ export class GitContextCollector extends BaseCollector {
     }
 
     /**
-     * Get diff information
+     * Get diff information using VSCode's Git API
      */
     private async getDiffInfo(workspacePath: string): Promise<GitCollectorData['diff']> {
         const diff: GitCollectorData['diff'] = {
@@ -315,61 +315,150 @@ export class GitContextCollector extends BaseCollector {
         };
 
         try {
-            const maxDiffLines = this.config.options.maxDiffLines || 1000;
+            // Try to use VSCode's git extension API first
+            const gitExtension = vscode.extensions.getExtension('vscode.git');
+            if (gitExtension?.isActive) {
+                const gitApi = gitExtension.exports.getAPI(1);
+                const repository = gitApi.repositories.find((repo: any) =>
+                    repo.rootUri.fsPath === workspacePath || workspacePath.startsWith(repo.rootUri.fsPath)
+                );
 
-            // Get staged changes
-            if (this.config.options.includeStaged) {
-                try {
-                    const stagedResult = await this.executeGitCommand({
-                        command: 'git',
-                        args: ['diff', '--cached', `--unified=3`],
-                        cwd: workspacePath
-                    });
-                    diff.stagedChanges = this.truncateDiff(stagedResult.stdout, maxDiffLines);
-                } catch (error) {
-                    this.debug(`Failed to get staged changes: ${error}`);
-                }
-            }
-
-            // Get unstaged changes
-            if (this.config.options.includeUnstaged) {
-                try {
-                    const unstagedResult = await this.executeGitCommand({
-                        command: 'git',
-                        args: ['diff', '--unified=3'],
-                        cwd: workspacePath
-                    });
-                    diff.unstagedChanges = this.truncateDiff(unstagedResult.stdout, maxDiffLines);
-                } catch (error) {
-                    this.debug(`Failed to get unstaged changes: ${error}`);
-                }
-            }
-
-            // Detect merge conflicts
-            if (this.config.options.detectConflicts) {
-                try {
-                    const conflictResult = await this.executeGitCommand({
-                        command: 'git',
-                        args: ['diff', '--name-only', '--diff-filter=U'],
-                        cwd: workspacePath
-                    });
-
-                    if (conflictResult.stdout.trim()) {
-                        diff.conflictFiles = conflictResult.stdout
-                            .trim()
-                            .split('\n')
-                            .map(file => path.relative(workspacePath, path.resolve(workspacePath, file)));
+                if (repository) {
+                    // Get staged changes
+                    const stagedFiles = repository.state.indexChanges;
+                    if (stagedFiles.length > 0) {
+                        const stagedDiffs = await Promise.all(
+                            stagedFiles.slice(0, 5).map(async (change: any) => {
+                                try {
+                                    return await this.getFileDiffFromGit(workspacePath, change.uri.fsPath, true);
+                                } catch {
+                                    return `${change.uri.fsPath}: ${change.status}`;
+                                }
+                            })
+                        );
+                        diff.stagedChanges = stagedDiffs.join('\n\n');
                     }
-                } catch (error) {
-                    this.debug(`Failed to detect conflicts: ${error}`);
+
+                    // Get unstaged changes
+                    const unstagedFiles = repository.state.workingTreeChanges;
+                    if (unstagedFiles.length > 0) {
+                        const unstagedDiffs = await Promise.all(
+                            unstagedFiles.slice(0, 5).map(async (change: any) => {
+                                try {
+                                    return await this.getFileDiffFromGit(workspacePath, change.uri.fsPath, false);
+                                } catch {
+                                    return `${change.uri.fsPath}: ${change.status}`;
+                                }
+                            })
+                        );
+                        diff.unstagedChanges = unstagedDiffs.join('\n\n');
+                    }
+
+                    // Find conflict files
+                    diff.conflictFiles = repository.state.mergeChanges.map((change: any) => change.uri.fsPath);
                 }
+            }
+
+            // Fallback to git commands if VSCode API doesn't work
+            if (!diff.stagedChanges && !diff.unstagedChanges) {
+                diff.stagedChanges = await this.getStagedDiffFromCommand(workspacePath);
+                diff.unstagedChanges = await this.getUnstagedDiffFromCommand(workspacePath);
             }
 
         } catch (error) {
             this.debug(`Failed to get diff info: ${error}`);
+
+            // Final fallback to basic git commands
+            try {
+                diff.stagedChanges = await this.getStagedDiffFromCommand(workspacePath);
+                diff.unstagedChanges = await this.getUnstagedDiffFromCommand(workspacePath);
+            } catch (fallbackError) {
+                this.debug(`Fallback diff also failed: ${fallbackError}`);
+            }
         }
 
         return diff;
+    }
+
+    /**
+     * Get staged diff using git command
+     */
+    private async getStagedDiffFromCommand(workspacePath: string): Promise<string> {
+        try {
+            const result = await this.executeGitCommand({
+                command: 'git',
+                args: ['diff', '--cached', '--name-status'],
+                cwd: workspacePath
+            });
+
+            if (!result.stdout.trim()) {
+                return '';
+            }
+
+            // Get detailed diff for staged files
+            const detailedResult = await this.executeGitCommand({
+                command: 'git',
+                args: ['diff', '--cached', '--unified=3'],
+                cwd: workspacePath
+            });
+
+            return this.truncateDiff(detailedResult.stdout, this.config.options.maxDiffLines || 1000);
+        } catch (error) {
+            this.debug(`Failed to get staged diff: ${error}`);
+            return '';
+        }
+    }
+
+    /**
+     * Get unstaged diff using git command
+     */
+    private async getUnstagedDiffFromCommand(workspacePath: string): Promise<string> {
+        try {
+            const result = await this.executeGitCommand({
+                command: 'git',
+                args: ['diff', '--name-status'],
+                cwd: workspacePath
+            });
+
+            if (!result.stdout.trim()) {
+                return '';
+            }
+
+            // Get detailed diff for unstaged files
+            const detailedResult = await this.executeGitCommand({
+                command: 'git',
+                args: ['diff', '--unified=3'],
+                cwd: workspacePath
+            });
+
+            return this.truncateDiff(detailedResult.stdout, this.config.options.maxDiffLines || 1000);
+        } catch (error) {
+            this.debug(`Failed to get unstaged diff: ${error}`);
+            return '';
+        }
+    }
+
+    /**
+     * Get file diff using git command
+     */
+    private async getFileDiffFromGit(workspacePath: string, filePath: string, staged: boolean): Promise<string> {
+        try {
+            const relativePath = path.relative(workspacePath, filePath);
+            const args = staged
+                ? ['diff', '--cached', '--unified=3', relativePath]
+                : ['diff', '--unified=3', relativePath];
+
+            const result = await this.executeGitCommand({
+                command: 'git',
+                args,
+                cwd: workspacePath
+            });
+
+            return result.stdout;
+        } catch (error) {
+            this.debug(`Failed to get file diff for ${filePath}: ${error}`);
+            return '';
+        }
     }
 
     /**

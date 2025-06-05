@@ -55,11 +55,10 @@ export interface ActiveFileCollectorData {
     file: {
         path: string;
         relativePath: string;
-        content: string;
         languageId: string;
-        isDirty: boolean;
         lineCount: number;
         fileSize: number;
+        lastModified: string;
     };
     cursor: {
         line: number;
@@ -85,10 +84,9 @@ export interface OpenFilesCollectorData {
         path: string;
         relativePath: string;
         languageId: string;
-        isDirty: boolean;
         lineCount: number;
         fileSize: number;
-        lastAccessed: number;
+        lastModified: string;
         tabIndex: number;
         isActive: boolean;
     }>;
@@ -99,26 +97,7 @@ export interface OpenFilesCollectorData {
 
 export interface ProjectStructureCollectorData {
     root: string;
-    structure: {
-        directories: Array<{
-            path: string;
-            relativePath: string;
-            fileCount: number;
-            importance: number;
-        }>;
-        files: Array<{
-            path: string;
-            relativePath: string;
-            type: 'source' | 'config' | 'test' | 'documentation' | 'other';
-            importance: number;
-        }>;
-    };
-    dependencies: Array<{
-        fromFile: string;
-        toFile: string;
-        type: string;
-        strength: number;
-    }>;
+    treeStructure: string;
     packageInfo: {
         managers: string[];
         mainFiles: string[];

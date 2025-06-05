@@ -1,7 +1,10 @@
 import cors from 'cors';
 import express from 'express';
+import * as fs from 'fs';
 import * as http from 'http';
+import * as path from 'path';
 import * as vscode from 'vscode';
+import { PersistentTerminalManager } from '../bridge/PersistentTerminalManager';
 import { ContextManager } from '../context/ContextManager';
 import { VSCodeStorage } from '../context/storage/VSCodeStorage';
 
@@ -14,12 +17,39 @@ interface StreamingChunk {
     workspaceId: string;
 }
 
+interface TerminalRequest {
+    command: string;
+    workspacePath: string;
+    workingDirectory?: string;
+    environmentVariables?: Record<string, string>;
+    isBackground?: boolean;
+    timeout?: number;
+    operationType: 'terminal_command' | 'read_file' | 'write_file' | 'list_directory' | 'delete_file' | 'search_files';
+    // Additional parameters for file operations
+    filePath?: string;
+    content?: string;
+    startLine?: number;
+    endLine?: number;
+    searchPattern?: string;
+    directoryPath?: string;
+}
+
+interface TerminalResponse {
+    success: boolean;
+    data?: any;
+    error?: string;
+    timestamp: string;
+    workspacePath: string;
+    operationType: string;
+}
+
 export class ContextApiServer implements vscode.Disposable {
     private app: express.Application;
     private server: http.Server | null = null;
     private port: number = 3001;
     private readonly outputChannel: vscode.OutputChannel;
     private isRunning: boolean = false;
+    private terminalManager: PersistentTerminalManager;
 
     constructor(
         private storage: VSCodeStorage,
@@ -27,6 +57,7 @@ export class ContextApiServer implements vscode.Disposable {
         outputChannel: vscode.OutputChannel
     ) {
         this.outputChannel = outputChannel;
+        this.terminalManager = new PersistentTerminalManager(outputChannel);
         this.app = express();
         this.setupMiddleware();
         this.setupRoutes();
@@ -34,22 +65,22 @@ export class ContextApiServer implements vscode.Disposable {
 
     private setupMiddleware(): void {
         this.app.use(cors({
-            origin: ['http://localhost:5000', 'http://localhost:5001', 'http://0.0.0.0:5000', 'http://0.0.0.0:5001'],
+            origin: ['http://localhost:5000', 'http://localhost:5001', 'http://0.0.0.0:5000', 'http://0.0.0.0:5001', 'http://localhost:8001'],
             credentials: true
         }));
 
-        this.app.use(express.json({ limit: '10mb' }));
-        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+        this.app.use(express.json({ limit: '50mb' }));
+        this.app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
         // Request logging middleware
         this.app.use((req, res, next) => {
-            this.outputChannel.appendLine(`[ContextAPI] ${req.method} ${req.path} - ${req.ip}`);
+            this.outputChannel.appendLine(`[UnifiedAPI] ${req.method} ${req.path} - ${req.ip}`);
             next();
         });
 
         // Error handling middleware
         this.app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-            this.outputChannel.appendLine(`[ContextAPI] Error: ${error.message}`);
+            this.outputChannel.appendLine(`[UnifiedAPI] Error: ${error.message}`);
             res.status(500).json({
                 success: false,
                 error: error.message,
@@ -62,6 +93,7 @@ export class ContextApiServer implements vscode.Disposable {
         // Health check endpoint
         this.app.get('/api/health', this.handleHealthCheck.bind(this));
 
+        // Context API routes
         // Streaming context endpoint (main endpoint for coding agent)
         this.app.get('/api/workspace/:workspaceId/context/stream', this.handleStreamingContext.bind(this));
 
@@ -79,16 +111,33 @@ export class ContextApiServer implements vscode.Disposable {
 
         // Force context collection endpoint
         this.app.post('/api/workspace/:workspaceId/collect', this.handleForceCollection.bind(this));
+
+        // Terminal Bridge API routes
+        // Main terminal bridge endpoint - single endpoint for all operations
+        this.app.post('/api/terminal/execute', this.handleTerminalRequest.bind(this));
+
+        // Terminal sessions status endpoint
+        this.app.get('/api/terminal/sessions', this.handleTerminalSessions.bind(this));
+
+        // Bridge info endpoint (for registration with backend)
+        this.app.get('/api/bridge/info', this.handleBridgeInfo.bind(this));
     }
 
     private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
         try {
             const stats = this.contextManager.getStats();
+            const terminalSessions = this.terminalManager.getSessionsStatus();
+
             res.json({
                 success: true,
                 status: 'healthy',
                 storage: this.storage.initialized,
                 contextManager: this.contextManager ? 'ready' : 'not_ready',
+                terminalBridge: {
+                    ready: true,
+                    activeSessions: Object.keys(terminalSessions).length,
+                    sessions: terminalSessions
+                },
                 timestamp: new Date().toISOString(),
                 stats: stats,
                 server: {
@@ -442,34 +491,337 @@ export class ContextApiServer implements vscode.Disposable {
         }
     }
 
+    // Terminal Bridge Handler Methods
+    private async handleTerminalRequest(req: express.Request, res: express.Response): Promise<void> {
+        const request: TerminalRequest = req.body;
+
+        try {
+            this.outputChannel.appendLine(
+                `[UnifiedAPI] Processing ${request.operationType} for workspace: ${request.workspacePath}`
+            );
+
+            let result: any;
+
+            switch (request.operationType) {
+                case 'terminal_command':
+                    result = await this.executeTerminalCommand(request);
+                    break;
+                case 'read_file':
+                    result = await this.readFile(request);
+                    break;
+                case 'write_file':
+                    result = await this.writeFile(request);
+                    break;
+                case 'list_directory':
+                    result = await this.listDirectory(request);
+                    break;
+                case 'delete_file':
+                    result = await this.deleteFile(request);
+                    break;
+                case 'search_files':
+                    result = await this.searchFiles(request);
+                    break;
+                default:
+                    throw new Error(`Unsupported operation type: ${request.operationType}`);
+            }
+
+            const response: TerminalResponse = {
+                success: true,
+                data: result,
+                timestamp: new Date().toISOString(),
+                workspacePath: request.workspacePath,
+                operationType: request.operationType
+            };
+
+            res.json(response);
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[UnifiedAPI] Error processing terminal request: ${error}`);
+
+            const response: TerminalResponse = {
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString(),
+                workspacePath: request.workspacePath || '',
+                operationType: request.operationType || 'unknown'
+            };
+
+            res.status(500).json(response);
+        }
+    }
+
+    private async handleTerminalSessions(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const sessions = this.terminalManager.getSessionsStatus();
+            res.json({
+                success: true,
+                sessions: sessions,
+                totalSessions: Object.keys(sessions).length,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleBridgeInfo(req: express.Request, res: express.Response): Promise<void> {
+        res.json({
+            bridgeUrl: `http://localhost:${this.port}`,
+            port: this.port,
+            endpoints: {
+                execute: '/api/terminal/execute',
+                health: '/api/health',
+                sessions: '/api/terminal/sessions',
+                context: '/api/workspace/{workspaceId}/context/stream'
+            },
+            supportedOperations: [
+                'terminal_command',
+                'read_file',
+                'write_file',
+                'list_directory',
+                'delete_file',
+                'search_files'
+            ],
+            timestamp: new Date().toISOString(),
+            version: '1.0.0'
+        });
+    }
+
+    // Terminal Operation Helper Methods
+    private async executeTerminalCommand(request: TerminalRequest): Promise<any> {
+        return await this.terminalManager.executeCommand(request.workspacePath, {
+            command: request.command,
+            workingDirectory: request.workingDirectory,
+            environmentVariables: request.environmentVariables,
+            isBackground: request.isBackground,
+            timeout: request.timeout
+        });
+    }
+
+    private async readFile(request: TerminalRequest): Promise<any> {
+        if (!request.filePath) {
+            throw new Error('filePath is required for read_file operation');
+        }
+
+        const filePath = path.resolve(request.workspacePath, request.filePath);
+
+        try {
+            // Security check - ensure file is within workspace
+            if (!filePath.startsWith(request.workspacePath)) {
+                throw new Error('Access denied: File is outside workspace');
+            }
+
+            const content = await fs.promises.readFile(filePath, 'utf8');
+            const lines = content.split('\n');
+
+            if (request.startLine !== undefined && request.endLine !== undefined) {
+                const start = Math.max(0, request.startLine - 1);
+                const end = Math.min(lines.length, request.endLine);
+                const selectedLines = lines.slice(start, end);
+
+                return {
+                    content: selectedLines.join('\n'),
+                    totalLines: lines.length,
+                    selectedLines: selectedLines.length,
+                    startLine: request.startLine,
+                    endLine: request.endLine,
+                    filePath: request.filePath
+                };
+            }
+
+            return {
+                content: content,
+                totalLines: lines.length,
+                filePath: request.filePath
+            };
+
+        } catch (error) {
+            throw new Error(`Failed to read file ${request.filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private async writeFile(request: TerminalRequest): Promise<any> {
+        if (!request.filePath || request.content === undefined) {
+            throw new Error('filePath and content are required for write_file operation');
+        }
+
+        const filePath = path.resolve(request.workspacePath, request.filePath);
+
+        try {
+            // Security check - ensure file is within workspace
+            if (!filePath.startsWith(request.workspacePath)) {
+                throw new Error('Access denied: File is outside workspace');
+            }
+
+            // Ensure directory exists
+            const dirPath = path.dirname(filePath);
+            await fs.promises.mkdir(dirPath, { recursive: true });
+
+            await fs.promises.writeFile(filePath, request.content, 'utf8');
+
+            return {
+                filePath: request.filePath,
+                bytesWritten: Buffer.byteLength(request.content, 'utf8'),
+                success: true
+            };
+
+        } catch (error) {
+            throw new Error(`Failed to write file ${request.filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private async listDirectory(request: TerminalRequest): Promise<any> {
+        const dirPath = request.directoryPath
+            ? path.resolve(request.workspacePath, request.directoryPath)
+            : request.workspacePath;
+
+        try {
+            // Security check - ensure directory is within workspace
+            if (!dirPath.startsWith(request.workspacePath)) {
+                throw new Error('Access denied: Directory is outside workspace');
+            }
+
+            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+            const items: Array<{
+                name: string;
+                path: string;
+                type: string;
+                size: number | null;
+                modified: Date;
+                created: Date;
+            }> = [];
+
+            for (const entry of entries) {
+                const entryPath = path.join(dirPath, entry.name);
+                const relativePath = path.relative(request.workspacePath, entryPath);
+
+                try {
+                    const stats = await fs.promises.stat(entryPath);
+                    items.push({
+                        name: entry.name,
+                        path: relativePath,
+                        type: entry.isDirectory() ? 'directory' : 'file',
+                        size: entry.isFile() ? stats.size : null,
+                        modified: stats.mtime,
+                        created: stats.birthtime
+                    });
+                } catch (statError) {
+                    // Skip entries that can't be accessed
+                    this.outputChannel.appendLine(`[UnifiedAPI] Warning: Could not stat ${entryPath}: ${statError}`);
+                }
+            }
+
+            return {
+                directory: request.directoryPath || '.',
+                items: items,
+                totalItems: items.length
+            };
+
+        } catch (error) {
+            throw new Error(`Failed to list directory ${request.directoryPath || '.'}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private async deleteFile(request: TerminalRequest): Promise<any> {
+        if (!request.filePath) {
+            throw new Error('filePath is required for delete_file operation');
+        }
+
+        const filePath = path.resolve(request.workspacePath, request.filePath);
+
+        try {
+            // Security check - ensure file is within workspace
+            if (!filePath.startsWith(request.workspacePath)) {
+                throw new Error('Access denied: File is outside workspace');
+            }
+
+            const stats = await fs.promises.stat(filePath);
+
+            if (stats.isDirectory()) {
+                await fs.promises.rmdir(filePath, { recursive: true });
+            } else {
+                await fs.promises.unlink(filePath);
+            }
+
+            return {
+                filePath: request.filePath,
+                type: stats.isDirectory() ? 'directory' : 'file',
+                success: true
+            };
+
+        } catch (error) {
+            throw new Error(`Failed to delete ${request.filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private async searchFiles(request: TerminalRequest): Promise<any> {
+        if (!request.searchPattern) {
+            throw new Error('searchPattern is required for search_files operation');
+        }
+
+        // Use terminal command for file search to leverage system tools
+        const searchCommand = process.platform === 'win32'
+            ? `findstr /r /s /i "${request.searchPattern}" *.* 2>nul || echo "No matches found"`
+            : `grep -r -i "${request.searchPattern}" . 2>/dev/null || echo "No matches found"`;
+
+        const result = await this.terminalManager.executeCommand(request.workspacePath, {
+            command: searchCommand,
+            workingDirectory: request.directoryPath
+                ? path.resolve(request.workspacePath, request.directoryPath)
+                : request.workspacePath
+        });
+
+        return {
+            searchPattern: request.searchPattern,
+            searchDirectory: request.directoryPath || '.',
+            commandOutput: result.output,
+            searchResult: result
+        };
+    }
+
     public async start(): Promise<void> {
         if (this.isRunning) {
-            this.outputChannel.appendLine('[ContextAPI] Server already running');
+            this.outputChannel.appendLine('[UnifiedAPI] Server already running');
             return;
         }
 
         return new Promise((resolve, reject) => {
             this.server = this.app.listen(this.port, 'localhost', () => {
                 this.isRunning = true;
-                this.outputChannel.appendLine(`[ContextAPI] Context API server running on http://localhost:${this.port}`);
-                this.outputChannel.appendLine(`[ContextAPI] Available endpoints:`);
-                this.outputChannel.appendLine(`[ContextAPI]   GET /api/health`);
-                this.outputChannel.appendLine(`[ContextAPI]   GET /api/workspace/{id}/context/stream`);
-                this.outputChannel.appendLine(`[ContextAPI]   GET /api/workspace/{id}/context`);
-                this.outputChannel.appendLine(`[ContextAPI]   POST /api/workspace/{id}/collect`);
+                this.outputChannel.appendLine(`[UnifiedAPI] Unified API server running on http://localhost:${this.port}`);
+                this.outputChannel.appendLine(`[UnifiedAPI] Available endpoints:`);
+                this.outputChannel.appendLine(`[UnifiedAPI]   GET /api/health`);
+                this.outputChannel.appendLine(`[UnifiedAPI]   Context API:`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/workspace/{id}/context/stream`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/workspace/{id}/context`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/workspace/{id}/collect`);
+                this.outputChannel.appendLine(`[UnifiedAPI]   Terminal Bridge API:`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/terminal/execute`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/terminal/sessions`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/bridge/info`);
+
+                // Setup periodic cleanup of inactive terminal sessions
+                setInterval(() => {
+                    this.terminalManager.cleanupInactiveSessions();
+                }, 60 * 60 * 1000); // Every hour
+
                 resolve();
             });
 
             this.server.on('error', (error: any) => {
                 if (error.code === 'EADDRINUSE') {
-                    this.outputChannel.appendLine(`[ContextAPI] Port ${this.port} in use, trying ${this.port + 1}`);
+                    this.outputChannel.appendLine(`[UnifiedAPI] Port ${this.port} in use, trying ${this.port + 1}`);
                     this.port++;
                     if (this.server) {
                         this.server.listen(this.port, 'localhost');
                     }
                 } else {
                     this.isRunning = false;
-                    this.outputChannel.appendLine(`[ContextAPI] Server error: ${error.message}`);
+                    this.outputChannel.appendLine(`[UnifiedAPI] Server error: ${error.message}`);
                     reject(error);
                 }
             });
@@ -481,7 +833,7 @@ export class ContextApiServer implements vscode.Disposable {
             return new Promise((resolve) => {
                 this.server!.close(() => {
                     this.isRunning = false;
-                    this.outputChannel.appendLine('[ContextAPI] Context API server stopped');
+                    this.outputChannel.appendLine('[UnifiedAPI] Unified API server stopped');
                     resolve();
                 });
             });
@@ -496,10 +848,17 @@ export class ContextApiServer implements vscode.Disposable {
         return this.isRunning;
     }
 
+    public getBridgeUrl(): string {
+        return `http://localhost:${this.port}`;
+    }
+
     // Implement vscode.Disposable
     dispose(): void {
         this.stop().catch(error => {
-            this.outputChannel.appendLine(`[ContextAPI] Error stopping server: ${error}`);
+            this.outputChannel.appendLine(`[UnifiedAPI] Error stopping server: ${error}`);
         });
+
+        // Clean up terminal manager
+        this.terminalManager.dispose();
     }
 } 

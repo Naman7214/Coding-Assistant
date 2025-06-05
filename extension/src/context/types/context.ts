@@ -15,11 +15,9 @@ export interface FileInfo {
     relativePath: string;
     content?: string;
     languageId: string;
-    isDirty: boolean;
-    isUntitled: boolean;
     lineCount: number;
     fileSize: number;
-    lastModified: number;
+    lastModified: string;
     accessFrequency: number;
     relevanceScore?: number;
     cursorPosition?: vscode.Position;
@@ -43,6 +41,8 @@ export interface GitContext {
     changedFiles: string[];
     recentCommits: GitCommit[];
     uncommittedChanges: GitChange[];
+    stagedDiff?: string;
+    unstagedDiff?: string;
     remoteUrl?: string;
     isRepo: boolean;
 }
@@ -65,7 +65,6 @@ export interface GitChange {
 
 export interface WorkspaceMetadata {
     path: string;
-    name: string;
     folders: string[];
     totalFiles?: number;
     languages: string[];
@@ -138,39 +137,13 @@ export interface ProcessedContext {
     workspace: WorkspaceMetadata;
     activeFile: FileInfo | null;
     openFiles: FileInfo[];
-    projectStructure: ProjectStructure;
+    projectStructure: string;
     gitContext: GitContext;
     lspContext: LspContext;
     terminalContext: TerminalContext;
     userBehavior: UserBehaviorData;
     relevanceScores: Record<string, number>;
     totalTokens: number;
-}
-
-export interface ProjectStructure {
-    directories: DirectoryInfo[];
-    dependencies: DependencyInfo[];
-    configFiles: string[];
-    mainEntryPoints: string[];
-    testFiles: string[];
-}
-
-export interface DirectoryInfo {
-    path: string;
-    relativePath: string;
-    fileCount: number;
-    totalSize: number;
-    lastModified: number;
-    importance: number;
-}
-
-export interface DependencyInfo {
-    fromFile: string;
-    toFile: string;
-    importType: 'import' | 'require' | 'include';
-    lineNumber: number;
-    isExternal: boolean;
-    packageName?: string;
 }
 
 // Context optimization

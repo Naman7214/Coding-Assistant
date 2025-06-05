@@ -6,14 +6,35 @@ import { CollectorMetadata, ProjectStructureCollectorData } from '../types/colle
 import { ContextData } from '../types/context';
 import { BaseCollector } from './base/BaseCollector';
 
+interface Directory {
+    name: string;
+    files: string[];
+    directories: Directory[];
+}
+
 export class ProjectStructureCollector extends BaseCollector {
-    private fileTypeCategories = {
-        source: ['.ts', '.js', '.tsx', '.jsx', '.py', '.java', '.cpp', '.c', '.cs', '.go', '.rs', '.swift', '.kt'],
-        config: ['.json', '.yaml', '.yml', '.toml', '.ini', '.env', '.config', '.conf'],
-        test: ['.test.', '.spec.', '.e2e.'],
-        documentation: ['.md', '.txt', '.rst', '.adoc'],
-        build: ['webpack', 'vite', 'rollup', 'gulp', 'grunt', 'makefile', 'dockerfile']
-    };
+    private skipPatterns = [
+        'node_modules',
+        '.venv',
+        '.env',
+        '.git',
+        '.vscode',
+        'dist',
+        'build',
+        '__pycache__',
+        '.pytest_cache',
+        '.next',
+        '.nuxt',
+        'target',
+        'bin',
+        'obj',
+        '.idea',
+        '.vs',
+        'coverage',
+        '.nyc_output',
+        'temp',
+        'tmp'
+    ];
 
     constructor(
         outputChannel: vscode.OutputChannel,
@@ -30,10 +51,10 @@ export class ProjectStructureCollector extends BaseCollector {
             {
                 cacheTimeout: 1800, // 30 minutes cache
                 options: {
-                    maxDepth: 8,
-                    maxFiles: 5000,
-                    includeNodeModules: false,
-                    includeHiddenFiles: false
+                    maxDepth: 6,
+                    maxFiles: 1000,
+                    includeHiddenFiles: false,
+                    generateTreeView: true
                 }
             }
         );
@@ -51,44 +72,40 @@ export class ProjectStructureCollector extends BaseCollector {
                 return null;
             }
 
-            this.outputChannel.appendLine(`[${this.name}] Starting simple project structure scan`);
+            this.outputChannel.appendLine(`[${this.name}] Starting project structure scan`);
 
-            // Simple directory and file scan
-            const structure = await this.scanProjectStructure(workspacePath);
+            // Generate tree structure
+            const treeStructure = await this.generateProjectTree(workspacePath);
 
             // Detect basic package info
             const packageInfo = await this.detectBasicPackageInfo(workspacePath);
 
             const data: ProjectStructureCollectorData = {
                 root: workspacePath,
-                structure,
-                dependencies: [], // Empty - no complex dependency analysis
+                treeStructure,
                 packageInfo
             };
 
-            this.outputChannel.appendLine(`[${this.name}] Completed scan: ${structure.files.length} files, ${structure.directories.length} directories`);
+            this.outputChannel.appendLine(`[${this.name}] Completed scan`);
 
             return this.createContextData(
                 this.generateId(),
                 data,
                 {
-                    fileCount: structure.files.length,
-                    directoryCount: structure.directories.length,
-                    dependencyCount: 0,
                     timestamp: Date.now()
                 }
             );
 
         } catch (error) {
             this.error('Failed to collect project structure', error);
-            return null; // Return null instead of throwing
+            return null;
         }
     }
 
     getMetadata(): CollectorMetadata {
         return {
             name: this.name,
-            description: 'Simple project structure scanner that catalogs files and directories',
+            description: 'Generates a tree-like project structure view',
             version: '2.0.0',
             dependencies: ['vscode.workspace', 'fs'],
             configurable: true,
@@ -98,170 +115,117 @@ export class ProjectStructureCollector extends BaseCollector {
     }
 
     /**
-     * Simple project structure scan
+     * Generate a tree-like project structure
      */
-    private async scanProjectStructure(rootPath: string): Promise<{
-        directories: ProjectStructureCollectorData['structure']['directories'];
-        files: ProjectStructureCollectorData['structure']['files'];
-    }> {
-        const directories: ProjectStructureCollectorData['structure']['directories'] = [];
-        const files: ProjectStructureCollectorData['structure']['files'] = [];
-        const maxDepth = this.config.options.maxDepth || 8;
-        const maxFiles = this.config.options.maxFiles || 5000;
+    private async generateProjectTree(rootPath: string): Promise<string> {
+        const maxDepth = this.config.options.maxDepth || 6;
+        const maxFiles = this.config.options.maxFiles || 1000;
+        const globalCounter = { count: 0 }; // Use object to pass by reference
 
-        const scanDirectory = async (dirPath: string, currentDepth: number = 0): Promise<void> => {
-            // Stop if we hit limits
-            if (currentDepth > maxDepth || files.length > maxFiles) {
-                return;
+        const buildDirectoryTree = async (dirPath: string, depth: number = 0): Promise<Directory | null> => {
+            if (depth > maxDepth) {
+                return null;
             }
+
+            const directory: Directory = {
+                name: path.basename(dirPath),
+                files: [],
+                directories: []
+            };
 
             try {
                 const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
-                for (const entry of entries) {
-                    // Skip if we hit file limit
-                    if (files.length > maxFiles) {
-                        break;
-                    }
+                // Filter entries
+                const filteredEntries = entries.filter(entry => !this.shouldSkip(entry.name));
 
-                    const fullPath = path.join(dirPath, entry.name);
-                    const relativePath = this.getRelativePath(fullPath);
+                // Process files first
+                for (const entry of filteredEntries) {
+                    if (globalCounter.count >= maxFiles) break;
 
-                    // Skip unwanted directories/files
-                    if (this.shouldSkip(entry.name, relativePath)) {
-                        continue;
-                    }
-
-                    if (entry.isDirectory()) {
-                        // Count files in directory
-                        const fileCount = await this.countFiles(fullPath);
-
-                        directories.push({
-                            path: fullPath,
-                            relativePath,
-                            fileCount,
-                            importance: this.getDirectoryImportance(entry.name)
-                        });
-
-                        // Recurse into subdirectory
-                        await scanDirectory(fullPath, currentDepth + 1);
-
-                    } else if (entry.isFile()) {
-                        const fileType = this.getFileType(fullPath);
-
-                        files.push({
-                            path: fullPath,
-                            relativePath,
-                            type: fileType,
-                            importance: this.getFileImportance(entry.name, fileType)
-                        });
+                    if (entry.isFile()) {
+                        directory.files.push(entry.name);
+                        globalCounter.count++;
                     }
                 }
+
+                // Process directories
+                for (const entry of filteredEntries) {
+                    if (globalCounter.count >= maxFiles) break;
+
+                    if (entry.isDirectory()) {
+                        const subDirectory = await buildDirectoryTree(
+                            path.join(dirPath, entry.name),
+                            depth + 1
+                        );
+                        if (subDirectory) {
+                            directory.directories.push(subDirectory);
+                        }
+                    }
+                }
+
+                // Sort files and directories alphabetically
+                directory.files.sort();
+                directory.directories.sort((a, b) => a.name.localeCompare(b.name));
+
             } catch (error) {
                 this.debug(`Cannot scan directory ${dirPath}: ${error}`);
             }
+
+            return directory;
         };
 
-        await scanDirectory(rootPath);
-        return { directories, files };
+        const formatFileTree = (tree: Directory, indentation: string = ""): string => {
+            let result = "";
+
+            // Add files first
+            for (const file of tree.files) {
+                result += `${indentation}${file}\n`;
+            }
+
+            // Add directories
+            for (const directory of tree.directories) {
+                result += `${indentation}${directory.name}/\n`;
+                result += formatFileTree(directory, `${indentation}  `);
+            }
+
+            return result;
+        };
+
+        // Build the tree starting from root
+        const rootTree = await buildDirectoryTree(rootPath);
+        if (!rootTree) {
+            return "";
+        }
+
+        // Format the tree
+        let result = `${rootTree.name}/\n`;
+        result += formatFileTree(rootTree, "");
+
+        return result.trim();
     }
 
     /**
      * Check if we should skip this file/directory
      */
-    private shouldSkip(name: string, relativePath: string): boolean {
+    private shouldSkip(name: string): boolean {
         // Skip hidden files unless enabled
         if (!this.config.options.includeHiddenFiles && name.startsWith('.')) {
-            return true;
+            // Allow important dotfiles
+            const allowedDotFiles = ['.gitignore', '.env.example', '.editorconfig', '.prettierrc'];
+            if (!allowedDotFiles.some(allowed => name.startsWith(allowed))) {
+                return true;
+            }
         }
 
-        // Skip node_modules unless enabled
-        if (!this.config.options.includeNodeModules && name === 'node_modules') {
-            return true;
-        }
-
-        // Skip common unwanted directories
-        const skipDirs = ['.git', '.vscode', 'dist', 'build', '__pycache__', '.pytest_cache'];
-        if (skipDirs.includes(name)) {
-            return true;
-        }
-
-        return false;
+        // Skip directories/files in skip patterns
+        return this.skipPatterns.some(pattern =>
+            name === pattern || name.startsWith(pattern)
+        );
     }
 
     /**
-     * Get file type category
-     */
-    private getFileType(filePath: string): 'source' | 'config' | 'test' | 'documentation' | 'other' {
-        const fileName = path.basename(filePath).toLowerCase();
-        const ext = path.extname(filePath).toLowerCase();
-
-        // Check for test files first
-        if (this.fileTypeCategories.test.some(pattern => fileName.includes(pattern))) {
-            return 'test';
-        }
-
-        // Check by extension
-        if (this.fileTypeCategories.source.includes(ext)) {
-            return 'source';
-        }
-
-        if (this.fileTypeCategories.config.includes(ext)) {
-            return 'config';
-        }
-
-        if (this.fileTypeCategories.documentation.includes(ext)) {
-            return 'documentation';
-        }
-
-        return 'other';
-    }
-
-    /**
-     * Get directory importance (simple scoring)
-     */
-    private getDirectoryImportance(dirName: string): number {
-        const importantDirs = ['src', 'lib', 'app', 'components', 'pages', 'api', 'routes'];
-        return importantDirs.includes(dirName.toLowerCase()) ? 2 : 1;
-    }
-
-    /**
-     * Get file importance (simple scoring)
-     */
-    private getFileImportance(fileName: string, fileType: string): number {
-        let importance = 1;
-
-        // Type-based scoring
-        switch (fileType) {
-            case 'source': importance = 2; break;
-            case 'config': importance = 1.5; break;
-            case 'documentation': importance = 0.5; break;
-            default: importance = 1;
-        }
-
-        // Important file names
-        const importantNames = ['index', 'main', 'app', 'entry'];
-        if (importantNames.some(name => fileName.toLowerCase().includes(name))) {
-            importance += 0.5;
-        }
-
-        return importance;
-    }
-
-    /**
-     * Count files in directory (simple count)
-     */
-    private async countFiles(dirPath: string): Promise<number> {
-        try {
-            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-            return entries.filter(entry => entry.isFile()).length;
-        } catch {
-            return 0;
-        }
-    }
-
-    /**
-     * Detect basic package information
+     * Detect basic package information from package managers
      */
     private async detectBasicPackageInfo(workspacePath: string): Promise<ProjectStructureCollectorData['packageInfo']> {
         const packageInfo: ProjectStructureCollectorData['packageInfo'] = {
@@ -270,43 +234,83 @@ export class ProjectStructureCollector extends BaseCollector {
             scripts: {}
         };
 
-        // Check for common package files
-        const packageFiles = [
-            { file: 'package.json', manager: 'npm' },
-            { file: 'requirements.txt', manager: 'pip' },
-            { file: 'Cargo.toml', manager: 'cargo' },
-            { file: 'go.mod', manager: 'go' }
-        ];
-
-        for (const { file, manager } of packageFiles) {
-            const filePath = path.join(workspacePath, file);
-
-            try {
-                await fs.promises.access(filePath);
-                packageInfo.managers.push(manager);
-
-                // Try to parse package.json for additional info
-                if (file === 'package.json') {
-                    try {
-                        const content = await fs.promises.readFile(filePath, 'utf8');
-                        const packageJson = JSON.parse(content);
-
-                        if (packageJson.main) {
-                            packageInfo.mainFiles.push(packageJson.main);
-                        }
-
-                        if (packageJson.scripts && typeof packageJson.scripts === 'object') {
-                            packageInfo.scripts = packageJson.scripts;
-                        }
-                    } catch (parseError) {
-                        this.debug(`Could not parse package.json: ${parseError}`);
+        try {
+            // Check for package.json (Node.js)
+            const packageJsonPath = path.join(workspacePath, 'package.json');
+            if (await this.fileExists(packageJsonPath)) {
+                packageInfo.managers.push('npm');
+                try {
+                    const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, 'utf8'));
+                    if (packageJson.main) {
+                        packageInfo.mainFiles.push(packageJson.main);
                     }
+                    if (packageJson.scripts) {
+                        packageInfo.scripts = { ...packageInfo.scripts, ...packageJson.scripts };
+                    }
+                } catch (error) {
+                    this.debug(`Error reading package.json: ${error}`);
                 }
-            } catch {
-                // File doesn't exist, skip
             }
+
+            // Check for requirements.txt (Python)
+            if (await this.fileExists(path.join(workspacePath, 'requirements.txt'))) {
+                packageInfo.managers.push('pip');
+            }
+
+            // Check for Cargo.toml (Rust)
+            if (await this.fileExists(path.join(workspacePath, 'Cargo.toml'))) {
+                packageInfo.managers.push('cargo');
+            }
+
+            // Check for go.mod (Go)
+            if (await this.fileExists(path.join(workspacePath, 'go.mod'))) {
+                packageInfo.managers.push('go');
+            }
+
+            // Check for Gemfile (Ruby)
+            if (await this.fileExists(path.join(workspacePath, 'Gemfile'))) {
+                packageInfo.managers.push('bundler');
+            }
+
+            // Look for common main files
+            const commonMainFiles = ['index.js', 'index.ts', 'main.js', 'main.ts', 'app.js', 'app.ts', 'server.js', 'server.ts'];
+            for (const mainFile of commonMainFiles) {
+                if (await this.fileExists(path.join(workspacePath, mainFile))) {
+                    packageInfo.mainFiles.push(mainFile);
+                }
+            }
+
+        } catch (error) {
+            this.debug(`Error detecting package info: ${error}`);
         }
 
         return packageInfo;
+    }
+
+    /**
+     * Check if file exists
+     */
+    private async fileExists(filePath: string): Promise<boolean> {
+        try {
+            await fs.promises.access(filePath);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    protected generateCacheKey(): string {
+        const workspacePath = this.getWorkspacePath();
+        return `${this.type}:${this.workspaceId}:${this.hashString(workspacePath)}`;
+    }
+
+    private hashString(str: string): string {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return hash.toString();
     }
 } 

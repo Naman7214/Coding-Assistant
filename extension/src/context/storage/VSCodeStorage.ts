@@ -48,8 +48,8 @@ export class VSCodeStorage {
         try {
             this.outputChannel.appendLine('[VSCodeStorage] Initializing VS Code storage...');
 
-            // Load existing data from globalState
-            await this.loadFromGlobalState();
+            // Load existing data from workspace storage
+            await this.loadFromWorkspaceState();
 
             this.isInitialized = true;
             this.outputChannel.appendLine('[VSCodeStorage] Successfully initialized');
@@ -59,9 +59,15 @@ export class VSCodeStorage {
         }
     }
 
-    private async loadFromGlobalState(): Promise<void> {
+    private async loadFromWorkspaceState(): Promise<void> {
         try {
-            // Load workspaces
+            // Check if workspace is available
+            if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+                this.outputChannel.appendLine('[VSCodeStorage] No workspace open, using minimal storage');
+                return;
+            }
+
+            // Load workspace metadata (keep this in global for workspace discovery)
             const workspacesData = this.context.globalState.get<any[]>('codegen.workspaces', []);
             for (const workspace of workspacesData) {
                 this.data.workspaces.set(workspace.metadata.path, {
@@ -70,25 +76,24 @@ export class VSCodeStorage {
                 });
             }
 
-            // Load sessions (only keep recent ones to manage memory)
-            const sessionsData = this.context.globalState.get<ContextSession[]>('codegen.sessions', []);
+            // Load workspace-specific data from workspaceState
+            const sessionsData = this.context.workspaceState.get<ContextSession[]>('codegen.sessions', []);
             const recentSessions = sessionsData.slice(-100); // Keep only last 100 sessions
             for (const session of recentSessions) {
                 this.data.sessions.set(session.id, session);
             }
 
-            // Load file access data
-            const filesData = this.context.globalState.get<any>('codegen.files', {});
-            for (const [workspaceId, files] of Object.entries(filesData)) {
-                this.data.files.set(workspaceId, files as FileInfo[]);
-            }
+            // Load file access data for current workspace
+            const filesData = this.context.workspaceState.get<FileInfo[]>('codegen.files', []);
+            const currentWorkspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            this.data.files.set(currentWorkspacePath, filesData);
 
             // Cache is kept in memory only for performance
             this.data.cache.clear();
 
             this.outputChannel.appendLine(`[VSCodeStorage] Loaded ${this.data.workspaces.size} workspaces, ${this.data.sessions.size} sessions`);
         } catch (error) {
-            this.outputChannel.appendLine(`[VSCodeStorage] Error loading from globalState: ${error}`);
+            this.outputChannel.appendLine(`[VSCodeStorage] Error loading from workspaceState: ${error}`);
             // Initialize with empty data if loading fails
             this.data = {
                 workspaces: new Map(),
@@ -100,25 +105,29 @@ export class VSCodeStorage {
         }
     }
 
-    private async saveToGlobalState(): Promise<void> {
+    private async saveToWorkspaceState(): Promise<void> {
         try {
-            // Save workspaces
+            // Save workspace list to global state for discovery
             const workspacesArray = Array.from(this.data.workspaces.values());
             await this.context.globalState.update('codegen.workspaces', workspacesArray);
 
-            // Save sessions (only recent ones)
-            const sessionsArray = Array.from(this.data.sessions.values()).slice(-100);
-            await this.context.globalState.update('codegen.sessions', sessionsArray);
-
-            // Save file access data
-            const filesObject: any = {};
-            for (const [workspaceId, files] of this.data.files.entries()) {
-                filesObject[workspaceId] = files.slice(-1000); // Keep only last 1000 file accesses per workspace
+            // Only save to workspace state if workspace is open
+            if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+                return;
             }
-            await this.context.globalState.update('codegen.files', filesObject);
+
+            // Save sessions to workspace-specific storage
+            const sessionsArray = Array.from(this.data.sessions.values()).slice(-100);
+            await this.context.workspaceState.update('codegen.sessions', sessionsArray);
+
+            // Save file access data for current workspace only
+            const currentWorkspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            const currentWorkspaceFiles = this.data.files.get(currentWorkspacePath) || [];
+            const limitedFiles = currentWorkspaceFiles.slice(-1000); // Keep only last 1000 file accesses
+            await this.context.workspaceState.update('codegen.files', limitedFiles);
 
         } catch (error) {
-            this.outputChannel.appendLine(`[VSCodeStorage] Error saving to globalState: ${error}`);
+            this.outputChannel.appendLine(`[VSCodeStorage] Error saving to workspaceState: ${error}`);
         }
     }
 
@@ -126,7 +135,7 @@ export class VSCodeStorage {
         const existingWorkspace = this.data.workspaces.get(metadata.path);
         if (existingWorkspace) {
             existingWorkspace.metadata = metadata;
-            await this.saveToGlobalState();
+            await this.saveToWorkspaceState();
             return existingWorkspace.id;
         }
 
@@ -136,7 +145,7 @@ export class VSCodeStorage {
             metadata
         });
 
-        await this.saveToGlobalState();
+        await this.saveToWorkspaceState();
         return workspaceId;
     }
 
@@ -147,9 +156,9 @@ export class VSCodeStorage {
     async storeContextSession(session: ContextSession): Promise<void> {
         this.data.sessions.set(session.id, session);
 
-        // Periodically save to globalState
+        // Periodically save to workspace state
         if (this.data.sessions.size % 10 === 0) {
-            await this.saveToGlobalState();
+            await this.saveToWorkspaceState();
         }
     }
 
@@ -169,13 +178,10 @@ export class VSCodeStorage {
             path: filePath,
             relativePath: metadata?.relativePath || path.relative(workspaceId, filePath),
             languageId: metadata?.languageId || 'unknown',
-            isDirty: metadata?.isDirty || false,
-            isUntitled: metadata?.isUntitled || false,
             lineCount: metadata?.lineCount || 0,
             fileSize: metadata?.fileSize || 0,
-            lastModified: metadata?.lastModified || Date.now(),
+            lastModified: metadata?.lastModified || new Date().toISOString(),
             accessFrequency: 1,
-            content: metadata?.content,
             relevanceScore: metadata?.relevanceScore,
             cursorPosition: metadata?.cursorPosition,
             selection: metadata?.selection,
@@ -185,7 +191,7 @@ export class VSCodeStorage {
         if (existingIndex >= 0) {
             const existing = files[existingIndex];
             fileInfo.accessFrequency = existing.accessFrequency + 1;
-            fileInfo.lastModified = Date.now();
+            fileInfo.lastModified = new Date().toISOString();
             files[existingIndex] = fileInfo;
         } else {
             files.push(fileInfo);
@@ -195,16 +201,16 @@ export class VSCodeStorage {
             }
         }
 
-        // Periodically save to globalState
+        // Periodically save to workspace state
         if (files.length % 50 === 0) {
-            await this.saveToGlobalState();
+            await this.saveToWorkspaceState();
         }
     }
 
     async getFileStats(workspaceId: string, limit: number = 50): Promise<FileInfo[]> {
         const files = this.data.files.get(workspaceId) || [];
         return files
-            .sort((a, b) => b.lastModified - a.lastModified)
+            .sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime())
             .slice(0, limit);
     }
 
@@ -307,7 +313,7 @@ export class VSCodeStorage {
 
     async close(): Promise<void> {
         if (this.isInitialized) {
-            await this.saveToGlobalState();
+            await this.saveToWorkspaceState();
             this.isInitialized = false;
         }
     }
@@ -323,7 +329,7 @@ export class VSCodeStorage {
 
             // Build context from most recently accessed files
             const recentFiles = files
-                .sort((a, b) => b.lastModified - a.lastModified)
+                .sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime())
                 .slice(0, 20); // Limit to 20 most recent files
 
             // Return the session's context data if available, otherwise create a minimal one
@@ -341,13 +347,7 @@ export class VSCodeStorage {
                 workspace: workspace.metadata,
                 activeFile: recentFiles[0] || null,
                 openFiles: recentFiles,
-                projectStructure: {
-                    directories: [],
-                    dependencies: [],
-                    configFiles: [],
-                    mainEntryPoints: [],
-                    testFiles: []
-                },
+                projectStructure: 'No project structure available',
                 gitContext: {
                     branch: 'main',
                     hasChanges: false,
