@@ -1,14 +1,11 @@
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
 
 from system.mcp_server.config.settings import settings
-
-# import aiofiles
-
 
 load_dotenv()
 
@@ -17,8 +14,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
 
 
 async def codebase_search(
@@ -36,7 +31,9 @@ async def codebase_search(
     }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -59,7 +56,8 @@ async def execute_grep_search(
     include_pattern: Optional[str] = None,
     exclude_pattern: Optional[str] = None,
     explanation: Optional[str] = None,
-) -> Dict[str, Any]:
+    workspace_path: Optional[str] = None,
+):
     """
     Execute a grep search using ripgrep.
 
@@ -87,9 +85,13 @@ async def execute_grep_search(
         payload["exclude_pattern"] = exclude_pattern
     if explanation:
         payload["explanation"] = explanation
+    if workspace_path:
+        payload["workspace_path"] = workspace_path
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout =settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

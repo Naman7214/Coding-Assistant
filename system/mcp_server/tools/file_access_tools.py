@@ -7,9 +7,6 @@ from dotenv import load_dotenv
 
 from system.mcp_server.config.settings import settings
 
-# import aiofiles
-
-
 load_dotenv()
 
 logging.basicConfig(
@@ -19,13 +16,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
-
 async def read_file(
     file_path: str,
     explanation: str,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
+    workspace_path: Optional[str] = None,
 ) -> Dict[str, Any]:
 
     url = settings.READ_FILE_API
@@ -36,9 +32,13 @@ async def read_file(
         payload["start_line"] = start_line
     if end_line:
         payload["end_line"] = end_line
+    if workspace_path:
+        payload["workspace_path"] = workspace_path
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -55,7 +55,9 @@ async def read_file(
         return f"An error occured : {str(e)}"
 
 
-async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
+async def delete_file(
+    path: str, explanation: str, workspace_path: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Delete a file or directory with safety checks.
 
@@ -71,8 +73,13 @@ async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
 
     payload = {"path": path, "explanation": explanation}
 
+    if workspace_path:
+        payload["workspace_path"] = workspace_path
+
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -89,12 +96,11 @@ async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
         return f"An error occured : {str(e)}"
 
 
-
 async def list_directory(
     dir_path: Optional[str] = None,
+    workspace_path: Optional[str] = None,
     explanation: str = "",
 ) -> List[Dict[str, Any]]:
-
 
     payload = {
         "explanation": explanation,
@@ -102,9 +108,13 @@ async def list_directory(
 
     if dir_path:
         payload["dir_path"] = dir_path
+    if workspace_path:
+        payload["workspace_path"] = workspace_path
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(settings.LIST_DIR_API, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -134,7 +144,9 @@ async def search_files(
     }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

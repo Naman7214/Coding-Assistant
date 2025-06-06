@@ -383,7 +383,7 @@ export class EnhancedStreamingClient {
 
         if (webview) {
             webview.postMessage({
-                command: 'thinkingUpdate',
+                command: 'thinking',
                 content: content,
                 fullThinking: this.currentState.thinking.content,
                 isThinking: this.currentState.thinking.isThinking
@@ -533,7 +533,7 @@ export class EnhancedStreamingClient {
             webview.postMessage({
                 command: 'permissionRequest',
                 content: content,
-                commandToExecute: command,
+                terminalCommand: command,
                 permissionId: permissionId,
                 metadata: metadata
             });
@@ -585,7 +585,7 @@ export class EnhancedStreamingClient {
 
         if (webview) {
             webview.postMessage({
-                command: 'finalResponse',
+                command: 'streamComplete',
                 content: content,
                 metadata: metadata
             });

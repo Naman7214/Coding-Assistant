@@ -296,6 +296,10 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       case 'handleContextRequest':
         await this.handleContextRequest(message.contextType, message.params);
         return;
+
+      case 'getAvailableFiles':
+        await this.getAvailableFiles();
+        return;
     }
   }
 
@@ -349,125 +353,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       this.notifyWebviewContextManagerReady(false, errorMsg);
     }
   }
-
-  // public async handleEnhancedQuery(query: string, useStreaming: boolean = true) {
-  //   if (!this._view) return;
-
-  //   try {
-  //     // Check workspace first
-  //     const hasWorkspace = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
-  //     if (!hasWorkspace) {
-  //       this.updateResponse('❌ No workspace is open. Please open a folder to enable workspace analysis.');
-  //       vscode.window.showErrorMessage(
-  //         'No workspace folder is open. Please open a folder first.',
-  //         'Open Folder'
-  //       ).then(selection => {
-  //         if (selection === 'Open Folder') {
-  //           vscode.commands.executeCommand('vscode.openFolder');
-  //         }
-  //       });
-  //       return;
-  //     }
-
-  //     // Initialize context manager if not ready
-  //     if (!this.isContextManagerReady) {
-  //       this.outputChannel.appendLine('[Context] Context manager not ready - attempting initialization...');
-  //       this.updateResponse('🔄 Initializing context manager for workspace analysis...');
-
-  //       await this.initializeForWorkspace();
-
-  //       if (!this.isContextManagerReady) {
-  //         this.updateResponse('❌ Failed to initialize context manager. Please check the output for details.');
-  //         return;
-  //       }
-
-  //       this.outputChannel.appendLine('[Context] Context manager is now ready');
-  //     }
-
-  //     // Collect workspace context
-  //     this.outputChannel.appendLine('[Context] Collecting comprehensive workspace context...');
-  //     this.updateResponse('🔍 Analyzing workspace structure and context...');
-
-  //     const collectionResult = await this.contextManager!.collectContext({
-  //       collectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector'],
-  //       options: {
-  //         includeFileContent: true,
-  //         maxFileSize: 1024 * 1024, // 1MB
-  //         excludePatterns: ['**/node_modules/**', '**/.git/**'],
-  //         includeHiddenFiles: false,
-  //         respectGitignore: true,
-  //         maxDepth: 10,
-  //         parallel: true,
-  //         useCache: true
-  //       }
-  //     });
-
-  //     if (!collectionResult.success || !collectionResult.context) {
-  //       this.updateResponse('❌ Failed to collect workspace context. Please check the output for details.');
-  //       return;
-  //     }
-
-  //     const fullContext = collectionResult.context;
-
-  //     this.outputChannel.appendLine(`[Context] Full Workspace Context:\n${JSON.stringify(fullContext, null, 2)}`);
-
-  //     // Send context to webview for display
-  //     if (this._view) {
-  //       this._view.webview.postMessage({
-  //         command: 'workspaceContext',
-  //         context: fullContext,
-  //         collectionResult: {
-  //           success: collectionResult.success,
-  //           duration: collectionResult.totalDuration,
-  //           collectors: collectionResult.metadata.collectorCount,
-  //           successCount: collectionResult.metadata.successCount
-  //         }
-  //       });
-  //     }
-
-  //     if (useStreaming && this.enhancedStreamingClient) {
-  //       // Use streaming API with workspace context
-  //       this.outputChannel.appendLine(`🚀 Using enhanced streaming API for query: ${query}`);
-  //       this.updateResponse('🧠 Processing your query with AI agent...');
-
-  //       const streamRequest: any = {
-  //         query: query,
-  //         workspace_path: fullContext.workspace.path
-  //       };
-
-  //       // Prepare headers with workspace ID
-  //       const requestHeaders = {
-  //         'X-Workspace-ID': this.contextManager!.getWorkspaceId()
-  //       };
-
-  //       // Stream the query
-  //       await this.enhancedStreamingClient.streamQuery(
-  //         streamRequest,
-  //         this._view.webview,
-  //         async (event, state) => {
-  //           // Enhanced event handling
-  //           this.outputChannel.appendLine(`[EVENT] ${event.type}: ${event.content.substring(0, 50)}...`);
-
-  //           if (event.type === 'thinking' && event.content.length > 100) {
-  //             this.statusBarItem.text = `🧠 Thinking... (${event.content.length} chars)`;
-  //           } else if (event.type === 'tool_selection') {
-  //             this.outputChannel.appendLine(`🔧 TOOL SELECTED: ${event.metadata?.tool_name}`);
-  //           } else if (event.type === 'final_response') {
-  //             this.outputChannel.appendLine('✅ Enhanced streaming query completed');
-  //             this.statusBarItem.text = '$(plug) Agent Server (Enhanced)';
-  //           }
-  //         },
-  //         requestHeaders
-  //       );
-  //     }
-
-  //   } catch (error) {
-  //     console.error('Error processing enhanced query:', error);
-  //     const errorMessage = `❌ Error: ${error instanceof Error ? error.message : String(error)}`;
-  //     this.updateResponse(errorMessage);
-  //     this.outputChannel.appendLine(`Enhanced query error: ${errorMessage}`);
-  //   }
-  // }
 
   /**
    * Handle queries from the simplified UI
@@ -524,34 +409,32 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           'X-Workspace-ID': this.contextManager!.getWorkspaceId()
         };
 
-        // DEBUG: Log the exact request being sent with detailed structure analysis
-        this.outputChannel.appendLine(`[SimpleQuery] DEBUG - Request payload structure analysis:`);
-        this.outputChannel.appendLine(`Query: "${streamRequest.query}"`);
-        this.outputChannel.appendLine(`Workspace Path: "${streamRequest.workspace_path}"`);
-        this.outputChannel.appendLine(`System Info Fields: [${Object.keys(streamRequest.system_info || {}).join(', ')}]`);
-        this.outputChannel.appendLine(`System Info: ${JSON.stringify(streamRequest.system_info, null, 2)}`);
-
+        // DEBUG: Log the exact request being sent
+        this.outputChannel.appendLine(`[SimpleQuery] Sending request with context mentions: ${JSON.stringify(contextMentions)}`);
+        this.outputChannel.appendLine(`[SimpleQuery] Workspace: ${streamRequest.workspace_path}`);
+        this.outputChannel.appendLine(`[SimpleQuery] System Info: ${JSON.stringify(streamRequest.system_info)}`);
         if (streamRequest.active_file_context) {
-          this.outputChannel.appendLine(`Active File Context Fields: [${Object.keys(streamRequest.active_file_context).join(', ')}]`);
-          this.outputChannel.appendLine(`Active File Context: ${JSON.stringify(streamRequest.active_file_context, null, 2)}`);
-        } else {
-          this.outputChannel.appendLine(`Active File Context: null`);
+          this.outputChannel.appendLine(`[SimpleQuery] Active File: ${streamRequest.active_file_context.relativePath}`);
         }
-
-        this.outputChannel.appendLine(`Context Mentions: ${JSON.stringify(streamRequest.context_mentions)}`);
-        this.outputChannel.appendLine(`Headers: ${JSON.stringify(requestHeaders)}`);
-        this.outputChannel.appendLine(`[SimpleQuery] DEBUG - Expected Python model comparison:`);
-        this.outputChannel.appendLine(`Expected SystemInfo fields: platform, osVersion, architecture, workspacePath, defaultShell`);
-        this.outputChannel.appendLine(`Expected ActiveFileContext fields: path, relativePath, languageId, lineCount, fileSize, lastModified, content, cursorPosition, selection, visibleRanges, cursorLineContent`);
-        this.outputChannel.appendLine(`[SimpleQuery] DEBUG - Sending request to ${this.enhancedStreamingClient['baseUrl']}/stream`);
 
         // Stream the query with comprehensive event handling for SimpleApp
         await this.enhancedStreamingClient.streamQuery(
           streamRequest,
           this._view.webview,
           async (event, state) => {
+            this.outputChannel.appendLine(`[SimpleQuery] Event: ${event.type} - ${event.content.substring(0, 100)}...`);
+
             // Comprehensive event handling for the SimpleApp UI
             switch (event.type) {
+              case 'thinking':
+                // Forward thinking events to UI for transparency
+                this._view!.webview.postMessage({
+                  command: 'thinking',
+                  content: event.content,
+                  metadata: event.metadata
+                });
+                break;
+
               case 'tool_selection':
                 this._view!.webview.postMessage({
                   command: 'toolSelection',
@@ -570,19 +453,21 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
                 });
                 break;
 
+              case 'tool_result':
+                // Forward tool results for display
+                this._view!.webview.postMessage({
+                  command: 'toolResult',
+                  toolName: event.metadata?.tool_name,
+                  content: event.content,
+                  isError: event.metadata?.error || false,
+                  metadata: event.metadata
+                });
+                break;
+
               case 'assistant_response':
                 this._view!.webview.postMessage({
                   command: 'responseUpdate',
                   content: event.content
-                });
-                break;
-
-              case 'thinking':
-                // Forward thinking events to UI for transparency
-                this._view!.webview.postMessage({
-                  command: 'thinking',
-                  content: event.content,
-                  metadata: event.metadata
                 });
                 break;
 
@@ -593,17 +478,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
                   content: event.content,
                   permissionId: event.metadata?.permission_id,
                   terminalCommand: event.metadata?.command,
-                  metadata: event.metadata
-                });
-                break;
-
-              case 'tool_result':
-                // Forward tool results for display
-                this._view!.webview.postMessage({
-                  command: 'toolResult',
-                  toolName: event.metadata?.tool_name,
-                  content: event.content,
-                  isError: event.metadata?.error || false,
                   metadata: event.metadata
                 });
                 break;
@@ -621,6 +495,11 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
                   error: event.content,
                   metadata: event.metadata
                 });
+                break;
+
+              case 'context_request':
+                // Handle context requests from the agent
+                this.outputChannel.appendLine(`[SimpleQuery] Context request: ${event.metadata?.context_type}`);
                 break;
 
               default:
@@ -643,32 +522,32 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Parse @ mentions from user query
+   * Parse @ mentions from user query including file attachments
    */
   private parseContextMentions(query: string): string[] {
     const mentions: string[] = [];
-    const atMentionRegex = /@(\w+)/g;
+    const atMentionRegex = /@([^\s]+)/g;
     let match;
 
     while ((match = atMentionRegex.exec(query)) !== null) {
       const mention = match[1].toLowerCase();
 
       // Map user-friendly names to actual context types
-      switch (mention) {
-        case 'problems':
-          mentions.push('problems');
-          break;
-        case 'project':
-        case 'structure':
-          mentions.push('project-structure');
-          break;
-        case 'git':
-          mentions.push('git');
-          break;
-        case 'files':
-        case 'open':
-          mentions.push('open-files');
-          break;
+      if (mention === 'problems' || mention === 'problem') {
+        mentions.push('problems');
+      } else if (mention === 'project' || mention === 'structure') {
+        mentions.push('project-structure');
+      } else if (mention === 'git') {
+        mentions.push('git');
+      } else if (mention === 'files' || mention === 'open') {
+        mentions.push('open-files');
+      } else {
+        // Check if it's a file path
+        const originalMention = match[1]; // Keep original case
+        if (originalMention.includes('.') || originalMention.includes('/')) {
+          // This looks like a file path, add it as a file mention
+          mentions.push(`file:${originalMention}`);
+        }
       }
     }
 
@@ -1191,6 +1070,55 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Get available files for context attachment
+   */
+  private async getAvailableFiles(): Promise<void> {
+    try {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) {
+        this._view?.webview.postMessage({
+          command: 'availableFiles',
+          files: []
+        });
+        return;
+      }
+
+      // Use glob to find files, excluding common non-useful directories
+      const files = await vscode.workspace.findFiles(
+        '**/*',
+        '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/.vscode/**,**/coverage/**,**/*.log}',
+        1000 // Limit to 1000 files for performance
+      );
+
+      const relativePaths = files
+        .map(file => vscode.workspace.asRelativePath(file))
+        .filter(path => {
+          // Filter out very long paths and certain file types
+          return path.length < 100 &&
+            !path.includes('node_modules') &&
+            !path.includes('.git/') &&
+            !path.startsWith('.') &&
+            !path.endsWith('.lock') &&
+            !path.endsWith('.log');
+        })
+        .sort();
+
+      this._view?.webview.postMessage({
+        command: 'availableFiles',
+        files: relativePaths
+      });
+
+      this.outputChannel.appendLine(`[AvailableFiles] Found ${relativePaths.length} files`);
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[AvailableFiles] Error: ${error}`);
+      this._view?.webview.postMessage({
+        command: 'availableFiles',
+        files: []
+      });
+    }
+  }
 
   /**
    * Clean up all resources

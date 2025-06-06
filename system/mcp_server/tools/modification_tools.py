@@ -17,15 +17,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
-
 async def search_and_replace(
     query: str,
     replacement: str,
     explanation: str,
     workspace_path: str,
     options: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+):
     """
     Search for text and replace it in files.
 
@@ -52,7 +50,9 @@ async def search_and_replace(
         payload["options"] = options
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -77,7 +77,9 @@ async def edit_file(target_file_path: str, code_snippet: str, explanation: str):
         "explanation": explanation,
     }
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

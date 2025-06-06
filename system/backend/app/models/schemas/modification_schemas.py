@@ -28,7 +28,9 @@ class SearchReplaceRequest(BaseModel):
     options: Optional[SearchReplaceOptions] = Field(
         default=None, description="Search options"
     )
-    workspace_path: str = Field(..., description="The path to the workspace")
+    workspace_path: str = Field(
+        default=None, description="The path to the workspace"
+    )
     explanation: str = Field(
         ..., description="The explanation for the search and replace request"
     )
@@ -42,7 +44,9 @@ class EditFileRequest(BaseModel):
     explanation: str = Field(
         ..., description="The explanation for the file edit request"
     )
-    workspace_path: str = Field(..., description="The path to the workspace")
+    workspace_path: str = Field(
+        default=None, description="The path to the workspace"
+    )
 
 
 class ReapplyRequest(BaseModel):
@@ -53,4 +57,6 @@ class ReapplyRequest(BaseModel):
     explanation: str = Field(
         ..., description="The explanation for the file reapply request"
     )
-    workspace_path: str = Field(..., description="The path to the workspace")
+    workspace_path: str = Field(
+        default=None, description="The path to the workspace"
+    )

@@ -1,5 +1,5 @@
-from pydantic_settings import BaseSettings
 import httpx
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     REAPPLY_API: str
     CODEBASE_SEARCH_API: str
     EXECUTE_GREP_SEARCH_API: str
+    EDIT_FILE_API: str
 
     class Config:
         env_file = ".env"

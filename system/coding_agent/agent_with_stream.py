@@ -13,6 +13,11 @@ from mcp.client.stdio import stdio_client
 from memory.agent_memory import AgentMemory
 from motor.motor_asyncio import AsyncIOMotorClient
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
+from utils.context_formatter import (
+    format_active_file_context,
+    format_additional_context,
+    format_system_info_context,
+)
 
 logger = getLogger(__name__)
 
@@ -28,7 +33,6 @@ class AnthropicStreamingAgent:
         self.client_context = None
         self.anthropic_tools = []
         self.workspace_path = None
-        self.workspace_id = None
         self.system_info = None
         self.active_file_context = None  # New: store active file context
         self.additional_context = {}  # New: store on-demand context
@@ -55,11 +59,6 @@ class AnthropicStreamingAgent:
         logger.info(
             f"System info updated: {system_info.get('platform', 'unknown')} {system_info.get('osVersion', '')}"
         )
-
-    def set_workspace_id(self, workspace_id: str):
-        """Set workspace ID for context retrieval"""
-        self.workspace_id = workspace_id
-        logger.info(f"Workspace ID set: {workspace_id}")
 
     def set_active_file_context(self, active_file_context: Optional[dict]):
         """Set active file context (always-send context)"""
@@ -108,7 +107,9 @@ class AnthropicStreamingAgent:
             from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
 
             # Format system info context
-            system_info_context = self._format_system_info_context()
+            system_info_context = format_system_info_context(
+                system_info=self.system_info
+            )
             base_prompt = CODING_AGENT_SYSTEM_PROMPT.format(
                 system_info_context=system_info_context
             )
@@ -118,148 +119,26 @@ class AnthropicStreamingAgent:
 
             # Add active file context if available
             if self.active_file_context:
-                enhanced_prompt += self._format_active_file_context()
+                enhanced_prompt += format_active_file_context(
+                    active_file_context=self.active_file_context
+                )
 
             # Add on-demand context sections
             if self.additional_context:
-                enhanced_prompt += self._format_additional_context()
+                enhanced_prompt += format_additional_context(
+                    additional_context=self.additional_context
+                )
 
             return enhanced_prompt
 
         except Exception as e:
-            logger.error(f"Failed to create enhanced system prompt: {e}")
+            logger.error(f"Failed to create enhanced system prompt: {str(e)}")
             # Fallback to basic prompt
             return CODING_AGENT_SYSTEM_PROMPT.format(
-                system_info_context=self._format_system_info_context()
+                system_info_context=format_system_info_context(
+                    system_info=self.system_info
+                )
             )
-
-    def _format_system_info_context(self) -> str:
-        """Format system information for the prompt"""
-        if not self.system_info:
-            return "No system information available."
-
-        context = f"""
-SYSTEM INFORMATION:
-- Platform: {self.system_info.get('platform', 'unknown')}
-- OS Version: {self.system_info.get('osVersion', 'unknown')}
-- Architecture: {self.system_info.get('architecture', 'unknown')}
-- Workspace Path: {self.system_info.get('workspacePath', 'unknown')}
-- Default Shell: {self.system_info.get('defaultShell', 'unknown')}
-"""
-        return context
-
-    def _format_active_file_context(self) -> str:
-        """Format active file context for inclusion in system prompt"""
-        if not self.active_file_context:
-            return ""
-
-        context = f"""
-=== ACTIVE FILE CONTEXT ===
-Currently editing: {self.active_file_context.get('relativePath', 'Unknown')}
-Language: {self.active_file_context.get('languageId', 'unknown')}
-Lines: {self.active_file_context.get('lineCount', 0)}
-"""
-
-        # Add cursor position if available
-        if self.active_file_context.get("cursorPosition"):
-            cursor_pos = self.active_file_context["cursorPosition"]
-            context += f"Cursor Position: Line {cursor_pos.get('line', 0)}, Character {cursor_pos.get('character', 0)}\n"
-
-        # Add selection if available
-        if self.active_file_context.get("selection"):
-            selection = self.active_file_context["selection"]
-            if not selection.get("isEmpty", True):
-                start = selection.get("start", {})
-                end = selection.get("end", {})
-                context += f"Selection: Lines {start.get('line', 0)}-{end.get('line', 0)}\n"
-
-        # Add file content if available (truncated for context)
-        if self.active_file_context.get("content"):
-            content = self.active_file_context["content"]
-            if len(content) > 5000:
-                context += f"\nFile Content (first 5000 chars):\n```\n{content[:5000]}\n...[truncated]\n```\n"
-            else:
-                context += f"\nFile Content:\n```\n{content}\n```\n"
-
-        context += "=== END ACTIVE FILE CONTEXT ===\n"
-        return context
-
-    def _format_additional_context(self) -> str:
-        """Format additional on-demand context for inclusion in system prompt"""
-        if not self.additional_context:
-            return ""
-
-        context = "\n=== ADDITIONAL CONTEXT ===\n"
-
-        # Format problems context
-        if "problems" in self.additional_context:
-            problems = self.additional_context["problems"]
-            context += "\n--- PROBLEMS/DIAGNOSTICS ---\n"
-            if problems and isinstance(problems, list):
-                for problem in problems[:10]:  # Limit to 10 problems
-                    severity = problem.get("severity", "unknown")
-                    source = problem.get("source", "unknown")
-                    message = problem.get("message", "No message")
-                    file_path = problem.get("file", "unknown file")
-                    line = problem.get("line", 0)
-                    context += f"  [{severity.upper()}] {source}: {message} ({file_path}:{line})\n"
-                if len(problems) > 10:
-                    context += f"  ... and {len(problems) - 10} more problems\n"
-            else:
-                context += "  No problems detected\n"
-
-        # Format git context
-        if "git" in self.additional_context:
-            git_info = self.additional_context["git"]
-            context += "\n--- GIT CONTEXT ---\n"
-            if git_info:
-                context += f"  Repository: {git_info.get('isRepo', False)}\n"
-                if git_info.get("isRepo"):
-                    context += (
-                        f"  Branch: {git_info.get('branch', 'unknown')}\n"
-                    )
-                    context += (
-                        f"  Has Changes: {git_info.get('hasChanges', False)}\n"
-                    )
-                    if git_info.get("changedFiles"):
-                        context += f"  Changed Files ({len(git_info['changedFiles'])}):\n"
-                        for file_change in git_info["changedFiles"][
-                            :5
-                        ]:  # Limit to 5 files
-                            context += f"    {file_change.get('status', '?')} {file_change.get('path', 'unknown')}\n"
-            else:
-                context += "  No git repository detected\n"
-
-        # Format project structure context
-        if "project-structure" in self.additional_context:
-            structure = self.additional_context["project-structure"]
-            context += "\n--- PROJECT STRUCTURE ---\n"
-            if structure and structure.get("tree"):
-                context += f"Project tree:\n{structure['tree']}\n"
-            else:
-                context += "  No project structure available\n"
-
-        # Format open files context
-        if "open-files" in self.additional_context:
-            open_files = self.additional_context["open-files"]
-            context += "\n--- OPEN FILES ---\n"
-            if open_files and isinstance(open_files, list):
-                context += f"  {len(open_files)} files currently open:\n"
-                for file_info in open_files[:10]:  # Limit to 10 files
-                    path = file_info.get("path", "unknown")
-                    language = file_info.get("languageId", "unknown")
-                    is_dirty = file_info.get("isDirty", False)
-                    dirty_indicator = " (unsaved)" if is_dirty else ""
-                    context += f"    {path} ({language}){dirty_indicator}\n"
-                if len(open_files) > 10:
-                    context += (
-                        f"    ... and {len(open_files) - 10} more files\n"
-                    )
-            else:
-                context += "  No open files\n"
-
-        context += "=== END ADDITIONAL CONTEXT ===\n"
-        return context
 
     async def anthropic_streaming_api_call(
         self,
@@ -755,12 +634,7 @@ Lines: {self.active_file_context.get('lineCount', 0)}
             yield {"type": "error", "data": {"error": str(e)}}
 
     async def initialize_session(
-        self,
-        server_url,
-        transport_type,
-        workspace_path,
-        system_info=None,
-        workspace_id=None,
+        self, server_url, transport_type, workspace_path, system_info=None
     ):
         """Initialize the MCP session with optional system information and workspace ID"""
         try:
@@ -768,14 +642,13 @@ Lines: {self.active_file_context.get('lineCount', 0)}
             self.workspace_path = workspace_path or os.getcwd()
             if system_info:
                 self.set_system_info(system_info)
-            if workspace_id:
-                self.set_workspace_id(workspace_id)
 
             logger.info(
                 f"Initializing session with workspace: {self.workspace_path}"
             )
-            if workspace_id:
-                logger.info(f"Workspace ID: {workspace_id}")
+
+            # Clean up any existing session first
+            await self.cleanup()
 
             # Connect to MCP server
             logger.info(f"Connecting to MCP server via {transport_type}...")
@@ -822,27 +695,14 @@ Lines: {self.active_file_context.get('lineCount', 0)}
                 )
 
             # Format system info context
-            system_info_context = self._format_system_info_context()
-
-            # Get workspace context if workspace ID is available
-            workspace_context = (
-                await self.get_workspace_context() if workspace_id else ""
+            system_info_context = format_system_info_context(
+                system_info=self.system_info
             )
 
             # Use the actual workspace path and system info
             system_message = CODING_AGENT_SYSTEM_PROMPT.format(
                 system_info_context=system_info_context,
             )
-
-            # Add workspace context to system message if available
-            if workspace_context:
-                system_message += f"\n\n{workspace_context}"
-
-            logger.info(f"Using system information:\n{system_info_context}")
-            if workspace_context:
-                logger.info(
-                    "Workspace context loaded and added to system prompt"
-                )
 
             # Initialize agent memory with system message
             logger.info(

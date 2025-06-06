@@ -41,7 +41,6 @@ async def delete_file(
     return await file_deletion_controller.execute(request)
 
 
-
 @router.post("/search-files")
 @handle_exceptions
 async def search_files(

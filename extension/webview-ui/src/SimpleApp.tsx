@@ -4,19 +4,12 @@ import './SimpleApp.css';
 // Declare vscode API
 declare const vscode: any;
 
-interface ToolUsage {
-    name: string;
-    description: string;
-    status: 'running' | 'completed' | 'error';
-    timestamp: number;
-}
-
-interface ChatMessage {
+interface ConversationItem {
     id: string;
-    type: 'user' | 'assistant';
+    type: 'user' | 'thinking' | 'tool' | 'response';
     content: string;
+    metadata?: any;
     timestamp: number;
-    tools?: ToolUsage[];
     isStreaming?: boolean;
 }
 
@@ -27,165 +20,269 @@ interface PermissionRequest {
     isBackground?: boolean;
 }
 
-interface TerminalOutput {
-    command: string;
-    output: string;
-    isExecuting: boolean;
-    hasError: boolean;
-}
-
-interface ContextMention {
-    type: 'problems' | 'project-structure' | 'git' | 'open-files';
-    label: string;
-}
-
-const CONTEXT_MENTIONS: ContextMention[] = [
-    { type: 'problems', label: '@problems' },
-    { type: 'project-structure', label: '@project' },
-    { type: 'git', label: '@git' },
-    { type: 'open-files', label: '@files' }
-];
-
 const SimpleApp: React.FC = () => {
     const [query, setQuery] = useState('');
-    const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-    const [isStreaming, setIsStreaming] = useState(false);
-    const [currentResponse, setCurrentResponse] = useState('');
-    const [currentTools, setCurrentTools] = useState<ToolUsage[]>([]);
-    const [showContextMenu, setShowContextMenu] = useState(false);
-    const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
-    const [filteredContexts, setFilteredContexts] = useState<ContextMention[]>([]);
+    const [items, setItems] = useState<ConversationItem[]>([]);
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
-    const [terminalOutput, setTerminalOutput] = useState<TerminalOutput | null>(null);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [pendingQuery, setPendingQuery] = useState('');
 
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        // Listen for messages from the extension
         const handleMessage = (event: MessageEvent) => {
             const message = event.data;
+            console.log('[UI] Received:', message.command, message);
 
             switch (message.command) {
                 case 'streamStart':
-                    handleStreamStart();
+                    handleStreamStart(message);
+                    break;
+                case 'thinking':
+                    handleThinking(message.content);
                     break;
                 case 'toolSelection':
-                    handleToolUpdate(message);
+                    handleToolSelection(message);
                     break;
                 case 'toolExecution':
-                    handleToolUpdate(message);
+                    handleToolExecution(message);
+                    break;
+                case 'toolResult':
+                    handleToolResult(message);
                     break;
                 case 'responseUpdate':
-                    handleResponseUpdate(message);
+                    handleResponseUpdate(message.content);
                     break;
                 case 'streamComplete':
-                    handleStreamComplete();
+                    handleStreamComplete(message.content);
                     break;
                 case 'streamError':
-                    handleStreamError(message);
+                    handleStreamError(message.error);
                     break;
                 case 'permissionRequest':
                     handlePermissionRequest(message);
-                    break;
-                case 'terminalOutput':
-                    handleTerminalOutput(message);
                     break;
             }
         };
 
         window.addEventListener('message', handleMessage);
-        return () => {
-            window.removeEventListener('message', handleMessage);
-        };
+
+        // Debug: Log when component mounts
+        console.log('[UI] SimpleApp component mounted, waiting for messages...');
+
+        return () => window.removeEventListener('message', handleMessage);
     }, []);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatHistory, currentResponse]);
+        console.log('[UI] Items updated, count:', items.length, 'types:', items.map(i => i.type));
+    }, [items]);
 
-    const handleStreamStart = () => {
+    const handleStreamStart = (message?: any) => {
+        const queryText = message?.query || pendingQuery || query;
+        console.log('[UI] Stream started for:', queryText);
         setIsStreaming(true);
-        setCurrentResponse('');
-        setCurrentTools([]);
         setPermissionRequest(null);
-        setTerminalOutput(null);
-    };
 
-    const handleToolUpdate = (message: any) => {
-        const toolName = message.toolName || message.content;
-        const status = message.type === 'toolSelection' ? 'running' : 'completed';
-
-        // Create simple tool descriptions like Cursor
-        const getToolDescription = (name: string): string => {
-            if (name.includes('list') || name.includes('directory')) return 'listing files';
-            if (name.includes('grep') || name.includes('search')) return 'searched codebase';
-            if (name.includes('read') || name.includes('file')) return 'reading file';
-            if (name.includes('write') || name.includes('edit')) return 'editing file';
-            if (name.includes('terminal') || name.includes('command')) return 'running command';
-            if (name.includes('git')) return 'checking git status';
-            if (name.includes('problems') || name.includes('diagnostic')) return 'checking problems';
-            return name.toLowerCase();
+        // Add user message
+        const userItem: ConversationItem = {
+            id: `user-${Date.now()}`,
+            type: 'user',
+            content: queryText,
+            timestamp: Date.now()
         };
 
-        setCurrentTools(prev => {
-            const existing = prev.find(t => t.name === toolName);
-            if (existing) {
-                return prev.map(t =>
-                    t.name === toolName
-                        ? { ...t, status, timestamp: Date.now() }
-                        : t
-                );
+        setItems(prev => [...prev, userItem]);
+    };
+
+    const handleThinking = (content: string) => {
+        console.log('[UI] Thinking received:', content.substring(0, 100), '...');
+
+        // Skip system thinking messages that aren't actual content
+        if (content.includes('Processing your request') ||
+            content.includes('Generating response') ||
+            content.includes('Starting to process') ||
+            content.trim().length === 0) {
+            console.log('[UI] Skipping system thinking message');
+            return;
+        }
+
+        setItems(prev => {
+            const newItems = [...prev];
+            const lastItem = newItems[newItems.length - 1];
+
+            // If last item is thinking and streaming, append content
+            if (lastItem && lastItem.type === 'thinking' && lastItem.isStreaming) {
+                lastItem.content += content;
+                console.log('[UI] Appended to thinking, total chars:', lastItem.content.length);
             } else {
-                return [...prev, {
-                    name: toolName,
-                    description: getToolDescription(toolName),
-                    status,
-                    timestamp: Date.now()
-                }];
+                // Create new thinking item
+                const thinkingItem: ConversationItem = {
+                    id: `thinking-${Date.now()}`,
+                    type: 'thinking',
+                    content: content,
+                    timestamp: Date.now(),
+                    isStreaming: true
+                };
+                newItems.push(thinkingItem);
+                console.log('[UI] New thinking item created with:', content.substring(0, 50));
             }
+
+            return newItems;
         });
     };
 
-    const handleResponseUpdate = (message: any) => {
-        setCurrentResponse(prev => prev + (message.content || ''));
+    const handleToolSelection = (message: any) => {
+        console.log('[UI] Tool selection:', message);
+        const toolName = message.metadata?.tool_name || 'unknown';
+        const friendlyName = message.metadata?.friendly_name || toolName;
+
+        setItems(prev => {
+            const newItems = [...prev];
+
+            // Mark last thinking as complete
+            if (newItems.length > 0 && newItems[newItems.length - 1].type === 'thinking') {
+                newItems[newItems.length - 1].isStreaming = false;
+            }
+
+            // Add tool item
+            const toolItem: ConversationItem = {
+                id: `tool-${Date.now()}`,
+                type: 'tool',
+                content: getCleanToolName(toolName, friendlyName),
+                metadata: { toolName, status: 'selected' },
+                timestamp: Date.now(),
+                isStreaming: true
+            };
+            newItems.push(toolItem);
+
+            return newItems;
+        });
     };
 
-    const handleStreamComplete = () => {
-        setIsStreaming(false);
+    const handleToolExecution = (message: any) => {
+        console.log('[UI] Tool execution:', message);
+        const toolName = message.metadata?.tool_name || 'unknown';
+        const friendlyName = message.metadata?.friendly_name || toolName;
 
-        // Add the complete message to chat history
-        const assistantMessage: ChatMessage = {
-            id: Date.now().toString(),
-            type: 'assistant',
-            content: currentResponse,
-            timestamp: Date.now(),
-            tools: [...currentTools]
-        };
+        setItems(prev => {
+            const newItems = [...prev];
+            const lastTool = newItems.reverse().find(item =>
+                item.type === 'tool' && item.metadata?.toolName === toolName
+            );
 
-        setChatHistory(prev => [...prev, assistantMessage]);
-        setCurrentResponse('');
-        setCurrentTools([]);
-        setPermissionRequest(null);
-        setTerminalOutput(null);
+            if (lastTool) {
+                lastTool.content = getCleanToolName(toolName, friendlyName);
+                lastTool.metadata = { ...lastTool.metadata, status: 'executing' };
+            }
+
+            return newItems.reverse();
+        });
     };
 
-    const handleStreamError = (message: any) => {
+    const handleToolResult = (message: any) => {
+        console.log('[UI] Tool result:', message);
+        const toolName = message.metadata?.tool_name || 'unknown';
+        const isError = message.metadata?.error || false;
+
+        setItems(prev => {
+            const newItems = [...prev];
+            const lastTool = newItems.reverse().find(item =>
+                item.type === 'tool' && item.metadata?.toolName === toolName
+            );
+
+            if (lastTool) {
+                lastTool.metadata = { ...lastTool.metadata, status: isError ? 'error' : 'completed' };
+                lastTool.isStreaming = false;
+            }
+
+            return newItems.reverse();
+        });
+    };
+
+    const handleResponseUpdate = (content: string) => {
+        console.log('[UI] Response update:', content.substring(0, 50));
+
+        setItems(prev => {
+            const newItems = [...prev];
+
+            // Mark last thinking as complete when response starts (but keep it visible)
+            const lastThinking = newItems.reverse().find(item => item.type === 'thinking' && item.isStreaming);
+            if (lastThinking) {
+                lastThinking.isStreaming = false;
+                console.log('[UI] Marked thinking as complete, keeping visible');
+            }
+            newItems.reverse();
+
+            const lastItem = newItems[newItems.length - 1];
+
+            // If last item is response and streaming, append content
+            if (lastItem && lastItem.type === 'response' && lastItem.isStreaming) {
+                lastItem.content += content;
+                console.log('[UI] Appended to response, total chars:', lastItem.content.length);
+            } else {
+                // Create new response item
+                const responseItem: ConversationItem = {
+                    id: `response-${Date.now()}`,
+                    type: 'response',
+                    content: content,
+                    timestamp: Date.now(),
+                    isStreaming: true
+                };
+                newItems.push(responseItem);
+                console.log('[UI] New response item created');
+            }
+
+            return newItems;
+        });
+    };
+
+    const handleStreamComplete = (finalContent?: string) => {
+        console.log('[UI] Stream complete');
+
+        setItems(prev => {
+            const newItems = [...prev];
+
+            // Mark all items as complete
+            newItems.forEach(item => {
+                item.isStreaming = false;
+            });
+
+            // Update final response if provided
+            if (finalContent) {
+                const lastResponse = newItems.reverse().find(item => item.type === 'response');
+                if (lastResponse) {
+                    lastResponse.content = finalContent;
+                }
+                newItems.reverse();
+            }
+
+            return newItems;
+        });
+
         setIsStreaming(false);
-        const errorMessage: ChatMessage = {
-            id: Date.now().toString(),
-            type: 'assistant',
-            content: `Error: ${message.error || 'Something went wrong'}`,
+        setPendingQuery('');
+    };
+
+    const handleStreamError = (error: string) => {
+        console.log('[UI] Stream error:', error);
+
+        const errorItem: ConversationItem = {
+            id: `error-${Date.now()}`,
+            type: 'response',
+            content: `Error: ${error}`,
+            metadata: { isError: true },
             timestamp: Date.now()
         };
-        setChatHistory(prev => [...prev, errorMessage]);
-        setCurrentResponse('');
-        setCurrentTools([]);
-        setPermissionRequest(null);
-        setTerminalOutput(null);
+
+        setItems(prev => [...prev, errorItem]);
+        setIsStreaming(false);
+        setPendingQuery('');
     };
 
     const handlePermissionRequest = (message: any) => {
+        console.log('[UI] Permission request:', message);
         setPermissionRequest({
             id: message.permissionId,
             message: message.content || 'Permission required to execute command',
@@ -194,86 +291,45 @@ const SimpleApp: React.FC = () => {
         });
     };
 
-    const handleTerminalOutput = (message: any) => {
-        setTerminalOutput({
-            command: message.terminalCommand || message.command || '',
-            output: message.output || message.content || '',
-            isExecuting: message.isExecuting || false,
-            hasError: message.hasError || false
-        });
-    };
-
     const handlePermissionResponse = (granted: boolean) => {
         if (!permissionRequest) return;
 
-        // Send response to extension
+        console.log('[UI] Permission response:', granted);
         vscode.postMessage({
             command: 'permissionResponse',
             permissionId: permissionRequest.id,
             granted: granted
         });
 
-        if (granted) {
-            // Initialize terminal output for approved command
-            setTerminalOutput({
-                command: permissionRequest.command,
-                output: 'Executing command...',
-                isExecuting: true,
-                hasError: false
-            });
-        }
-
         setPermissionRequest(null);
+    };
+
+    const getCleanToolName = (toolName: string, friendlyName: string): string => {
+        // Clean, minimal tool descriptions like Cursor IDE Chat interface
+        const cleanNames: Record<string, string> = {
+            'list_directory': 'List files',
+            'read_file': 'Read file',
+            'edit_file': 'Edit file',
+            'search_files': 'Search codebase',
+            'run_terminal_command': 'Run command',
+            'create_file': 'Create file',
+            'delete_file': 'Delete file',
+        };
+
+        return cleanNames[toolName] || friendlyName || toolName;
     };
 
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const value = e.target.value;
         setQuery(value);
 
-        // Check for @ mentions
-        const atIndex = value.lastIndexOf('@');
-        if (atIndex !== -1 && atIndex === value.length - 1) {
-            // Just typed @, show all contexts
-            setFilteredContexts(CONTEXT_MENTIONS);
-            setShowContextMenu(true);
-            setContextMenuPosition({ x: 0, y: -120 });
-        } else if (atIndex !== -1 && atIndex < value.length - 1) {
-            // Typing after @, filter contexts
-            const searchTerm = value.substring(atIndex + 1).toLowerCase();
-            const filtered = CONTEXT_MENTIONS.filter(ctx =>
-                ctx.label.toLowerCase().includes(searchTerm) ||
-                ctx.type.toLowerCase().includes(searchTerm)
-            );
-            setFilteredContexts(filtered);
-            setShowContextMenu(filtered.length > 0);
-        } else {
-            setShowContextMenu(false);
-        }
-    };
-
-    const handleContextSelect = (context: ContextMention) => {
-        const atIndex = query.lastIndexOf('@');
-        if (atIndex !== -1) {
-            const beforeAt = query.substring(0, atIndex);
-            setQuery(beforeAt + context.label + ' ');
-        }
-        setShowContextMenu(false);
-        inputRef.current?.focus();
+        // Auto-resize textarea
+        const textarea = e.target;
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (showContextMenu) {
-            if (e.key === 'Escape') {
-                setShowContextMenu(false);
-                return;
-            }
-            if (e.key === 'Enter' && filteredContexts.length > 0) {
-                e.preventDefault();
-                handleContextSelect(filteredContexts[0]);
-                return;
-            }
-        }
-
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSubmit();
@@ -282,15 +338,10 @@ const SimpleApp: React.FC = () => {
 
     const handleSubmit = () => {
         if (query.trim() && !isStreaming) {
-            // Add user message to chat
-            const userMessage: ChatMessage = {
-                id: Date.now().toString(),
-                type: 'user',
-                content: query.trim(),
-                timestamp: Date.now()
-            };
+            console.log('[UI] Submitting:', query.trim());
 
-            setChatHistory(prev => [...prev, userMessage]);
+            // Store the query before sending
+            setPendingQuery(query.trim());
 
             // Send to extension
             vscode.postMessage({
@@ -299,87 +350,87 @@ const SimpleApp: React.FC = () => {
             });
 
             setQuery('');
-            setShowContextMenu(false);
+
+            // Reset textarea height
+            if (inputRef.current) {
+                inputRef.current.style.height = 'auto';
+            }
         }
     };
 
-    const formatTimestamp = (timestamp: number) => {
-        return new Date(timestamp).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    };
+    const renderItem = (item: ConversationItem) => {
+        const { type, content, isStreaming, metadata } = item;
 
-    const renderMessage = (message: ChatMessage) => {
-        return (
-            <div key={message.id} className={`message ${message.type}`}>
-                <div className="message-content">
-                    {message.content}
-                </div>
-                {message.tools && message.tools.length > 0 && (
-                    <div className="message-tools">
-                        {message.tools.map((tool, index) => (
-                            <div key={index} className={`tool-item ${tool.status}`}>
-                                <span className="tool-icon">
-                                    {tool.status === 'running' ? '⏳' :
-                                        tool.status === 'completed' ? '✓' : '❌'}
-                                </span>
-                                <span className="tool-description">{tool.description}</span>
-                            </div>
-                        ))}
+        // Debug rendering
+        console.log('[UI] Rendering item:', type, 'streaming:', isStreaming, 'content length:', content.length);
+
+        switch (type) {
+            case 'user':
+                return (
+                    <div key={item.id} className="conversation-item user-item">
+                        <div className="item-header">
+                            <span className="item-role">You</span>
+                        </div>
+                        <div className="item-content user-content">
+                            {content}
+                        </div>
                     </div>
-                )}
-                <div className="message-timestamp">
-                    {formatTimestamp(message.timestamp)}
-                </div>
-            </div>
-        );
+                );
+
+            case 'thinking':
+                return (
+                    <div key={item.id} className="conversation-item thinking-item">
+                        <div className="item-header">
+                            <span className="thinking-icon">💭</span>
+                            <span className="item-label">Thinking</span>
+                            {isStreaming && <span className="streaming-cursor">|</span>}
+                        </div>
+                        <div className="item-content thinking-content">
+                            {content}
+                        </div>
+                    </div>
+                );
+
+            case 'tool':
+                const status = metadata?.status || 'selected';
+                const statusIcon = status === 'completed' ? '✓' : status === 'error' ? '✗' : status === 'executing' ? '...' : '';
+
+                return (
+                    <div key={item.id} className={`conversation-item tool-item tool-${status}`}>
+                        <div className="item-header">
+                            <span className="tool-icon">🔧</span>
+                            <span className="item-label">{content} {statusIcon}</span>
+                            {isStreaming && status === 'executing' && <span className="streaming-cursor">⏳</span>}
+                        </div>
+                    </div>
+                );
+
+            case 'response':
+                return (
+                    <div key={item.id} className={`conversation-item response-item ${metadata?.isError ? 'error' : ''}`}>
+                        <div className="item-content response-content">
+                            {content}
+                            {isStreaming && <span className="streaming-cursor">|</span>}
+                        </div>
+                    </div>
+                );
+
+            default:
+                return null;
+        }
     };
 
     return (
         <div className="simple-app">
             <div className="chat-container">
                 <div className="chat-messages">
-                    {chatHistory.map(renderMessage)}
-
-                    {/* Current streaming response */}
-                    {isStreaming && (
-                        <div className="message assistant streaming">
-                            {currentTools.length > 0 && (
-                                <div className="current-tools">
-                                    {currentTools.map((tool, index) => (
-                                        <div key={index} className={`tool-item ${tool.status}`}>
-                                            <span className="tool-icon">
-                                                {tool.status === 'running' ? '⏳' : '✓'}
-                                            </span>
-                                            <span className="tool-description">{tool.description}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Terminal output display */}
-                            {terminalOutput && (
-                                <div className="terminal-output">
-                                    <div className="terminal-header">
-                                        <span className="terminal-icon">$</span>
-                                        <span className="terminal-command">{terminalOutput.command}</span>
-                                        {terminalOutput.isExecuting && (
-                                            <span className="terminal-status executing">⏳ Executing...</span>
-                                        )}
-                                    </div>
-                                    <div className={`terminal-content ${terminalOutput.hasError ? 'error' : ''}`}>
-                                        <pre>{terminalOutput.output}</pre>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="message-content">
-                                {currentResponse}
-                                <span className="cursor-blink">|</span>
-                            </div>
+                    {items.length === 0 && (
+                        <div className="empty-state">
+                            Ask anything to get started...
                         </div>
                     )}
+
+                    {items.map(renderItem)}
 
                     <div ref={chatEndRef} />
                 </div>
@@ -390,7 +441,7 @@ const SimpleApp: React.FC = () => {
                     <textarea
                         ref={inputRef}
                         className="message-input"
-                        placeholder="Ask anything... Use @ for context"
+                        placeholder="Ask anything..."
                         value={query}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
@@ -405,32 +456,10 @@ const SimpleApp: React.FC = () => {
                     >
                         {isStreaming ? '⏳' : '➤'}
                     </button>
-
-                    {/* Context menu */}
-                    {showContextMenu && (
-                        <div
-                            className="context-menu"
-                            style={{
-                                bottom: contextMenuPosition.y,
-                                left: contextMenuPosition.x
-                            }}
-                        >
-                            {filteredContexts.map((context, index) => (
-                                <div
-                                    key={context.type}
-                                    className="context-menu-item"
-                                    onClick={() => handleContextSelect(context)}
-                                >
-                                    <span className="context-icon">@</span>
-                                    <span className="context-label">{context.type}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
                 </div>
             </div>
 
-            {/* Permission Dialog Modal */}
+            {/* Permission Dialog */}
             {permissionRequest && (
                 <div className="permission-modal-overlay">
                     <div className="permission-modal">
@@ -438,7 +467,7 @@ const SimpleApp: React.FC = () => {
                             <h3>⚠️ Permission Required</h3>
                         </div>
                         <div className="permission-content">
-                            <p className="permission-message">{permissionRequest.message}</p>
+                            <p>{permissionRequest.message}</p>
                             <div className="permission-command-container">
                                 <div className="permission-command-label">Command:</div>
                                 <code className="permission-command">{permissionRequest.command}</code>
@@ -470,4 +499,4 @@ const SimpleApp: React.FC = () => {
     );
 };
 
-export default SimpleApp; 
+export default SimpleApp;

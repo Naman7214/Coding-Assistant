@@ -1,18 +1,20 @@
 import asyncio
 import json
-import os
-import re
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import httpx
 import uvicorn
 from agent_with_stream import AnthropicStreamingAgent
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from models.schema.context_schema import ActiveFileContext, SystemInfo
+from models.schema.request_schema import (
+    PermissionResponse,
+    QueryRequest,
+    StreamEvent,
+)
 
 # Create FastAPI app
 app = FastAPI(title="Agent True Streaming API")
@@ -31,153 +33,8 @@ agent_instance = None
 # Store pending permission requests
 pending_permissions = {}
 
-
-class SystemInfo(BaseModel):
-    platform: str
-    osVersion: str
-    architecture: str
-    workspacePath: str
-    defaultShell: str
-
-
-class ActiveFileContext(BaseModel):
-    path: Optional[str] = None
-    relativePath: Optional[str] = None
-    languageId: Optional[str] = None
-    lineCount: Optional[int] = None
-    fileSize: Optional[int] = None
-    lastModified: Optional[str] = None
-    content: Optional[str] = None
-    cursorPosition: Optional[Dict[str, Any]] = None
-    selection: Optional[Dict[str, Any]] = None
-    visibleRanges: Optional[List[Dict[str, Any]]] = None
-    cursorLineContent : Optional[Dict] = None
-
-
-class QueryRequest(BaseModel):
-    query: str
-    workspace_path: str
-    system_info: Optional[SystemInfo] = None
-    active_file_context: Optional[ActiveFileContext] = None
-    context_mentions: Optional[List[str]] = None
-
-
-class PermissionResponse(BaseModel):
-    permission_id: str
-    granted: bool
-
-
-class StreamEvent(BaseModel):
-    type: str  # "thinking", "assistant_response", "tool_selection", "tool_execution", "tool_result", "final_response", "permission_request", "context_request"
-    content: str
-    metadata: Optional[Dict[str, Any]] = None
-    timestamp: float
-
-
 # Context API base URL (extension's context server)
 CONTEXT_API_BASE = "http://localhost:3001"
-
-
-async def request_context_from_extension(
-    context_type: str, workspace_id: str, params: Dict[str, Any] = None
-) -> Optional[Dict[str, Any]]:
-    """Request on-demand context from the VSCode extension"""
-    try:
-        url = f"{CONTEXT_API_BASE}/api/context/{context_type}"
-        query_params = {"workspaceId": workspace_id}
-        if params:
-            query_params.update(params)
-
-        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-            response = await client.get(url, params=query_params)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("success"):
-                    return result.get("data")
-                else:
-                    print(f"❌ Context request failed: {result.get('error')}")
-                    return None
-            else:
-                print(f"❌ Context API error: {response.status_code}")
-                return None
-    except Exception as e:
-        print(f"❌ Error requesting {context_type} context: {e}")
-        return None
-
-
-def parse_context_mentions(query: str) -> List[str]:
-    """Parse @ mentions from user query"""
-    mentions = []
-    # Find all @mentions
-    pattern = r"@(\w+)"
-    matches = re.findall(pattern, query)
-
-    for match in matches:
-        mention = match.lower()
-        # Map user-friendly names to context types
-        if mention in ["problems", "problem"]:
-            mentions.append("problems")
-        elif mention in ["project", "structure", "tree"]:
-            mentions.append("project-structure")
-        elif mention in ["git", "version", "commit"]:
-            mentions.append("git")
-        elif mention in ["files", "open", "tabs"]:
-            mentions.append("open-files")
-
-    return list(set(mentions))  # Remove duplicates
-
-
-def analyze_query_for_context_needs(query: str) -> List[str]:
-    """Analyze query to determine what context might be needed"""
-    needed_contexts = []
-    query_lower = query.lower()
-
-    # Keywords that suggest needing different contexts
-    problem_keywords = [
-        "error",
-        "bug",
-        "issue",
-        "problem",
-        "warning",
-        "diagnostic",
-        "lint",
-        "fix",
-        "debug",
-    ]
-    git_keywords = [
-        "commit",
-        "branch",
-        "merge",
-        "git",
-        "version",
-        "history",
-        "diff",
-        "status",
-    ]
-    structure_keywords = [
-        "structure",
-        "architecture",
-        "organization",
-        "folders",
-        "directory",
-        "project",
-        "tree",
-    ]
-    files_keywords = ["file", "open", "tab", "editor", "switch"]
-
-    if any(keyword in query_lower for keyword in problem_keywords):
-        needed_contexts.append("problems")
-
-    if any(keyword in query_lower for keyword in git_keywords):
-        needed_contexts.append("git")
-
-    if any(keyword in query_lower for keyword in structure_keywords):
-        needed_contexts.append("project-structure")
-
-    if any(keyword in query_lower for keyword in files_keywords):
-        needed_contexts.append("open-files")
-
-    return needed_contexts
 
 
 @app.on_event("startup")
@@ -211,7 +68,6 @@ def create_stream_event(
 async def stream_agent_response(
     query: str,
     workspace_path: str,
-    workspace_id: Optional[str] = None,
     system_info: Optional[SystemInfo] = None,
     active_file_context: Optional[ActiveFileContext] = None,
     context_mentions: Optional[List[str]] = None,
@@ -222,7 +78,6 @@ async def stream_agent_response(
     print(f"🚀 Enhanced stream request received:")
     print(f"   Query: {query[:100]}...")
     print(f"   Workspace Path: {workspace_path}")
-    print(f"   Workspace ID: {workspace_id}")
     print(f"   Context Mentions: {context_mentions}")
     if system_info:
         print(f"   System: {system_info.platform} {system_info.osVersion}")
@@ -233,10 +88,8 @@ async def stream_agent_response(
     if not agent_instance or not agent_instance.session:
         try:
             agent_instance = AnthropicStreamingAgent()
-            server_url = os.environ.get(
-                "MCP_SERVER_URL", "http://localhost:8001/sse"
-            )
-            transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
+            server_url = "http://localhost:8001/sse"
+            transport_type = "sse"
             print(
                 f"🔧 Initializing enhanced agent with workspace: {workspace_path}"
             )
@@ -246,8 +99,7 @@ async def stream_agent_response(
                 server_url,
                 transport_type,
                 workspace_path,
-                system_info.dict() if system_info else None,
-                workspace_id,
+                system_info.model_dump() if system_info else None,
             )
         except Exception as e:
             yield create_stream_event(
@@ -257,12 +109,10 @@ async def stream_agent_response(
 
     # Update agent with always-send context
     if system_info:
-        agent_instance.set_system_info(system_info.dict())
-    if workspace_id:
-        agent_instance.set_workspace_id(workspace_id)
+        agent_instance.set_system_info(system_info.model_dump())
     if active_file_context:
         agent_instance.set_active_file_context(
-            active_file_context.dict() if active_file_context else None
+            active_file_context.model_dump() if active_file_context else None
         )
 
     try:
@@ -272,7 +122,6 @@ async def stream_agent_response(
             {
                 "query": query,
                 "workspace": workspace_path,
-                "workspace_id": workspace_id,
                 "context_mentions": context_mentions,
                 "active_file": (
                     active_file_context.relativePath
@@ -282,45 +131,14 @@ async def stream_agent_response(
             },
         )
 
-        # Parse explicit @ mentions and analyze query for implicit context needs
-        explicit_mentions = context_mentions or []
-        implicit_needs = analyze_query_for_context_needs(query)
-        all_context_needs = list(set(explicit_mentions + implicit_needs))
-
-        print(
-            f"📋 Context needs - Explicit: {explicit_mentions}, Implicit: {implicit_needs}"
-        )
-
-        # Collect needed context data
-        context_data = {}
-        if workspace_id and all_context_needs:
-            yield create_stream_event(
-                "thinking", f"Gathering context: {', '.join(all_context_needs)}"
-            )
-
-            for context_type in all_context_needs:
-                yield create_stream_event(
-                    "context_request",
-                    f"Requesting {context_type} context...",
-                    {"context_type": context_type},
-                )
-
-                context_result = await request_context_from_extension(
-                    context_type, workspace_id
-                )
-                if context_result:
-                    context_data[context_type] = context_result
-                    print(f"✅ Got {context_type} context")
-                else:
-                    print(f"❌ Failed to get {context_type} context")
-
         # Update agent memory with enhanced context
         await agent_instance.update_context_memory(
-            system_info=system_info.dict() if system_info else None,
+            system_info=system_info.model_dump() if system_info else None,
             active_file=(
-                active_file_context.dict() if active_file_context else None
+                active_file_context.model_dump()
+                if active_file_context
+                else None
             ),
-            additional_context=context_data,
         )
 
         # Add the query to agent memory
@@ -331,9 +149,7 @@ async def stream_agent_response(
         )
 
         # Process with enhanced streaming tool calls
-        async for event in process_enhanced_streaming_tool_calls(
-            depth=0, context_data=context_data
-        ):
+        async for event in process_enhanced_streaming_tool_calls(depth=0):
             yield event
 
     except Exception as e:
@@ -349,20 +165,12 @@ async def stream_agent_response(
 
 
 @app.post("/stream")
-async def stream_query(
-    request: QueryRequest,
-    workspace_id: Optional[str] = Header(None, alias="X-Workspace-ID"),
-):
+async def stream_query(request: QueryRequest):
     """Stream the agent's enhanced response with context system"""
     try:
-        # Parse @ mentions from query if not provided
-        if not request.context_mentions:
-            parsed_mentions = parse_context_mentions(request.query)
-            request.context_mentions = parsed_mentions
 
         print(f"🚀 Enhanced /stream endpoint called:")
         print(f"   Query: {request.query[:100]}...")
-        print(f"   Workspace ID: {workspace_id}")
         print(f"   Context Mentions: {request.context_mentions}")
         print(f"   System Info: {bool(request.system_info)}")
         print(f"   Active File: {bool(request.active_file_context)}")
@@ -371,10 +179,8 @@ async def stream_query(
             stream_agent_response(
                 request.query,
                 request.workspace_path,
-                workspace_id,
                 request.system_info,
                 request.active_file_context,
-                request.context_mentions,
             ),
             media_type="text/event-stream",
             headers={
@@ -526,11 +332,6 @@ async def reset_agent():
         agent_instance.workspace_path if agent_instance else None
     )
     current_system_info = agent_instance.system_info if agent_instance else None
-    current_workspace_id = (
-        getattr(agent_instance, "workspace_id", None)
-        if agent_instance
-        else None
-    )
 
     # Clean up existing agent if any
     if agent_instance:
@@ -542,17 +343,14 @@ async def reset_agent():
     # Create a fresh agent instance
     try:
         agent_instance = AnthropicStreamingAgent()
-        server_url = os.environ.get(
-            "MCP_SERVER_URL", "http://localhost:8001/sse"
-        )
-        transport_type = os.environ.get("MCP_TRANSPORT_TYPE", "sse")
+        server_url = "http://localhost:8001/sse"
+        transport_type = "sse"
         # Use the preserved workspace path and system info
         success = await agent_instance.initialize_session(
             server_url,
             transport_type,
             current_workspace_path,
             current_system_info,
-            current_workspace_id,
         )
         if success:
             print("✅ Agent reset successfully with preserved system info")
@@ -563,7 +361,9 @@ async def reset_agent():
         agent_instance = None
 
 
-async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
+async def process_enhanced_streaming_tool_calls(
+    depth=0, context_data=None
+) -> AsyncGenerator[str, None]:
     """
     Enhanced process tool calls with context awareness and streaming
     """
@@ -589,9 +389,11 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
     text_content = ""
     tool_calls = []
 
-    yield create_stream_event(
-        "thinking", f"Generating enhanced response (depth {depth})..."
-    )
+    # Don't send initial thinking message for depth > 0
+    if depth == 0:
+        yield create_stream_event(
+            "thinking", "Starting to process your request..."
+        )
 
     async for stream_event in agent_instance.anthropic_streaming_api_call(
         messages=agent_instance.agent_memory.get_conversation_messages(),
@@ -602,15 +404,16 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
 
         if event_type == "content_block_start":
             content_block = data.get("content_block", {})
-            if content_block.get("type") == "thinking":
-                yield create_stream_event(
-                    "thinking", "Assistant is reasoning..."
-                )
-            elif content_block.get("type") == "text":
-                yield create_stream_event("assistant_response", "")
-            elif content_block.get("type") == "tool_use":
+            block_type = content_block.get("type")
+
+            if block_type == "thinking":
+                # Start thinking mode
+                pass  # Don't send duplicate thinking events
+            elif block_type == "text":
+                # Assistant is about to start responding
+                pass  # Wait for actual content
+            elif block_type == "tool_use":
                 tool_name = content_block.get("name", "unknown")
-                # Provide user-friendly tool descriptions
                 friendly_name = get_friendly_tool_name(tool_name)
                 yield create_stream_event(
                     "tool_selection",
@@ -620,24 +423,28 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
 
         elif event_type == "content_block_delta":
             delta = data.get("delta", {})
-            if delta.get("type") == "thinking_delta":
+            delta_type = delta.get("type")
+
+            if delta_type == "thinking_delta":
                 thinking_text = delta.get("thinking", "")
                 thinking_content += thinking_text
-                if thinking_text:
+                if (
+                    thinking_text.strip()
+                ):  # Only send non-empty thinking content
                     yield create_stream_event("thinking", thinking_text)
-            elif delta.get("type") == "text_delta":
+            elif delta_type == "text_delta":
                 text_chunk = delta.get("text", "")
                 text_content += text_chunk
                 if text_chunk:
                     yield create_stream_event("assistant_response", text_chunk)
-            elif delta.get("type") == "input_json_delta":
+            elif delta_type == "input_json_delta":
                 # Tool input is being streamed - show friendly progress
                 yield create_stream_event(
                     "tool_execution", ".", {"status": "preparing"}
                 )
 
         elif event_type == "content_block_stop":
-            # Content block ended
+            # Content block ended - we can finalize tool information here
             pass
 
         elif event_type == "message_stop":
@@ -744,6 +551,7 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
                         {
                             "tool_name": tool_name,
                             "tool_use_id": tool_use_id,
+                            "friendly_name": friendly_name,
                             "error": True,
                             "permission_denied": True,
                         },
@@ -765,6 +573,7 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
                     {
                         "tool_name": tool_name,
                         "tool_use_id": tool_use_id,
+                        "friendly_name": friendly_name,
                         "error": True,
                         "timeout": True,
                     },
@@ -784,14 +593,14 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
             if not agent_instance.session:
                 raise Exception("Session is not initialized")
 
-            # Enhanced workspace path injection for tools that need it
+            # Enhanced workspace path injection for tools that need it (BEFORE tool call)
             tools_requiring_workspace_path = {
                 "run_terminal_command",
                 "search_and_replace",
                 "search_files",
-                "edit_file",
-                "read_file",
                 "list_directory",
+                "read_file",
+                "delete_file",
             }
 
             if (
@@ -809,10 +618,76 @@ async def process_enhanced_streaming_tool_calls(depth=0, context_data=None):
                     tool_input["dir_path"] = agent_instance.workspace_path
                     print(f"✅ Enhanced: Updated dir_path for {tool_name}")
 
-            print(f"Enhanced: Calling MCP server for tool: {tool_name}")
-            tool_result = await agent_instance.session.call_tool(
-                tool_name, tool_input
+            # For each tool call, create a fresh session to avoid session corruption issues
+            # This is a temporary workaround for MCP SSE session reuse issues
+            print(
+                f"Enhanced: Creating fresh session for tool call: {tool_name}"
             )
+            try:
+                # Store original session info
+                original_workspace_path = agent_instance.workspace_path
+                original_system_info = agent_instance.system_info
+                original_tools = agent_instance.anthropic_tools
+
+                # Create a temporary agent instance for this tool call
+                from agent_with_stream import AnthropicStreamingAgent
+
+                temp_agent = AnthropicStreamingAgent()
+
+                # Initialize the temporary session
+                success = await temp_agent.initialize_session(
+                    "http://localhost:8001/sse",
+                    "sse",
+                    original_workspace_path,
+                    original_system_info,
+                )
+
+                if not success:
+                    raise Exception(
+                        "Failed to create temporary session for tool call"
+                    )
+
+                print(
+                    f"Enhanced: Fresh session created successfully for {tool_name}"
+                )
+                print(f"Enhanced: Tool input with workspace_path: {tool_input}")
+
+                # Use the temporary session for this tool call
+                tool_result = await temp_agent.session.call_tool(
+                    tool_name, tool_input
+                )
+
+                # Clean up the temporary session
+                await temp_agent.cleanup()
+
+                print(
+                    f"Enhanced: Tool call completed successfully with fresh session: {tool_name}"
+                )
+
+            except Exception as fresh_session_error:
+                print(
+                    f"Enhanced: Fresh session approach failed for {tool_name}: {str(fresh_session_error)}"
+                )
+                # Fallback to original session
+                print(
+                    f"Enhanced: Falling back to original session for {tool_name}"
+                )
+                try:
+                    tool_result = await agent_instance.session.call_tool(
+                        tool_name, tool_input
+                    )
+                except Exception as fallback_error:
+                    print(
+                        f"Enhanced: Original session also failed for {tool_name}: {str(fallback_error)}"
+                    )
+                    raise Exception(
+                        f"Both fresh session and original session failed: {str(fallback_error)}"
+                    )
+
+            print(
+                f"Enhanced: Using fresh session approach for tool: {tool_name}"
+            )
+            print(f"Enhanced: Tool input: {tool_input}")
             print(
                 f"Enhanced: Received result from MCP server for tool: {tool_name}"
             )

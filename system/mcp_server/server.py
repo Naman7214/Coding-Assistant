@@ -56,7 +56,11 @@ def main(port: int) -> int:
         if name == "grep_search":
             if "query" not in arguments:
                 raise ValueError("Missing required argument 'query' ")
-            result = await execute_grep_search(**arguments)
+            try:
+                result = await execute_grep_search(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while executing grep_search: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
             # return [
@@ -70,7 +74,11 @@ def main(port: int) -> int:
                 raise ValueError(
                     "Missing required argument 'file_path' and 'explanation'"
                 )
-            result = await read_file(**arguments)
+            try:
+                result = await read_file(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while reading file: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
             # return [
@@ -84,7 +92,13 @@ def main(port: int) -> int:
             for arg in required_args:
                 if arg not in arguments:
                     raise ValueError(f"Missing required argument :'{arg}' ")
-            result = await run_terminal_command(**arguments)
+            try:
+                result = await run_terminal_command(**arguments)
+            except Exception as e:
+                logger.error(
+                    f"Error occurred while running terminal command: {e}"
+                )
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
             # return [
@@ -99,7 +113,11 @@ def main(port: int) -> int:
                 raise ValueError(
                     "Missing required argument 'path' and 'explanation'"
                 )
-            result = await delete_file(**arguments)
+            try:
+                result = await delete_file(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while deleting file: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
             # return [
@@ -108,7 +126,11 @@ def main(port: int) -> int:
             # ]
 
         elif name == "list_directory":
-            result = await list_directory(**arguments)
+            try:
+                result = await list_directory(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while listing directory: {e}")
+                result = {"error": str(e)}
 
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
@@ -118,21 +140,35 @@ def main(port: int) -> int:
                 raise ValueError(
                     "Missing required argument 'query' and 'replacement' and 'explanation'"
                 )
-            result = await search_and_replace(**arguments)
+            try:
+                result = await search_and_replace(**arguments)
+            except Exception as e:
+                logger.error(
+                    f"Error occurred while searching and replacing: {e}"
+                )
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
 
         elif name == "search_files":
             if "query" and "explanation" not in arguments:
                 raise ValueError("Missing required argument 'query'")
-            result = await search_files(**arguments)
+            try:
+                result = await search_files(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while searching files: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
 
         elif name == "web_search":
             if "search_term" and "explanation" not in arguments:
                 raise ValueError("Missing required argument 'search_term'")
-            result = await web_search(**arguments)
+            try:
+                result = await web_search(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while searching the web: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
 
@@ -141,8 +177,13 @@ def main(port: int) -> int:
                 raise ValueError(
                     "Missing required argument 'query' and 'explanation' "
                 )
-            result = await codebase_search(**arguments)
-            print(f"result in elif codebase_search: {result}")
+            try:
+                result = await codebase_search(**arguments)
+            except Exception as e:
+                logger.error(
+                    f"Error occurred while searching the codebase: {e}"
+                )
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
 
@@ -155,7 +196,11 @@ def main(port: int) -> int:
                 raise ValueError(
                     "Missing required argument 'target_file_path' and 'code_snippet' and 'explanation'"
                 )
-            result = await edit_file(**arguments)
+            try:
+                result = await edit_file(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while editing file: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
 
@@ -168,7 +213,11 @@ def main(port: int) -> int:
                 raise ValueError(
                     "Missing required argument 'target_file_path' and 'code_snippet' and 'explanation'"
                 )
-            result = await reapply(**arguments)
+            try:
+                result = await reapply(**arguments)
+            except Exception as e:
+                logger.error(f"Error occurred while reapplying changes: {e}")
+                result = {"error": str(e)}
             json_output = json.dumps(result, indent=2)
             return [types.TextContent(type="text", text=json_output)]
 

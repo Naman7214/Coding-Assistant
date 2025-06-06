@@ -1,3 +1,4 @@
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -8,15 +9,15 @@ class Settings(BaseSettings):
     ANTHROPIC_TIMEOUT: int = 100
     ANTHROPIC_MAX_RETRIES: int = 3
     ANTHROPIC_MAX_TOOL_CALL_DEPTH: int = 100
-    ANTHROPIC_MAX_RETRIES: int = 3
     MCP_BASE_URL: str = "http://0.0.0.0:8001/sse"
 
     MONGODB_URL: str = "mongodb://localhost:27017"
     MONGODB_DB_NAME: str = "code_assistant"
     LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"
 
-    class Config:
-        env_file = ".env"
+    model_config = ConfigDict(
+        env_file=".env", extra="ignore"  # Allow extra fields from .env file
+    )
 
 
 settings = Settings()

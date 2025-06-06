@@ -166,7 +166,7 @@ class SearchReplaceService:
             workspace_path=os.path.dirname(path) or "/",
             silent=True,
         )
-        
+
         is_directory = is_dir_result.get("exitCode", 1) == 0
 
         if is_directory:
@@ -174,14 +174,16 @@ class SearchReplaceService:
             include_paths = await self._find_files_with_pattern(
                 path, include_pattern, excluded_dirs
             )
-            
+
             if exclude_pattern:
                 # Get files to exclude and remove them from include_paths
                 exclude_paths = await self._find_files_with_pattern(
                     path, exclude_pattern, excluded_dirs
                 )
                 exclude_set = set(exclude_paths)
-                include_paths = [p for p in include_paths if p not in exclude_set]
+                include_paths = [
+                    p for p in include_paths if p not in exclude_set
+                ]
         else:
             # Single file case
             include_paths = (
@@ -193,12 +195,14 @@ class SearchReplaceService:
         file_tasks = []
         for file_path in include_paths:
             # Check if it's a file using terminal
-            is_file_result = await self.terminal_client.execute_terminal_command(
-                command=f'test -f "{file_path}"',
-                workspace_path=os.path.dirname(file_path) or "/",
-                silent=True,
+            is_file_result = (
+                await self.terminal_client.execute_terminal_command(
+                    command=f'test -f "{file_path}"',
+                    workspace_path=os.path.dirname(file_path) or "/",
+                    silent=True,
+                )
             )
-            
+
             if is_file_result.get("exitCode", 1) == 0:
                 # Additional check to ensure we don't process files in excluded directories
                 file_dir_parts = os.path.normpath(file_path).split(os.sep)
@@ -216,35 +220,39 @@ class SearchReplaceService:
         """Find files matching pattern using terminal find command."""
         try:
             all_files = []
-            
+
             # Build exclusion options for find command
             exclude_options = ""
             for exclude_dir in excluded_dirs:
                 exclude_options += f" -not -path '*/{exclude_dir}/*'"
-            
+
             # Process each pattern (comma-separated)
             for single_pattern in pattern.split(","):
                 single_pattern = single_pattern.strip()
                 if not single_pattern:
                     continue
-                
+
                 # Use find command to search for files matching the pattern
                 find_cmd = f'find "{search_path}" -type f -name "{single_pattern}"{exclude_options} 2>/dev/null'
-                
+
                 result = await self.terminal_client.execute_terminal_command(
                     command=find_cmd,
                     workspace_path=search_path,
                     silent=True,
                 )
-                
+
                 if result.get("exitCode", 1) == 0:
                     output = result.get("output", "").strip()
                     if output:
-                        files = [line.strip() for line in output.split('\n') if line.strip()]
+                        files = [
+                            line.strip()
+                            for line in output.split("\n")
+                            if line.strip()
+                        ]
                         all_files.extend(files)
-            
+
             return list(set(all_files))  # Remove duplicates
-            
+
         except Exception as e:
             await self.error_repo.insert_error(
                 Error(
@@ -278,11 +286,11 @@ class SearchReplaceService:
                 workspace_path=os.path.dirname(file_path) or "/",
                 silent=True,
             )
-            
+
             if read_result.get("exitCode", 1) != 0:
                 # Skip file if can't be read
                 return
-                
+
             original_content = read_result.get("output", "")
 
             matches = list(pattern.finditer(original_content))
@@ -354,35 +362,46 @@ class SearchReplaceService:
             except Exception:
                 # Fallback to terminal commands if write_file method fails
                 pass
-            
+
             # For safety, use base64 encoding to handle special characters
             import base64
-            encoded_content = base64.b64encode(content.encode('utf-8')).decode('ascii')
-            
+
+            encoded_content = base64.b64encode(content.encode("utf-8")).decode(
+                "ascii"
+            )
+
             # Use base64 decoding to write the file safely
             write_cmd = f'echo "{encoded_content}" | base64 -d > "{file_path}"'
-            
+
             write_result = await self.terminal_client.execute_terminal_command(
                 command=write_cmd,
                 workspace_path=os.path.dirname(file_path) or "/",
                 silent=True,
             )
-            
+
             if write_result.get("exitCode", 1) != 0:
                 # Fallback: try using cat with here document
                 # This approach handles multiline content better
-                escaped_content = content.replace("'", "'\"'\"'")  # Escape single quotes
-                cat_cmd = f"cat > \"{file_path}\" << 'EOF'\n{escaped_content}\nEOF"
-                
-                fallback_result = await self.terminal_client.execute_terminal_command(
-                    command=cat_cmd,
-                    workspace_path=os.path.dirname(file_path) or "/",
-                    silent=True,
+                escaped_content = content.replace(
+                    "'", "'\"'\"'"
+                )  # Escape single quotes
+                cat_cmd = (
+                    f"cat > \"{file_path}\" << 'EOF'\n{escaped_content}\nEOF"
                 )
-                
+
+                fallback_result = (
+                    await self.terminal_client.execute_terminal_command(
+                        command=cat_cmd,
+                        workspace_path=os.path.dirname(file_path) or "/",
+                        silent=True,
+                    )
+                )
+
                 if fallback_result.get("exitCode", 1) != 0:
-                    raise Exception(f"Failed to write file: {write_result.get('error', 'Unknown error')}")
-                    
+                    raise Exception(
+                        f"Failed to write file: {write_result.get('error', 'Unknown error')}"
+                    )
+
         except Exception as e:
             await self.error_repo.insert_error(
                 Error(

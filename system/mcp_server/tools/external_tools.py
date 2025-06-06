@@ -6,9 +6,6 @@ from dotenv import load_dotenv
 
 from system.mcp_server.config.settings import settings
 
-# import aiofiles
-
-
 load_dotenv()
 
 logging.basicConfig(
@@ -16,8 +13,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
 
 
 async def web_search(
@@ -33,7 +28,9 @@ async def web_search(
     }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

@@ -1,14 +1,11 @@
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
 
 from system.mcp_server.config.settings import settings
-
-# import aiofiles
-
 
 load_dotenv()
 
@@ -19,14 +16,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
-
 async def run_terminal_command(
     command: str,
-    is_background: bool,
     workspace_path: str,
+    is_background: bool = False,
     explanation: Optional[str] = None,
-) -> Dict[str, Any]:
+):
     """
     Run a terminal command on the user's system.
 
@@ -44,13 +39,15 @@ async def run_terminal_command(
     payload = {
         "cmd": command,
         "workspace_path": workspace_path,
-        "is_background": is_background,
+        "is_background": False,
     }
     if explanation:
         payload["explanation"] = explanation
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -60,7 +57,7 @@ async def run_terminal_command(
             # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
         return f"HTTP request error occured : {str(e)}"
     except Exception as e:
