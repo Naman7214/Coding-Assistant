@@ -1,5 +1,3 @@
-import os
-
 from pydantic import BaseModel, Field
 
 
@@ -14,6 +12,7 @@ class FileReadRequest(BaseModel):
     explanation: str = Field(
         ..., description="The explanation for the file read request"
     )
+    workspace_path: str = Field(..., description="The path to the workspace")
 
 
 class FilesDeleteRequest(BaseModel):
@@ -21,28 +20,15 @@ class FilesDeleteRequest(BaseModel):
     explanation: str = Field(
         ..., description="The explanation for the file deletion request"
     )
+    workspace_path: str = Field(..., description="The path to the workspace")
 
-
-class DirectoryListRequest(BaseModel):
-    dir_path: str = Field(
-        ...,
-        description="The path to the directory to list",
-    )
-    recursive: bool = Field(
-        default=True, description="Whether to list subdirectories recursively"
-    )
-    explanation: str = Field(
-        ..., description="The explanation for the directory list request"
-    )
 
 
 class FileSearchRequest(BaseModel):
     pattern: str = Field(
         ..., description="The pattern to search for in file names"
     )
-    workspace_path: str = Field(
-        ..., description="The path to the workspace"
-    )
+    workspace_path: str = Field(..., description="The path to the workspace")
     explanation: str = Field(
         ..., description="The explanation for the file search request"
     )

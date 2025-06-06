@@ -12,7 +12,9 @@ class FileDeletionUseCase:
         self.file_deletion_service = file_deletion_service
 
     async def execute(
-        self, path: str, explanation: Optional[str]
+        self, path: str, explanation: Optional[str], workspace_path: str = None
     ) -> Dict[str, Any]:
 
-        return await self.file_deletion_service.delete_file(path, explanation)
+        return await self.file_deletion_service.delete_file(
+            path, explanation, workspace_path
+        )

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
+
 from system.mcp_server.config.settings import settings
 
 # import aiofiles
@@ -17,12 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-timeout = httpx.Timeout(
-    connect=60.0,  # Time to establish a connection
-    read=150.0,  # Time to read the response
-    write=150.0,  # Time to send data
-    pool=60.0,  # Time to wait for a connection from the pool
-)
+
 
 
 async def read_file(
@@ -42,7 +38,7 @@ async def read_file(
         payload["end_line"] = end_line
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -76,7 +72,7 @@ async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
     payload = {"path": path, "explanation": explanation}
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -93,14 +89,12 @@ async def delete_file(path: str, explanation: str) -> Dict[str, Any]:
         return f"An error occured : {str(e)}"
 
 
-# backend me change krna he list directory me recursive parameter nikal na he
+
 async def list_directory(
     dir_path: Optional[str] = None,
-    # recursive: bool = True,
     explanation: str = "",
 ) -> List[Dict[str, Any]]:
 
-    url = settings.LIST_DIR_API
 
     payload = {
         "explanation": explanation,
@@ -110,8 +104,8 @@ async def list_directory(
         payload["dir_path"] = dir_path
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
-            response = await client.post(url, json=payload)
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
+            response = await client.post(settings.LIST_DIR_API, json=payload)
             response.raise_for_status()
             response_json = response.json()
             # print(response_json)
@@ -127,14 +121,20 @@ async def list_directory(
         return f"An error occured : {str(e)}"
 
 
-async def search_files(query: str, workspace_path: str, explanation: str) -> List[Dict[str, Any]]:
+async def search_files(
+    query: str, workspace_path: str, explanation: str
+) -> List[Dict[str, Any]]:
 
     url = settings.SEARCH_FILES_API
 
-    payload = {"pattern": query, "workspace_path": workspace_path, "explanation": explanation}
+    payload = {
+        "pattern": query,
+        "workspace_path": workspace_path,
+        "explanation": explanation,
+    }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

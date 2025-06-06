@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
+
 from system.mcp_server.config.settings import settings
 
 # import aiofiles
@@ -17,12 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-timeout = httpx.Timeout(
-    connect=60.0,  # Time to establish a connection
-    read=150.0,  # Time to read the response
-    write=150.0,  # Time to send data
-    pool=60.0,  # Time to wait for a connection from the pool
-)
+
 
 
 async def codebase_search(
@@ -40,7 +36,7 @@ async def codebase_search(
     }
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -93,7 +89,7 @@ async def execute_grep_search(
         payload["explanation"] = explanation
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=60) as client:
+        async with httpx.AsyncClient(verify=False, timeout =settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

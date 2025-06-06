@@ -1,6 +1,5 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import AppEnhancedStreaming from './AppEnhancedStreaming';
+import { createRoot } from 'react-dom/client';
+import SimpleApp from './SimpleApp';
 
 // Declare vscode for TypeScript
 declare global {
@@ -9,12 +8,10 @@ declare global {
   }
 }
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
+const container = document.getElementById('root');
+if (!container) {
+  throw new Error('Root container not found');
+}
 
-root.render(
-  <React.StrictMode>
-    <AppEnhancedStreaming />
-  </React.StrictMode>
-); 
+const root = createRoot(container);
+root.render(<SimpleApp />); 

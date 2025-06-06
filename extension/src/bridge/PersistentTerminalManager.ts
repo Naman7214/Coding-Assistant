@@ -1,3 +1,5 @@
+import * as cp from 'child_process';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 interface TerminalSession {
@@ -17,6 +19,7 @@ interface CommandExecution {
     environmentVariables?: Record<string, string>;
     isBackground?: boolean;
     timeout?: number;
+    silent?: boolean; // Whether to show command in terminal UI
 }
 
 interface CommandResult {
@@ -24,9 +27,7 @@ interface CommandResult {
     error: string;
     exitCode: number | null;
     status: 'completed' | 'error' | 'timeout' | 'running_in_background';
-    command: string;
-    workingDirectory: string;
-    duration: number;
+    currentDirectory: string;
 }
 
 export class PersistentTerminalManager implements vscode.Disposable {
@@ -34,7 +35,6 @@ export class PersistentTerminalManager implements vscode.Disposable {
     private outputChannel: vscode.OutputChannel;
     private disposables: vscode.Disposable[] = [];
     private readonly TERMINAL_TIMEOUT = 30000; // 30 seconds default timeout
-    private readonly FIXED_PORT = 8080; // Fixed port as requested
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
@@ -215,7 +215,6 @@ export class PersistentTerminalManager implements vscode.Disposable {
             }
 
         } catch (error) {
-            const duration = Date.now() - startTime;
             this.outputChannel.appendLine(`[TerminalManager] Command execution error: ${error}`);
 
             return {
@@ -223,9 +222,7 @@ export class PersistentTerminalManager implements vscode.Disposable {
                 error: error instanceof Error ? error.message : String(error),
                 exitCode: 1,
                 status: 'error',
-                command: execution.command,
-                workingDirectory: session.currentDirectory,
-                duration
+                currentDirectory: session.currentDirectory
             };
         }
     }
@@ -235,13 +232,18 @@ export class PersistentTerminalManager implements vscode.Disposable {
 
         if (session.shellIntegration) {
             try {
-                const command = session.shellIntegration.executeCommand({
-                    command: cdCommand,
-                    args: []
+                const execution = session.shellIntegration.executeCommand(cdCommand);
+                // Listen for the execution to complete
+                const exitCode = await new Promise<number | undefined>((resolve) => {
+                    const disposable = vscode.window.onDidEndTerminalShellExecution((event) => {
+                        if (event.execution === execution) {
+                            disposable.dispose();
+                            resolve(event.exitCode);
+                        }
+                    });
                 });
-                await command.exitCode;
                 session.currentDirectory = newDirectory;
-                this.outputChannel.appendLine(`[TerminalManager] Changed directory to: ${newDirectory}`);
+                this.outputChannel.appendLine(`[TerminalManager] Changed directory to: ${newDirectory} (exit code: ${exitCode})`);
             } catch (error) {
                 this.outputChannel.appendLine(`[TerminalManager] Failed to change directory: ${error}`);
             }
@@ -266,11 +268,16 @@ export class PersistentTerminalManager implements vscode.Disposable {
 
                 if (session.shellIntegration) {
                     try {
-                        const command = session.shellIntegration.executeCommand({
-                            command: setCommand,
-                            args: []
+                        const execution = session.shellIntegration.executeCommand(setCommand);
+                        // Listen for the execution to complete
+                        await new Promise<number | undefined>((resolve) => {
+                            const disposable = vscode.window.onDidEndTerminalShellExecution((event) => {
+                                if (event.execution === execution) {
+                                    disposable.dispose();
+                                    resolve(event.exitCode);
+                                }
+                            });
                         });
-                        await command.exitCode;
                         session.environmentVariables.set(key, value);
                     } catch (error) {
                         this.outputChannel.appendLine(`[TerminalManager] Failed to set env var ${key}: ${error}`);
@@ -284,24 +291,69 @@ export class PersistentTerminalManager implements vscode.Disposable {
         }
     }
 
+    private async updateCurrentDirectory(session: TerminalSession): Promise<string> {
+        try {
+            // Always use child_process to get current directory silently
+            const pwdCommand = process.platform === 'win32' ? 'cd' : 'pwd';
+
+            const result = await new Promise<string>((resolve) => {
+                const child = cp.spawn(pwdCommand, [], {
+                    cwd: session.currentDirectory || session.workspacePath,
+                    shell: true
+                });
+
+                let output = '';
+                child.stdout?.on('data', (data) => {
+                    output += data.toString();
+                });
+
+                child.on('close', () => {
+                    const currentDir = output.trim();
+                    if (currentDir && currentDir !== '') {
+                        resolve(currentDir);
+                    } else {
+                        resolve(session.currentDirectory || session.workspacePath);
+                    }
+                });
+
+                child.on('error', () => {
+                    resolve(session.currentDirectory || session.workspacePath);
+                });
+
+                // Timeout after 2 seconds
+                setTimeout(() => {
+                    child.kill();
+                    resolve(session.currentDirectory || session.workspacePath);
+                }, 2000);
+            });
+
+            session.currentDirectory = result;
+            return result;
+        } catch (error) {
+            this.outputChannel.appendLine(`[TerminalManager] Failed to update current directory: ${error}`);
+            return session.currentDirectory || session.workspacePath;
+        }
+    }
+
     private async executeBackgroundCommand(
         session: TerminalSession,
         execution: CommandExecution,
         startTime: number
     ): Promise<CommandResult> {
-        const duration = Date.now() - startTime;
+        // For background commands, send the text to terminal only if not silent
+        if (!execution.silent) {
+            session.terminal.sendText(execution.command);
+        }
 
-        // For background commands, just send the text and return immediately
-        session.terminal.sendText(execution.command);
+        // Get current directory silently
+        const currentDirectory = await this.updateCurrentDirectory(session);
 
         return {
             output: `Command started in background: ${execution.command}`,
             error: '',
             exitCode: null,
             status: 'running_in_background',
-            command: execution.command,
-            workingDirectory: session.currentDirectory,
-            duration
+            currentDirectory
         };
     }
 
@@ -312,62 +364,161 @@ export class PersistentTerminalManager implements vscode.Disposable {
     ): Promise<CommandResult> {
         const timeout = execution.timeout || this.TERMINAL_TIMEOUT;
 
-        if (session.shellIntegration) {
-            try {
-                // Use shell integration for reliable command execution
-                const command = session.shellIntegration.executeCommand({
-                    command: execution.command,
-                    args: []
+        try {
+            // Get current directory before executing command
+            let currentDir = session.currentDirectory || session.workspacePath;
+
+            // Execute the command using child_process to capture output
+            const result = await new Promise<{ stdout: string, stderr: string, exitCode: number | null }>((resolve, reject) => {
+                const options: cp.SpawnOptions = {
+                    cwd: currentDir,
+                    shell: true,
+                    env: {
+                        ...process.env,
+                        ...Object.fromEntries(session.environmentVariables.entries())
+                    }
+                };
+
+                const child = cp.spawn(execution.command, [], options);
+                let stdout = '';
+                let stderr = '';
+
+                child.stdout?.on('data', (data) => {
+                    stdout += data.toString();
                 });
 
-                // Wait for command completion with timeout
-                const exitCode = await Promise.race([
-                    command.exitCode,
-                    new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error('Command timeout')), timeout)
-                    )
-                ]);
+                child.stderr?.on('data', (data) => {
+                    stderr += data.toString();
+                });
 
-                const duration = Date.now() - startTime;
+                child.on('close', (code) => {
+                    resolve({
+                        stdout: stdout.trim(),
+                        stderr: stderr.trim(),
+                        exitCode: code
+                    });
+                });
 
-                return {
-                    output: `Command executed successfully: ${execution.command}`,
-                    error: '',
-                    exitCode: exitCode,
-                    status: exitCode === 0 ? 'completed' : 'error',
-                    command: execution.command,
-                    workingDirectory: session.currentDirectory,
-                    duration
-                };
+                child.on('error', (error) => {
+                    reject(error);
+                });
 
-            } catch (error) {
-                const duration = Date.now() - startTime;
-                const isTimeout = error instanceof Error && error.message === 'Command timeout';
+                // Timeout handling
+                const timeoutId = setTimeout(() => {
+                    child.kill('SIGTERM');
+                    reject(new Error('Command timeout'));
+                }, timeout);
 
-                return {
-                    output: '',
-                    error: error instanceof Error ? error.message : String(error),
-                    exitCode: isTimeout ? null : 1,
-                    status: isTimeout ? 'timeout' : 'error',
-                    command: execution.command,
-                    workingDirectory: session.currentDirectory,
-                    duration
-                };
+                child.on('close', () => {
+                    clearTimeout(timeoutId);
+                });
+            });
+
+            // Also send the command to the terminal for visual feedback (only if not silent)
+            if (!execution.silent) {
+                if (session.shellIntegration) {
+                    session.shellIntegration.executeCommand(execution.command);
+                } else {
+                    session.terminal.sendText(execution.command);
+                }
             }
-        } else {
-            // Fallback without shell integration
-            session.terminal.sendText(execution.command);
-            const duration = Date.now() - startTime;
+
+            // Update the current directory after command execution
+            const currentDirectory = await this.getCurrentDirectory(currentDir, execution.command);
+            session.currentDirectory = currentDirectory;
 
             return {
-                output: `Command sent to terminal (no shell integration): ${execution.command}`,
-                error: '',
-                exitCode: null,
-                status: 'completed',
-                command: execution.command,
-                workingDirectory: session.currentDirectory,
-                duration
+                output: result.stdout,
+                error: result.stderr,
+                exitCode: result.exitCode,
+                status: result.exitCode === 0 ? 'completed' : 'error',
+                currentDirectory
             };
+
+        } catch (error) {
+            // Fallback: send command to terminal even if child_process fails (only if not silent)
+            if (!execution.silent) {
+                if (session.shellIntegration) {
+                    session.shellIntegration.executeCommand(execution.command);
+                } else {
+                    session.terminal.sendText(execution.command);
+                }
+            }
+
+            const currentDirectory = await this.updateCurrentDirectory(session);
+
+            if (error instanceof Error && error.message === 'Command timeout') {
+                return {
+                    output: '',
+                    error: 'Command execution timed out',
+                    exitCode: null,
+                    status: 'timeout',
+                    currentDirectory
+                };
+            }
+
+            return {
+                output: '',
+                error: error instanceof Error ? error.message : String(error),
+                exitCode: 1,
+                status: 'error',
+                currentDirectory
+            };
+        }
+    }
+
+    private async getCurrentDirectory(startDir: string, command: string): Promise<string> {
+        try {
+            // If the command is a cd command, parse the target directory
+            const cdMatch = command.match(/^\s*cd\s+(.+)$/);
+            if (cdMatch) {
+                let targetDir = cdMatch[1].trim().replace(/['"]/g, '');
+
+                // Handle special cases
+                if (targetDir === '~') {
+                    return process.env.HOME || startDir;
+                } else if (targetDir === '..') {
+                    return path.dirname(startDir);
+                } else if (targetDir === '.') {
+                    return startDir;
+                } else if (path.isAbsolute(targetDir)) {
+                    return targetDir;
+                } else {
+                    return path.resolve(startDir, targetDir);
+                }
+            }
+
+            // For other commands, execute pwd to get current directory
+            const result = await new Promise<string>((resolve) => {
+                const pwdCommand = process.platform === 'win32' ? 'cd' : 'pwd';
+                const child = cp.spawn(pwdCommand, [], {
+                    cwd: startDir,
+                    shell: true
+                });
+
+                let output = '';
+                child.stdout?.on('data', (data) => {
+                    output += data.toString();
+                });
+
+                child.on('close', () => {
+                    resolve(output.trim() || startDir);
+                });
+
+                child.on('error', () => {
+                    resolve(startDir);
+                });
+
+                // Timeout after 2 seconds
+                setTimeout(() => {
+                    child.kill();
+                    resolve(startDir);
+                }, 2000);
+            });
+
+            return result;
+        } catch (error) {
+            return startDir;
         }
     }
 

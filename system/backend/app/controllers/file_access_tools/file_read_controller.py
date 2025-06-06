@@ -19,6 +19,7 @@ class FileReadController:
             request.start_line,
             request.end_line,
             request.explanation,
+            request.workspace_path,
         )
 
         return JSONResponse(

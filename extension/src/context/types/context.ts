@@ -18,11 +18,15 @@ export interface FileInfo {
     lineCount: number;
     fileSize: number;
     lastModified: string;
-    accessFrequency: number;
     relevanceScore?: number;
     cursorPosition?: vscode.Position;
     selection?: vscode.Selection;
     visibleRanges?: readonly vscode.Range[];
+    cursorLineContent?: {
+        current: string;
+        above?: string;
+        below?: string;
+    };
 }
 
 export interface SymbolInfo {
@@ -80,6 +84,55 @@ export interface LspContext {
     definitions: vscode.Location[];
     hover?: vscode.Hover;
     completions?: vscode.CompletionItem[];
+}
+
+export interface ProblemsContext {
+    problems: Array<{
+        filePath: string;
+        relativePath: string;
+        message: string;
+        severity: vscode.DiagnosticSeverity;
+        source?: string;
+        code?: string | number | { value: string | number; target: vscode.Uri };
+        range: {
+            start: {
+                line: number;
+                character: number;
+            };
+            end: {
+                line: number;
+                character: number;
+            };
+        };
+        position: {
+            line: number;
+            character: number;
+        };
+        relatedInformation?: Array<{
+            location: {
+                uri: string;
+                range: {
+                    start: { line: number; character: number };
+                    end: { line: number; character: number };
+                };
+            };
+            message: string;
+        }>;
+    }>;
+    summary: {
+        totalProblems: number;
+        errorCount: number;
+        warningCount: number;
+        infoCount: number;
+        hintCount: number;
+        filesWithProblems: number;
+        problemsByFile: Record<string, number>;
+        problemsBySeverity: Record<string, number>;
+        problemsBySource: Record<string, number>;
+    };
+    timestamp: number;
+    workspacePath: string;
+    requestedFilePath?: string;
 }
 
 export interface TerminalContext {
@@ -140,6 +193,7 @@ export interface ProcessedContext {
     projectStructure: string;
     gitContext: GitContext;
     lspContext: LspContext;
+    problemsContext: ProblemsContext;
     terminalContext: TerminalContext;
     userBehavior: UserBehaviorData;
     relevanceScores: Record<string, number>;
@@ -168,6 +222,7 @@ export interface TokenMetrics {
         projectStructure: number;
         gitContext: number;
         lspContext: number;
+        problemsContext: number;
         terminalContext: number;
         userBehavior: number;
     };

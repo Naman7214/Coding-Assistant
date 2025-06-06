@@ -17,8 +17,13 @@ class FileReadUseCase:
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
         explanation: Optional[str] = None,
+        workspace_path: str = None,
     ) -> Dict[str, Any]:
 
         return await self.file_read_service.read_file(
-            file_path, start_line, end_line, explanation
+            file_path=file_path,
+            explanation=explanation or "Reading file",
+            workspace_path=workspace_path,
+            start_line=start_line,
+            end_line=end_line,
         )

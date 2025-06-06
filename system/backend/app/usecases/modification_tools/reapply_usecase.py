@@ -12,9 +12,13 @@ class ReapplyUsecase:
         self.reapply_service = reapply_service
 
     async def execute(
-        self, target_file_path: str, code_snippet: str, explanation: str
+        self,
+        target_file_path: str,
+        code_snippet: str,
+        explanation: str,
+        workspace_path: str = None,
     ) -> Dict[str, Any]:
 
         return await self.reapply_service.reapply(
-            target_file_path, code_snippet, explanation
+            target_file_path, code_snippet, explanation, workspace_path
         )

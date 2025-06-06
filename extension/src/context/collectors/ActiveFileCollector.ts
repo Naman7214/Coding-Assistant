@@ -67,6 +67,7 @@ export class ActiveFileCollector extends BaseCollector {
             // Gather cursor and selection context (fix cursor position)
             const cursorContext = await this.gatherCursorContext(activeEditor, document);
 
+
             // Gather viewport context
             const viewportContext = await this.gatherViewportContext(activeEditor, document);
 
@@ -152,10 +153,33 @@ export class ActiveFileCollector extends BaseCollector {
         const selection = editor.selection;
         const position = selection.active;
 
+        // Get current line content
+        const currentLine = document.lineAt(position.line);
+        const currentLineContent = currentLine.text;
+
+        // Get line above (if exists)
+        let lineAboveContent: string | undefined;
+        if (position.line > 0) {
+            const lineAbove = document.lineAt(position.line - 1);
+            lineAboveContent = lineAbove.text;
+        }
+
+        // Get line below (if exists)
+        let lineBelowContent: string | undefined;
+        if (position.line < document.lineCount - 1) {
+            const lineBelow = document.lineAt(position.line + 1);
+            lineBelowContent = lineBelow.text;
+        }
+
         return {
             line: position.line + 1, // VSCode uses 0-indexed, display uses 1-indexed
             character: position.character + 1, // VSCode uses 0-indexed, display uses 1-indexed
-            selection: new vscode.Range(selection.start, selection.end)
+            selection: new vscode.Range(selection.start, selection.end),
+            lineContent: {
+                current: currentLineContent,
+                above: lineAboveContent,
+                below: lineBelowContent
+            }
         };
     }
 
@@ -356,9 +380,13 @@ export class ActiveFileCollector extends BaseCollector {
      * Track file access for analytics
      */
     private async trackFileAccess(document: vscode.TextDocument): Promise<void> {
-        // This would integrate with SQLiteStorage to track file access patterns
+        // This would integrate with VSCodeStorage to track file access patterns
         // For now, just log the access
         this.debug(`Tracking access to file: ${document.uri.fsPath}`);
+
+        // Note: Actual storage of file access with cursor line content happens in ContextManager
+        // when the context session is stored. The cursor line content is already captured
+        // in the cursor context and will be passed through the ProcessedContext.
     }
 
     /**

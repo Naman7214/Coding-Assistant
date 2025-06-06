@@ -8,8 +8,10 @@ from openai import OpenAI
 
 from system.backend.app.config.settings import settings
 from system.backend.app.models.domain.error import Error
+from system.backend.app.prompts.file_modification_prompt import (
+    FILE_MODIFICATION_PROMPT,
+)
 from system.backend.app.utils.path_validator import is_safe_path
-from system.backend.app.prompts.file_modification_prompt import FILE_MODIFICATION_PROMPT
 
 
 class ReapplyService:

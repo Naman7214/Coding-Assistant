@@ -12,21 +12,14 @@ export interface SystemInfo {
   architecture: string;
   workspacePath: string;
   defaultShell: string;
-  nodeVersion: string;
-  vsCodeVersion: string;
-  extensionVersion: string;
-  environmentVariables: Record<string, string>;
-  workspaceName?: string;
-  workspaceFolders: string[];
 }
 
 /**
- * Get comprehensive system information from VS Code context
+ * Get system information matching Python SystemInfo model exactly
  */
 export async function getSystemInfo(): Promise<SystemInfo> {
   const workspaceFolders = vscode.workspace.workspaceFolders || [];
   const workspacePath = workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
-  const workspaceName = workspaceFolders.length > 0 ? workspaceFolders[0].name : undefined;
 
   // Get default shell from VS Code configuration
   const config = vscode.workspace.getConfiguration();
@@ -48,28 +41,13 @@ export async function getSystemInfo(): Promise<SystemInfo> {
       process.env.SHELL || '/bin/bash';
   }
 
-  // Get relevant environment variables
-  const relevantEnvVars: Record<string, string> = {};
-  const envKeysToInclude = ['PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'NODE_ENV'];
-
-  envKeysToInclude.forEach(key => {
-    if (process.env[key]) {
-      relevantEnvVars[key] = process.env[key]!;
-    }
-  });
-
+  // Return only the fields that Python expects - no extra fields
   return {
     platform: os.platform(),
     osVersion: os.release(),
     architecture: os.arch(),
     workspacePath,
-    workspaceName,
-    workspaceFolders: workspaceFolders.map(folder => folder.uri.fsPath),
-    defaultShell,
-    nodeVersion: process.version,
-    vsCodeVersion: vscode.version,
-    extensionVersion: vscode.extensions.getExtension('your-extension-id')?.packageJSON?.version || 'unknown',
-    environmentVariables: relevantEnvVars
+    defaultShell
   };
 }
 

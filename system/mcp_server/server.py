@@ -2,13 +2,8 @@ import json
 import logging
 
 import click
-import httpx
 import mcp.types as types
-import tiktoken
 import uvicorn
-from crawl4ai import BrowserConfig, CacheMode, CrawlerRunConfig
-from crawl4ai.content_filter_strategy import PruningContentFilter
-from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from dotenv import load_dotenv
 from mcp.server.lowlevel import Server
 from mcp.server.sse import SseServerTransport
@@ -32,7 +27,10 @@ from system.mcp_server.tools.modification_tools import (
     reapply,
     search_and_replace,
 )
-from system.mcp_server.tools.search_tools import codebase_search, execute_grep_search
+from system.mcp_server.tools.search_tools import (
+    codebase_search,
+    execute_grep_search,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -268,7 +266,7 @@ def main(port: int) -> int:
                         "workspace_path": {
                             "type": "string",
                             "description": "The path to the workspace",
-                        }
+                        },
                     },
                 },
             ),
@@ -313,7 +311,12 @@ def main(port: int) -> int:
                 description="A tool for searching pattern in files and replace it with new text. this tool allows you to perform search and replace operation across files in codebase. you can specify file patterns to include/exclude and whether to do case-sensitive matching.",
                 inputSchema={
                     "type": "object",
-                    "required": ["query", "replacement", "explanation", "workspace_path"],
+                    "required": [
+                        "query",
+                        "replacement",
+                        "explanation",
+                        "workspace_path",
+                    ],
                     "properties": {
                         "query": {
                             "type": "string",

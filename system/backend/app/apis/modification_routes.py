@@ -16,7 +16,7 @@ from system.backend.app.models.schemas.modification_schemas import (
 )
 from system.backend.app.utils.error_handler import handle_exceptions
 
-router = APIRouter(tags=["modification"])
+router = APIRouter()
 
 
 @router.post("/search-replace")

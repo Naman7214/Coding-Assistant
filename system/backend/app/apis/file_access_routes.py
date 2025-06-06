@@ -1,8 +1,5 @@
 from fastapi import APIRouter, Depends
 
-from system.backend.app.controllers.file_access_tools.directory_list_controller import (
-    DirectoryListController,
-)
 from system.backend.app.controllers.file_access_tools.file_deletion_controller import (
     FileDeletionController,
 )
@@ -13,7 +10,6 @@ from system.backend.app.controllers.file_access_tools.file_search_controller imp
     FileSearchController,
 )
 from system.backend.app.models.schemas.file_access_schemas import (
-    DirectoryListRequest,
     FileReadRequest,
     FilesDeleteRequest,
     FileSearchRequest,
@@ -44,17 +40,6 @@ async def delete_file(
 
     return await file_deletion_controller.execute(request)
 
-
-@router.post("/list-directory")
-@handle_exceptions
-async def list_directory(
-    request: DirectoryListRequest,
-    directory_list_controller: DirectoryListController = Depends(
-        DirectoryListController
-    ),
-):
-
-    return await directory_list_controller.execute(request)
 
 
 @router.post("/search-files")

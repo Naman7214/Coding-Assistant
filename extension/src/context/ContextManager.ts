@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { ActiveFileCollector } from './collectors/ActiveFileCollector';
 import { GitContextCollector } from './collectors/GitContextCollector';
 import { OpenFilesCollector } from './collectors/OpenFilesCollector';
+import { ProblemsCollector } from './collectors/ProblemsCollector';
 import { ProjectStructureCollector } from './collectors/ProjectStructureCollector';
 import { FileChangeEvent, FileWatcher } from './FileWatcher';
 import { CacheManager } from './storage/CacheManager';
@@ -53,7 +54,7 @@ export class ContextManager extends EventEmitter {
             autoCollectOnChange: true,
             autoCollectInterval: 30000, // 30 seconds
             maxCacheSize: 100 * 1024 * 1024, // 100MB
-            defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector'],
+            defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector'],
             storageConfig: {
                 enableStorage: true,
                 enableCache: true
@@ -223,6 +224,12 @@ export class ContextManager extends EventEmitter {
         this.outputChannel.appendLine(
             `[ContextManager] Starting context collection (ID: ${collectionId}) with ${fullRequest.collectors.length} collectors`
         );
+        this.outputChannel.appendLine(
+            `[ContextManager] Requested collectors: ${JSON.stringify(fullRequest.collectors)}`
+        );
+        this.outputChannel.appendLine(
+            `[ContextManager] Available collectors: ${JSON.stringify(Array.from(this.collectors.keys()))}`
+        );
 
         this.emit('collectionStarted', {
             collectionId,
@@ -241,6 +248,7 @@ export class ContextManager extends EventEmitter {
 
             // Collect from each collector
             const collectorPromises = fullRequest.collectors.map(async (collectorName) => {
+                this.outputChannel.appendLine(`[ContextManager] 🔍 Looking for collector: ${collectorName}`);
                 const collector = this.collectors.get(collectorName);
                 if (!collector) {
                     const error = `Collector not found: ${collectorName}`;
@@ -252,6 +260,7 @@ export class ContextManager extends EventEmitter {
                     });
                     return null;
                 }
+                this.outputChannel.appendLine(`[ContextManager] ✅ Found collector: ${collectorName}`);
 
                 try {
                     this.outputChannel.appendLine(`[ContextManager] 🔄 Starting ${collectorName}...`);
@@ -427,6 +436,24 @@ export class ContextManager extends EventEmitter {
     }
 
     /**
+     * Get a specific collector by name
+     */
+    getCollector(name: string): IContextCollector | undefined {
+        return this.collectors.get(name);
+    }
+
+    /**
+     * Set target file path for ProblemsCollector
+     */
+    setProblemsTargetFile(filePath?: string): void {
+        const problemsCollector = this.collectors.get('ProblemsCollector');
+        if (problemsCollector && 'setTargetFilePath' in problemsCollector) {
+            (problemsCollector as any).setTargetFilePath(filePath);
+            this.outputChannel.appendLine(`[ContextManager] Set problems target file: ${filePath || 'all workspace'}`);
+        }
+    }
+
+    /**
      * Update configuration
      */
     updateConfig(newConfig: Partial<ContextManagerConfig>): void {
@@ -532,8 +559,16 @@ export class ContextManager extends EventEmitter {
         );
         this.collectors.set('GitContextCollector', gitContextCollector);
 
+        // Initialize ProblemsCollector
+        const problemsCollectorInstance = new ProblemsCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId
+        );
+        this.collectors.set('ProblemsCollector', problemsCollectorInstance);
+
         this.outputChannel.appendLine(
-            `[ContextManager] Initialized ${this.collectors.size} collectors`
+            `[ContextManager] Initialized ${this.collectors.size} collectors: ${Array.from(this.collectors.keys()).join(', ')}`
         );
     }
 
@@ -550,6 +585,7 @@ export class ContextManager extends EventEmitter {
         const openFilesData = results.find(r => r.collector === 'OpenFilesCollector' && r.success)?.data?.data;
         const projectStructureData = results.find(r => r.collector === 'ProjectStructureCollector' && r.success)?.data?.data;
         const gitContextData = results.find(r => r.collector === 'GitContextCollector' && r.success)?.data?.data;
+        const problemsData = results.find(r => r.collector === 'ProblemsCollector' && r.success)?.data?.data;
 
         // Build processed context
         const processedContext: ProcessedContext = {
@@ -566,13 +602,13 @@ export class ContextManager extends EventEmitter {
                 lineCount: activeFileData.file?.lineCount || 0,
                 fileSize: activeFileData.file?.fileSize || 0,
                 lastModified: activeFileData.file?.lastModified || new Date().toISOString(),
-                accessFrequency: 1,
                 cursorPosition: activeFileData.cursor ? new vscode.Position(
                     Math.max(0, (activeFileData.cursor.line || 1) - 1), // Convert back to 0-indexed for VSCode
                     Math.max(0, (activeFileData.cursor.character || 1) - 1)
                 ) : new vscode.Position(0, 0),
                 selection: activeFileData.cursor?.selection || new vscode.Selection(0, 0, 0, 0),
-                visibleRanges: activeFileData.viewport?.visibleRanges || []
+                visibleRanges: activeFileData.viewport?.visibleRanges || [],
+                cursorLineContent: activeFileData.cursor?.lineContent || undefined
             } : null,
             openFiles: openFilesData?.files ? openFilesData.files.map((file: any) => ({
                 path: file.path || '',
@@ -580,8 +616,7 @@ export class ContextManager extends EventEmitter {
                 languageId: file.languageId || '',
                 lineCount: file.lineCount || 0,
                 fileSize: file.fileSize || 0,
-                lastModified: file.lastModified || new Date().toISOString(),
-                accessFrequency: 1
+                lastModified: file.lastModified || new Date().toISOString()
             })) : [],
             projectStructure: projectStructureData?.treeStructure || '',
             gitContext: gitContextData ? {
@@ -619,6 +654,38 @@ export class ContextManager extends EventEmitter {
                 references: [],
                 definitions: []
             },
+            problemsContext: problemsData ? {
+                problems: problemsData.problems || [],
+                summary: problemsData.summary || {
+                    totalProblems: 0,
+                    errorCount: 0,
+                    warningCount: 0,
+                    infoCount: 0,
+                    hintCount: 0,
+                    filesWithProblems: 0,
+                    problemsByFile: {},
+                    problemsBySeverity: {},
+                    problemsBySource: {}
+                },
+                timestamp: problemsData.timestamp || Date.now(),
+                workspacePath: problemsData.workspacePath || this.workspaceMetadata?.path || '',
+                requestedFilePath: problemsData.requestedFilePath
+            } : {
+                problems: [],
+                summary: {
+                    totalProblems: 0,
+                    errorCount: 0,
+                    warningCount: 0,
+                    infoCount: 0,
+                    hintCount: 0,
+                    filesWithProblems: 0,
+                    problemsByFile: {},
+                    problemsBySeverity: {},
+                    problemsBySource: {}
+                },
+                timestamp: Date.now(),
+                workspacePath: this.workspaceMetadata?.path || ''
+            },
             terminalContext: {
                 currentDirectory: this.workspaceMetadata?.path || '',
                 recentCommands: [],
@@ -633,7 +700,7 @@ export class ContextManager extends EventEmitter {
                 commandUsage: {}
             },
             relevanceScores: {},
-            totalTokens: this.estimateTokenCount(activeFileData, openFilesData, projectStructureData, gitContextData)
+            totalTokens: this.estimateTokenCount(activeFileData, openFilesData, projectStructureData, gitContextData, problemsData)
         };
 
         return processedContext;
@@ -660,7 +727,8 @@ export class ContextManager extends EventEmitter {
         activeFileData: any,
         openFilesData: any,
         projectStructureData: any,
-        gitContextData: any
+        gitContextData: any,
+        problemsData?: any
     ): number {
         let tokens = 0;
 
@@ -673,6 +741,17 @@ export class ContextManager extends EventEmitter {
             if (activeFileData.context?.surroundingLines) {
                 const contextText = activeFileData.context.surroundingLines.join('\n');
                 tokens += Math.ceil(contextText.length / 4);
+            }
+
+            // Add tokens for cursor line content
+            if (activeFileData.cursor?.lineContent) {
+                const cursorContent = activeFileData.cursor.lineContent;
+                const lineContentText = [
+                    cursorContent.above || '',
+                    cursorContent.current || '',
+                    cursorContent.below || ''
+                ].join('\n');
+                tokens += Math.ceil(lineContentText.length / 4);
             }
         }
 
@@ -695,6 +774,11 @@ export class ContextManager extends EventEmitter {
             const stagedChanges = gitContextData.diff?.stagedChanges || '';
             const unstagedChanges = gitContextData.diff?.unstagedChanges || '';
             tokens += Math.ceil((stagedChanges.length + unstagedChanges.length) / 4);
+        }
+
+        if (problemsData?.problems && Array.isArray(problemsData.problems)) {
+            // Estimate problems tokens - ~50 tokens per problem (message + metadata)
+            tokens += problemsData.problems.length * 50;
         }
 
         return tokens;

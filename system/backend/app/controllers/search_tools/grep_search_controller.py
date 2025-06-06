@@ -17,7 +17,9 @@ class GrepSearchController:
         self.grep_search_usecase = grep_search_usecase
 
     async def process_grep_query(self, request: GrepSearchQueryRequest):
-        result = await self.grep_search_usecase.execute_grep_search(request)
+        result = await self.grep_search_usecase.execute_grep_search(
+            request, request.workspace_path
+        )
         return JSONResponse(
             content={
                 "data": result,

@@ -15,7 +15,7 @@ class FileDeletionController:
 
     async def execute(self, request: FilesDeleteRequest):
         response = await self.file_deletion_usecase.execute(
-            request.path, request.explanation
+            request.path, request.explanation, request.workspace_path
         )
 
         return JSONResponse(

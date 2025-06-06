@@ -1,5 +1,5 @@
 # Code Generation Assistant
-
+# the final AIM is to build the coding agent extension like you Cursor 
 The Code Generation Assistant is a powerful AI agent system designed to help with coding tasks. It consists of three main components: the Backend, the MCP Server, and the AI Coding Agent, which work together to provide a comprehensive code assistance experience.
 
 ## System Architecture

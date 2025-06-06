@@ -1,11 +1,17 @@
-import asyncio
-import os
 import re
 from typing import Any, Dict, List, Optional, Pattern, Set, Tuple
 
+from fastapi import Depends
+
+from system.backend.app.services.terminal_client_service import (
+    TerminalClientService,
+)
+
 
 class RunTerminalCmdUsecase:
-    def __init__(self):
+    def __init__(self, terminal_client: TerminalClientService = Depends()):
+        self.terminal_client = terminal_client
+
         # Explicitly blocked commands
         self.BLOCKED_COMMANDS: Set[str] = {
             "rm -rf /",
@@ -90,21 +96,20 @@ class RunTerminalCmdUsecase:
         command: str,
         is_background: bool,
         explanation: Optional[str] = None,
-        workspace_path: str = None,
+        workspace_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Run a terminal command on the user's system.
+        Run a terminal command using the client-side terminal API.
 
         Args:
             command: The terminal command to execute
             is_background: Whether the command should be run in the background
             explanation: Explanation for why the command is needed
+            workspace_path: The workspace path
 
         Returns:
             A dictionary with the command output and execution status
         """
-        import subprocess
-
         try:
             # Security check for dangerous commands
             security_check = self._check_command_safety(command)
@@ -114,6 +119,7 @@ class RunTerminalCmdUsecase:
                     "error": f"SECURITY ALERT: Dangerous command detected. {security_check['reason']}",
                     "exit_code": 1,
                     "status": "blocked_dangerous_command",
+                    "current_directory": workspace_path or "/",
                 }
 
             # Log command and explanation if provided
@@ -123,65 +129,30 @@ class RunTerminalCmdUsecase:
             print(f"Executing command: {command}")
             print(f"Run in background: {is_background}")
 
-            if is_background:
-                # For background processes, use Popen and don't wait
-                process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    start_new_session=True,
-                    cwd=workspace_path,
-                    shell=True,  # Use shell to expand wildcards, variables, etc.
-                )
-                return {
-                    "output": f"Command started in background with PID {process.pid}",
-                    "exit_code": None,
-                    "status": "running_in_background",
-                }
-            else:
-                # For foreground processes, capture output
-                process = await asyncio.create_subprocess_shell(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=workspace_path,
-                )
+            # Execute command using client-side terminal API
+            result = await self.terminal_client.execute_terminal_command(
+                command=command,
+                workspace_path=workspace_path or "/",
+                is_background=is_background,
+                timeout=(
+                    60 if not is_background else None
+                ),  # 60 second timeout for foreground commands
+                silent=False,  # Always show run_terminal_cmd commands in terminal
+            )
 
-                stdout, stderr = await process.communicate()
-                stdout_str = stdout.decode("utf-8")
-                stderr_str = stderr.decode("utf-8")
-
-                return {
-                    "output": stdout_str,
-                    "error": stderr_str,
-                    "exit_code": process.returncode,
-                    "status": (
-                        "completed" if process.returncode == 0 else "error"
-                    ),
-                }
-
-                # FALLBACK IF THE ABOVE ASYNCIO CODE FAILS UNCOMMENT THIS AND COMMENT THE ABOVE CODE
-                # result = subprocess.run(
-                #     shlex.split(command),
-                #     capture_output=True,
-                #     text=True,
-                #     timeout=60  # Add reasonable timeout
-                # )
-
-                # return {
-                #     "output": result.stdout,
-                #     "error": result.stderr,
-                #     "exit_code": result.returncode,
-                #     "status": "completed" if result.returncode == 0 else "error"
-                # }
-
-        except subprocess.TimeoutExpired:
+            # Map client response to expected format
             return {
-                "output": "Command timed out after 60 seconds",
-                "exit_code": None,
-                "status": "timeout",
+                "output": result.get("output", ""),
+                "error": result.get("error", ""),
+                "exit_code": result.get("exitCode"),
+                "status": self._map_client_status(
+                    result.get("status", "unknown"), is_background
+                ),
+                "current_directory": result.get(
+                    "currentDirectory", workspace_path or "/"
+                ),
             }
+
         except Exception as e:
             error_msg = f"Error executing command: {str(e)}"
             print(error_msg)
@@ -190,7 +161,27 @@ class RunTerminalCmdUsecase:
                 "error": error_msg,
                 "exit_code": 1,
                 "status": "error",
+                "current_directory": workspace_path or "/",
             }
+
+    def _map_client_status(
+        self, client_status: str, is_background: bool
+    ) -> str:
+        """Map client API status to expected status format."""
+        status_mapping = {
+            "completed": "completed",
+            "error": "error",
+            "timeout": "timeout",
+            "running_in_background": "running_in_background",
+        }
+
+        mapped_status = status_mapping.get(client_status, "error")
+
+        # For background commands, override status if needed
+        if is_background and mapped_status == "completed":
+            return "running_in_background"
+
+        return mapped_status
 
     def _check_command_safety(self, command: str) -> Dict[str, Any]:
         """

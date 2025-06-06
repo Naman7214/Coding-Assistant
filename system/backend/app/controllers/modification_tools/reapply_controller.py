@@ -17,7 +17,10 @@ class ReapplyController:
 
     async def execute(self, request: ReapplyRequest):
         response = await self.reapply_usecase.execute(
-            request.target_file_path, request.code_snippet, request.explanation
+            request.target_file_path,
+            request.code_snippet,
+            request.explanation,
+            request.workspace_path,
         )
 
         status_code = status.HTTP_200_OK

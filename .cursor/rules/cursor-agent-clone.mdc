@@ -1,0 +1,18 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+This is the coding agent extension, like your cursor. 
+
+Frontend: extension/webview-ui, it's a chat interface that streams the response from the agent. the chat interface should be same like cursor agent have that shows the agent thinking , which tool is agent using.
+
+extension : extension/src, the extension layer gets the query from the frontend, then attaches some must-have context and has an API to provide other context to the agent on demand; it has a persistent terminal
+
+Coding agent: system/coding_agent. This is the coding agent that uses the anthropic tool calling and does the recursive tool calling and asks for the permission for the terminal commands. It also streams the response.
+
+MCP server : system/mcp_server; this hosts the 11 tools useful for the agent.
+
+Tools : system/backend, the actual implementaion of the 11 tools in the form of the fastapi which are hosted in the MCP server
+
+The final AIM is to build the intelligent coding agent extension, like your cursor with smart context.

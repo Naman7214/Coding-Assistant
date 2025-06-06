@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+import httpx
 
 
 class Settings(BaseSettings):
@@ -15,7 +16,16 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
-        extra = "allow"  # Allow extra fields from .env file
+        extra = "allow"
+
+    @property
+    def httpx_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=60.0,
+            read=150.0,
+            write=150.0,
+            pool=60.0,
+        )
 
 
 settings = Settings()

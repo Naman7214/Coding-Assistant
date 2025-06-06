@@ -1,22 +1,17 @@
-import axios from 'axios';
 import * as fs from 'fs';
-import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ContextApiServer } from './api/ContextApiServer';
 import { ContextManager } from './context/ContextManager';
 import { ProcessedContext } from './context/types/context';
 import { EnhancedStreamingClient } from './enhanced_streaming_client';
-import { getWebviewContent } from './utilities';
+import { getSystemInfo, getWebviewContent } from './utilities';
 
-const AGENT_API_URL = 'http://0.0.0.0:5000';
 const STREAMING_API_URL = 'http://0.0.0.0:5001';
 
 class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'enhancedAssistantView';
   private _view?: vscode.WebviewView;
-  private agentServer?: http.Server;
-  private isAgentRunning = false;
   private enhancedStreamingClient?: EnhancedStreamingClient;
   private outputChannel: vscode.OutputChannel;
   private statusBarItem: vscode.StatusBarItem;
@@ -78,7 +73,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         enabled: true,
         autoCollectOnChange: false, // Disable auto-collect initially
         autoCollectInterval: 30000,
-        defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector'],
+        defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector'],
         storageConfig: {
           enableStorage: true,
           enableCache: true
@@ -259,7 +254,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   private async handleMessage(message: any) {
     switch (message.command) {
       case 'sendQuery':
-        await this.handleEnhancedQuery(message.text, message.useStreaming);
+        await this.handleSimpleQuery(message.text);
         return;
 
       case 'checkStreamingHealth':
@@ -290,12 +285,16 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         await this.collectContextManually();
         return;
 
-      case 'getContextStats':
-        await this.sendContextStats();
-        return;
-
       case 'initializeWorkspace':
         await this.initializeForWorkspace();
+        return;
+
+      case 'handleSimpleQuery':
+        await this.handleSimpleQuery(message.query);
+        return;
+
+      case 'handleContextRequest':
+        await this.handleContextRequest(message.contextType, message.params);
         return;
     }
   }
@@ -351,111 +350,283 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public async handleEnhancedQuery(query: string, useStreaming: boolean = true) {
+  // public async handleEnhancedQuery(query: string, useStreaming: boolean = true) {
+  //   if (!this._view) return;
+
+  //   try {
+  //     // Check workspace first
+  //     const hasWorkspace = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
+  //     if (!hasWorkspace) {
+  //       this.updateResponse('❌ No workspace is open. Please open a folder to enable workspace analysis.');
+  //       vscode.window.showErrorMessage(
+  //         'No workspace folder is open. Please open a folder first.',
+  //         'Open Folder'
+  //       ).then(selection => {
+  //         if (selection === 'Open Folder') {
+  //           vscode.commands.executeCommand('vscode.openFolder');
+  //         }
+  //       });
+  //       return;
+  //     }
+
+  //     // Initialize context manager if not ready
+  //     if (!this.isContextManagerReady) {
+  //       this.outputChannel.appendLine('[Context] Context manager not ready - attempting initialization...');
+  //       this.updateResponse('🔄 Initializing context manager for workspace analysis...');
+
+  //       await this.initializeForWorkspace();
+
+  //       if (!this.isContextManagerReady) {
+  //         this.updateResponse('❌ Failed to initialize context manager. Please check the output for details.');
+  //         return;
+  //       }
+
+  //       this.outputChannel.appendLine('[Context] Context manager is now ready');
+  //     }
+
+  //     // Collect workspace context
+  //     this.outputChannel.appendLine('[Context] Collecting comprehensive workspace context...');
+  //     this.updateResponse('🔍 Analyzing workspace structure and context...');
+
+  //     const collectionResult = await this.contextManager!.collectContext({
+  //       collectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector'],
+  //       options: {
+  //         includeFileContent: true,
+  //         maxFileSize: 1024 * 1024, // 1MB
+  //         excludePatterns: ['**/node_modules/**', '**/.git/**'],
+  //         includeHiddenFiles: false,
+  //         respectGitignore: true,
+  //         maxDepth: 10,
+  //         parallel: true,
+  //         useCache: true
+  //       }
+  //     });
+
+  //     if (!collectionResult.success || !collectionResult.context) {
+  //       this.updateResponse('❌ Failed to collect workspace context. Please check the output for details.');
+  //       return;
+  //     }
+
+  //     const fullContext = collectionResult.context;
+
+  //     this.outputChannel.appendLine(`[Context] Full Workspace Context:\n${JSON.stringify(fullContext, null, 2)}`);
+
+  //     // Send context to webview for display
+  //     if (this._view) {
+  //       this._view.webview.postMessage({
+  //         command: 'workspaceContext',
+  //         context: fullContext,
+  //         collectionResult: {
+  //           success: collectionResult.success,
+  //           duration: collectionResult.totalDuration,
+  //           collectors: collectionResult.metadata.collectorCount,
+  //           successCount: collectionResult.metadata.successCount
+  //         }
+  //       });
+  //     }
+
+  //     if (useStreaming && this.enhancedStreamingClient) {
+  //       // Use streaming API with workspace context
+  //       this.outputChannel.appendLine(`🚀 Using enhanced streaming API for query: ${query}`);
+  //       this.updateResponse('🧠 Processing your query with AI agent...');
+
+  //       const streamRequest: any = {
+  //         query: query,
+  //         workspace_path: fullContext.workspace.path
+  //       };
+
+  //       // Prepare headers with workspace ID
+  //       const requestHeaders = {
+  //         'X-Workspace-ID': this.contextManager!.getWorkspaceId()
+  //       };
+
+  //       // Stream the query
+  //       await this.enhancedStreamingClient.streamQuery(
+  //         streamRequest,
+  //         this._view.webview,
+  //         async (event, state) => {
+  //           // Enhanced event handling
+  //           this.outputChannel.appendLine(`[EVENT] ${event.type}: ${event.content.substring(0, 50)}...`);
+
+  //           if (event.type === 'thinking' && event.content.length > 100) {
+  //             this.statusBarItem.text = `🧠 Thinking... (${event.content.length} chars)`;
+  //           } else if (event.type === 'tool_selection') {
+  //             this.outputChannel.appendLine(`🔧 TOOL SELECTED: ${event.metadata?.tool_name}`);
+  //           } else if (event.type === 'final_response') {
+  //             this.outputChannel.appendLine('✅ Enhanced streaming query completed');
+  //             this.statusBarItem.text = '$(plug) Agent Server (Enhanced)';
+  //           }
+  //         },
+  //         requestHeaders
+  //       );
+  //     }
+
+  //   } catch (error) {
+  //     console.error('Error processing enhanced query:', error);
+  //     const errorMessage = `❌ Error: ${error instanceof Error ? error.message : String(error)}`;
+  //     this.updateResponse(errorMessage);
+  //     this.outputChannel.appendLine(`Enhanced query error: ${errorMessage}`);
+  //   }
+  // }
+
+  /**
+   * Handle queries from the simplified UI
+   */
+  public async handleSimpleQuery(query: string) {
     if (!this._view) return;
 
     try {
       // Check workspace first
       const hasWorkspace = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0;
       if (!hasWorkspace) {
-        this.updateResponse('❌ No workspace is open. Please open a folder to enable workspace analysis.');
-        vscode.window.showErrorMessage(
-          'No workspace folder is open. Please open a folder first.',
-          'Open Folder'
-        ).then(selection => {
-          if (selection === 'Open Folder') {
-            vscode.commands.executeCommand('vscode.openFolder');
-          }
+        this._view.webview.postMessage({
+          command: 'streamError',
+          error: 'No workspace is open. Please open a folder to enable workspace analysis.'
         });
         return;
       }
 
       // Initialize context manager if not ready
       if (!this.isContextManagerReady) {
-        this.outputChannel.appendLine('[Context] Context manager not ready - attempting initialization...');
-        this.updateResponse('🔄 Initializing context manager for workspace analysis...');
-
         await this.initializeForWorkspace();
-
         if (!this.isContextManagerReady) {
-          this.updateResponse('❌ Failed to initialize context manager. Please check the output for details.');
+          this._view.webview.postMessage({
+            command: 'streamError',
+            error: 'Failed to initialize context manager'
+          });
           return;
         }
-
-        this.outputChannel.appendLine('[Context] Context manager is now ready');
       }
 
-      // Collect workspace context
-      this.outputChannel.appendLine('[Context] Collecting comprehensive workspace context...');
-      this.updateResponse('🔍 Analyzing workspace structure and context...');
-
-      const collectionResult = await this.contextManager!.collectContext({
-        collectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector'],
-        options: {
-          includeFileContent: true,
-          maxFileSize: 1024 * 1024, // 1MB
-          excludePatterns: ['**/node_modules/**', '**/.git/**'],
-          includeHiddenFiles: false,
-          respectGitignore: true,
-          maxDepth: 10,
-          parallel: true,
-          useCache: true
-        }
+      // Notify UI that streaming started
+      this._view.webview.postMessage({
+        command: 'streamStart'
       });
 
-      if (!collectionResult.success || !collectionResult.context) {
-        this.updateResponse('❌ Failed to collect workspace context. Please check the output for details.');
-        return;
-      }
+      // Parse @ mentions from query
+      const contextMentions = this.parseContextMentions(query);
+      this.outputChannel.appendLine(`[SimpleQuery] Detected context mentions: ${JSON.stringify(contextMentions)}`);
 
-      const fullContext = collectionResult.context;
+      // Collect always-send context (system info + active file)
+      const alwaysSendContext = await this.collectAlwaysSendContext();
 
-      this.outputChannel.appendLine(`[Context] Full Workspace Context:\n${JSON.stringify(fullContext, null, 2)}`);
-
-      // Send context to webview for display
-      if (this._view) {
-        this._view.webview.postMessage({
-          command: 'workspaceContext',
-          context: fullContext,
-          collectionResult: {
-            success: collectionResult.success,
-            duration: collectionResult.totalDuration,
-            collectors: collectionResult.metadata.collectorCount,
-            successCount: collectionResult.metadata.successCount
-          }
-        });
-      }
-
-      if (useStreaming && this.enhancedStreamingClient) {
-        // Use streaming API with workspace context
-        this.outputChannel.appendLine(`🚀 Using enhanced streaming API for query: ${query}`);
-        this.updateResponse('🧠 Processing your query with AI agent...');
-
+      // Send query with always-send context to backend
+      if (this.enhancedStreamingClient) {
         const streamRequest: any = {
           query: query,
-          workspace_path: fullContext.workspace.path
+          workspace_path: alwaysSendContext.workspace.path,
+          system_info: alwaysSendContext.systemInfo,
+          active_file_context: alwaysSendContext.activeFile,
+          context_mentions: contextMentions
         };
 
-        // Prepare headers with workspace ID
         const requestHeaders = {
           'X-Workspace-ID': this.contextManager!.getWorkspaceId()
         };
 
-        // Stream the query
+        // DEBUG: Log the exact request being sent with detailed structure analysis
+        this.outputChannel.appendLine(`[SimpleQuery] DEBUG - Request payload structure analysis:`);
+        this.outputChannel.appendLine(`Query: "${streamRequest.query}"`);
+        this.outputChannel.appendLine(`Workspace Path: "${streamRequest.workspace_path}"`);
+        this.outputChannel.appendLine(`System Info Fields: [${Object.keys(streamRequest.system_info || {}).join(', ')}]`);
+        this.outputChannel.appendLine(`System Info: ${JSON.stringify(streamRequest.system_info, null, 2)}`);
+
+        if (streamRequest.active_file_context) {
+          this.outputChannel.appendLine(`Active File Context Fields: [${Object.keys(streamRequest.active_file_context).join(', ')}]`);
+          this.outputChannel.appendLine(`Active File Context: ${JSON.stringify(streamRequest.active_file_context, null, 2)}`);
+        } else {
+          this.outputChannel.appendLine(`Active File Context: null`);
+        }
+
+        this.outputChannel.appendLine(`Context Mentions: ${JSON.stringify(streamRequest.context_mentions)}`);
+        this.outputChannel.appendLine(`Headers: ${JSON.stringify(requestHeaders)}`);
+        this.outputChannel.appendLine(`[SimpleQuery] DEBUG - Expected Python model comparison:`);
+        this.outputChannel.appendLine(`Expected SystemInfo fields: platform, osVersion, architecture, workspacePath, defaultShell`);
+        this.outputChannel.appendLine(`Expected ActiveFileContext fields: path, relativePath, languageId, lineCount, fileSize, lastModified, content, cursorPosition, selection, visibleRanges, cursorLineContent`);
+        this.outputChannel.appendLine(`[SimpleQuery] DEBUG - Sending request to ${this.enhancedStreamingClient['baseUrl']}/stream`);
+
+        // Stream the query with comprehensive event handling for SimpleApp
         await this.enhancedStreamingClient.streamQuery(
           streamRequest,
           this._view.webview,
           async (event, state) => {
-            // Enhanced event handling
-            this.outputChannel.appendLine(`[EVENT] ${event.type}: ${event.content.substring(0, 50)}...`);
+            // Comprehensive event handling for the SimpleApp UI
+            switch (event.type) {
+              case 'tool_selection':
+                this._view!.webview.postMessage({
+                  command: 'toolSelection',
+                  toolName: event.metadata?.tool_name,
+                  content: event.content,
+                  metadata: event.metadata
+                });
+                break;
 
-            if (event.type === 'thinking' && event.content.length > 100) {
-              this.statusBarItem.text = `🧠 Thinking... (${event.content.length} chars)`;
-            } else if (event.type === 'tool_selection') {
-              this.outputChannel.appendLine(`🔧 TOOL SELECTED: ${event.metadata?.tool_name}`);
-            } else if (event.type === 'final_response') {
-              this.outputChannel.appendLine('✅ Enhanced streaming query completed');
-              this.statusBarItem.text = '$(plug) Agent Server (Enhanced)';
+              case 'tool_execution':
+                this._view!.webview.postMessage({
+                  command: 'toolExecution',
+                  toolName: event.metadata?.tool_name,
+                  content: event.content,
+                  metadata: event.metadata
+                });
+                break;
+
+              case 'assistant_response':
+                this._view!.webview.postMessage({
+                  command: 'responseUpdate',
+                  content: event.content
+                });
+                break;
+
+              case 'thinking':
+                // Forward thinking events to UI for transparency
+                this._view!.webview.postMessage({
+                  command: 'thinking',
+                  content: event.content,
+                  metadata: event.metadata
+                });
+                break;
+
+              case 'permission_request':
+                // Handle permission requests - these come from the agent
+                this._view!.webview.postMessage({
+                  command: 'permissionRequest',
+                  content: event.content,
+                  permissionId: event.metadata?.permission_id,
+                  terminalCommand: event.metadata?.command,
+                  metadata: event.metadata
+                });
+                break;
+
+              case 'tool_result':
+                // Forward tool results for display
+                this._view!.webview.postMessage({
+                  command: 'toolResult',
+                  toolName: event.metadata?.tool_name,
+                  content: event.content,
+                  isError: event.metadata?.error || false,
+                  metadata: event.metadata
+                });
+                break;
+
+              case 'final_response':
+                this._view!.webview.postMessage({
+                  command: 'streamComplete',
+                  content: event.content
+                });
+                break;
+
+              case 'error':
+                this._view!.webview.postMessage({
+                  command: 'streamError',
+                  error: event.content,
+                  metadata: event.metadata
+                });
+                break;
+
+              default:
+                // Log unhandled event types for debugging
+                this.outputChannel.appendLine(`[SimpleQuery] Unhandled event type: ${event.type}`);
+                break;
             }
           },
           requestHeaders
@@ -463,10 +634,245 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       }
 
     } catch (error) {
-      console.error('Error processing enhanced query:', error);
-      const errorMessage = `❌ Error: ${error instanceof Error ? error.message : String(error)}`;
-      this.updateResponse(errorMessage);
-      this.outputChannel.appendLine(`Enhanced query error: ${errorMessage}`);
+      this.outputChannel.appendLine(`[SimpleQuery] Error: ${error}`);
+      this._view.webview.postMessage({
+        command: 'streamError',
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Parse @ mentions from user query
+   */
+  private parseContextMentions(query: string): string[] {
+    const mentions: string[] = [];
+    const atMentionRegex = /@(\w+)/g;
+    let match;
+
+    while ((match = atMentionRegex.exec(query)) !== null) {
+      const mention = match[1].toLowerCase();
+
+      // Map user-friendly names to actual context types
+      switch (mention) {
+        case 'problems':
+          mentions.push('problems');
+          break;
+        case 'project':
+        case 'structure':
+          mentions.push('project-structure');
+          break;
+        case 'git':
+          mentions.push('git');
+          break;
+        case 'files':
+        case 'open':
+          mentions.push('open-files');
+          break;
+      }
+    }
+
+    return mentions;
+  }
+
+  /**
+   * Collect always-send context (system info + active file)
+   */
+  private async collectAlwaysSendContext(): Promise<any> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+
+    // Get system info using the utility function that matches Python model
+    const systemInfo = await getSystemInfo();
+
+    // Collect active file context and transform to match Python ActiveFileContext model
+    let activeFileContext: any = null;
+    if (this.contextManager) {
+      try {
+        const activeFileResult = await this.contextManager.collectContext({
+          collectors: ['ActiveFileCollector'],
+          options: {
+            includeFileContent: true,
+            maxFileSize: 1048576,
+            excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+            includeHiddenFiles: false,
+            respectGitignore: true,
+            maxDepth: 10,
+            parallel: false,
+            useCache: true
+          },
+          timeout: 5000,
+          retryCount: 1
+        });
+
+        if (activeFileResult.success && activeFileResult.context) {
+          const activeFile = activeFileResult.context.activeFile;
+
+          if (activeFile) {
+            // Transform to match Python ActiveFileContext model exactly
+            activeFileContext = {
+              path: activeFile.path || null,
+              relativePath: activeFile.relativePath || null,
+              languageId: activeFile.languageId || null,
+              lineCount: activeFile.lineCount || null,
+              fileSize: activeFile.fileSize || null,
+              lastModified: activeFile.lastModified || null,
+              content: null, // Don't send content for now to reduce size
+              cursorPosition: activeFile.cursorPosition ? {
+                line: activeFile.cursorPosition.line,
+                character: activeFile.cursorPosition.character
+              } : null,
+              selection: activeFile.selection ? {
+                start: {
+                  line: activeFile.selection.start.line,
+                  character: activeFile.selection.start.character
+                },
+                end: {
+                  line: activeFile.selection.end.line,
+                  character: activeFile.selection.end.character
+                }
+              } : null,
+              visibleRanges: activeFile.visibleRanges ? activeFile.visibleRanges.map((range: any) => ({
+                start: { line: range.start.line, character: range.start.character },
+                end: { line: range.end.line, character: range.end.character }
+              })) : null,
+              cursorLineContent: activeFile.cursorLineContent || null
+            };
+          }
+        }
+      } catch (error) {
+        this.outputChannel.appendLine(`[AlwaysSendContext] Failed to collect active file: ${error}`);
+      }
+    }
+
+    return {
+      systemInfo,
+      activeFile: activeFileContext,
+      workspace: {
+        path: workspaceFolder?.uri.fsPath || '',
+        name: workspaceFolder?.name || ''
+      }
+    };
+  }
+
+  /**
+   * Handle on-demand context requests from backend
+   */
+  private async handleContextRequest(contextType: string, params: any = {}) {
+    if (!this.contextManager || !this._view) return;
+
+    try {
+      this.outputChannel.appendLine(`[ContextRequest] Handling request for: ${contextType}`);
+
+      let result: any = null;
+
+      switch (contextType) {
+        case 'problems':
+          if (params.filePath) {
+            this.contextManager.setProblemsTargetFile(params.filePath);
+          }
+          result = await this.contextManager.collectContext({
+            collectors: ['ProblemsCollector'],
+            options: {
+              includeFileContent: false,
+              maxFileSize: 1048576,
+              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              includeHiddenFiles: false,
+              respectGitignore: true,
+              maxDepth: 10,
+              parallel: false,
+              useCache: true
+            },
+            timeout: 10000,
+            retryCount: 1
+          });
+          break;
+
+        case 'project-structure':
+          result = await this.contextManager.collectContext({
+            collectors: ['ProjectStructureCollector'],
+            options: {
+              includeFileContent: false,
+              maxFileSize: 1048576,
+              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              includeHiddenFiles: false,
+              respectGitignore: true,
+              maxDepth: params.maxDepth || 6,
+              parallel: false,
+              useCache: true
+            },
+            timeout: 15000,
+            retryCount: 1
+          });
+          break;
+
+        case 'git':
+          result = await this.contextManager.collectContext({
+            collectors: ['GitContextCollector'],
+            options: {
+              includeFileContent: params.includeChanges !== false,
+              maxFileSize: 1048576,
+              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              includeHiddenFiles: false,
+              respectGitignore: true,
+              maxDepth: 10,
+              parallel: false,
+              useCache: true
+            },
+            timeout: 15000,
+            retryCount: 1
+          });
+          break;
+
+        case 'open-files':
+          result = await this.contextManager.collectContext({
+            collectors: ['OpenFilesCollector'],
+            options: {
+              includeFileContent: params.includeContent === true,
+              maxFileSize: 1048576,
+              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              includeHiddenFiles: false,
+              respectGitignore: true,
+              maxDepth: 10,
+              parallel: false,
+              useCache: true
+            },
+            timeout: 10000,
+            retryCount: 1
+          });
+          break;
+
+        default:
+          this.outputChannel.appendLine(`[ContextRequest] Unknown context type: ${contextType}`);
+          return;
+      }
+
+      if (result && result.success) {
+        // Send context back to webview/backend
+        this._view.webview.postMessage({
+          command: 'contextResponse',
+          contextType,
+          data: result.context,
+          success: true
+        });
+        this.outputChannel.appendLine(`[ContextRequest] Successfully provided ${contextType} context`);
+      } else {
+        this._view.webview.postMessage({
+          command: 'contextResponse',
+          contextType,
+          error: 'Failed to collect context',
+          success: false
+        });
+        this.outputChannel.appendLine(`[ContextRequest] Failed to collect ${contextType} context`);
+      }
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[ContextRequest] Error collecting ${contextType}: ${error}`);
+      this._view.webview.postMessage({
+        command: 'contextResponse',
+        contextType,
+        error: error instanceof Error ? error.message : String(error),
+        success: false
+      });
     }
   }
 
@@ -785,28 +1191,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Send context statistics to webview
-   */
-  private async sendContextStats() {
-    try {
-      if (!this.isContextManagerReady || !this.contextManager) {
-        this.outputChannel.appendLine('[Context] Cannot get stats - context manager not ready');
-        return;
-      }
-
-      const stats = this.contextManager.getStats();
-
-      if (this._view) {
-        this._view.webview.postMessage({
-          command: 'contextStats',
-          stats: stats
-        });
-      }
-    } catch (error) {
-      this.outputChannel.appendLine(`[Context] Error getting stats: ${error}`);
-    }
-  }
 
   /**
    * Clean up all resources
@@ -930,9 +1314,9 @@ export function activate(context: vscode.ExtensionContext) {
         placeHolder: 'Enter your question or request...'
       });
 
-      if (query) {
-        await provider.handleEnhancedQuery(query, true);
-      }
+      // if (query) {
+      //   await provider.handleEnhancedQuery(query, true);
+      // }
     }),
 
     vscode.commands.registerCommand('enhanced-assistant-sidebar.collectContext', async () => {

@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from dotenv import load_dotenv
+
 from system.mcp_server.config.settings import settings
 
 load_dotenv()
@@ -15,12 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-timeout = httpx.Timeout(
-    connect=60.0,  # Time to establish a connection
-    read=150.0,  # Time to read the response
-    write=150.0,  # Time to send data
-    pool=60.0,  # Time to wait for a connection from the pool
-)
+
 
 
 async def search_and_replace(
@@ -56,7 +52,7 @@ async def search_and_replace(
         payload["options"] = options
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
@@ -81,7 +77,7 @@ async def edit_file(target_file_path: str, code_snippet: str, explanation: str):
         "explanation": explanation,
     }
     try:
-        async with httpx.AsyncClient(verify=False, timeout=60) as client:
+        async with httpx.AsyncClient(verify=False, timeout=settings.httpx_timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

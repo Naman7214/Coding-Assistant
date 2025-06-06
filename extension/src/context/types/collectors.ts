@@ -64,6 +64,11 @@ export interface ActiveFileCollectorData {
         line: number;
         character: number;
         selection: vscode.Range;
+        lineContent: {
+            current: string;
+            above?: string;
+            below?: string;
+        };
     };
     viewport: {
         visibleRanges: vscode.Range[];
@@ -141,6 +146,55 @@ export interface GitCollectorData {
         unstagedChanges: string;
         conflictFiles: string[];
     };
+}
+
+export interface ProblemsCollectorData {
+    problems: Array<{
+        filePath: string;
+        relativePath: string;
+        message: string;
+        severity: vscode.DiagnosticSeverity;
+        source?: string;
+        code?: string | number | { value: string | number; target: vscode.Uri };
+        range: {
+            start: {
+                line: number;
+                character: number;
+            };
+            end: {
+                line: number;
+                character: number;
+            };
+        };
+        position: {
+            line: number;
+            character: number;
+        };
+        relatedInformation?: Array<{
+            location: {
+                uri: string;
+                range: {
+                    start: { line: number; character: number };
+                    end: { line: number; character: number };
+                };
+            };
+            message: string;
+        }>;
+    }>;
+    summary: {
+        totalProblems: number;
+        errorCount: number;
+        warningCount: number;
+        infoCount: number;
+        hintCount: number;
+        filesWithProblems: number;
+        problemsByFile: Record<string, number>;
+        problemsBySeverity: Record<string, number>;
+        problemsBySource: Record<string, number>;
+    };
+    timestamp: number;
+    workspacePath: string;
+    requestedFilePath?: string;
 }
 
 // Collection orchestration

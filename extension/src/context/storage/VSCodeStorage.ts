@@ -181,16 +181,15 @@ export class VSCodeStorage {
             lineCount: metadata?.lineCount || 0,
             fileSize: metadata?.fileSize || 0,
             lastModified: metadata?.lastModified || new Date().toISOString(),
-            accessFrequency: 1,
             relevanceScore: metadata?.relevanceScore,
             cursorPosition: metadata?.cursorPosition,
             selection: metadata?.selection,
-            visibleRanges: metadata?.visibleRanges
+            visibleRanges: metadata?.visibleRanges,
+            cursorLineContent: metadata?.cursorLineContent
         };
 
         if (existingIndex >= 0) {
             const existing = files[existingIndex];
-            fileInfo.accessFrequency = existing.accessFrequency + 1;
             fileInfo.lastModified = new Date().toISOString();
             files[existingIndex] = fileInfo;
         } else {
@@ -361,6 +360,22 @@ export class VSCodeStorage {
                     diagnostics: [],
                     references: [],
                     definitions: []
+                },
+                problemsContext: {
+                    problems: [],
+                    summary: {
+                        totalProblems: 0,
+                        errorCount: 0,
+                        warningCount: 0,
+                        infoCount: 0,
+                        hintCount: 0,
+                        filesWithProblems: 0,
+                        problemsByFile: {},
+                        problemsBySeverity: {},
+                        problemsBySource: {}
+                    },
+                    timestamp: Date.now(),
+                    workspacePath: workspace.metadata.path
                 },
                 terminalContext: {
                     currentDirectory: workspace.metadata.path,

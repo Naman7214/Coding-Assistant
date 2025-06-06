@@ -16,7 +16,6 @@ PROTECTED_ROOT_PATHS = [
     "/usr",
     "/etc",
     "/var",
-    "/System",
     "/Library",
     # Add any other system paths that should be protected
 ]

@@ -51,12 +51,14 @@ class AgentMemory:
             if message.get("role") == "user" and message.get("content"):
                 for block in message.get("content", []):
                     if (
-                        block.get("type") == "tool_result" 
+                        block.get("type") == "tool_result"
                         and block.get("tool_use_id") == tool_use_id
                     ):
                         # We already have a result for this tool ID, let's use a new ID
                         new_id = f"unique_{uuid.uuid4().hex[:8]}"
-                        print(f"WARNING: Duplicate tool result ID detected. Changing {tool_use_id} to {new_id}")
+                        print(
+                            f"WARNING: Duplicate tool result ID detected. Changing {tool_use_id} to {new_id}"
+                        )
                         tool_use_id = new_id
                         break
 

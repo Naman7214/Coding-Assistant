@@ -313,4 +313,86 @@ export class ProjectStructureCollector extends BaseCollector {
         }
         return hash.toString();
     }
+
+    /**
+     * List contents of a specific directory (for list_directory tool)
+     */
+    public async listSpecificDirectory(dirPath?: string): Promise<{ paths: string[], success: boolean, directory_path: string }> {
+        try {
+            const workspacePath = this.getWorkspacePath();
+            if (!workspacePath) {
+                throw new Error('No workspace path available');
+            }
+
+            // Use provided directory path or default to workspace root
+            const targetDirectory = dirPath ? path.resolve(workspacePath, dirPath) : workspacePath;
+
+            // Security check - ensure directory is within workspace
+            if (!targetDirectory.startsWith(workspacePath)) {
+                throw new Error('Access denied: Directory is outside workspace');
+            }
+
+            // Check if directory exists
+            try {
+                const stats = await fs.promises.stat(targetDirectory);
+                if (!stats.isDirectory()) {
+                    throw new Error('Path is not a directory');
+                }
+            } catch (error) {
+                throw new Error(`Directory not found: ${targetDirectory}`);
+            }
+
+            this.outputChannel.appendLine(`[${this.name}] Listing directory: ${targetDirectory}`);
+
+            const paths = await this.getDirectoryPaths(targetDirectory);
+
+            return {
+                success: true,
+                directory_path: dirPath || '.',
+                paths: paths
+            };
+
+        } catch (error) {
+            this.error('Failed to list specific directory', error);
+            return {
+                success: false,
+                directory_path: dirPath || '.',
+                paths: []
+            };
+        }
+    }
+
+    /**
+     * Get directory paths (used by listSpecificDirectory)
+     */
+    private async getDirectoryPaths(dirPath: string): Promise<string[]> {
+        const paths: string[] = [];
+
+        try {
+            const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+            // Filter entries using existing skip logic
+            const filteredEntries = entries.filter(entry => !this.shouldSkip(entry.name));
+
+            // Process all entries (files and directories)
+            for (const entry of filteredEntries) {
+                const entryPath = path.join(dirPath, entry.name);
+
+                // Return absolute paths as expected by the tool
+                if (entry.isDirectory()) {
+                    paths.push(entryPath + '/');  // Add trailing slash for directories
+                } else {
+                    paths.push(entryPath);
+                }
+            }
+
+            // Sort paths alphabetically
+            paths.sort();
+
+        } catch (error) {
+            this.debug(`Cannot scan directory ${dirPath}: ${error}`);
+        }
+
+        return paths;
+    }
 } 

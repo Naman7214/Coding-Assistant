@@ -5,12 +5,13 @@ import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { PersistentTerminalManager } from '../bridge/PersistentTerminalManager';
+import { ProjectStructureCollector } from '../context/collectors/ProjectStructureCollector';
 import { ContextManager } from '../context/ContextManager';
 import { VSCodeStorage } from '../context/storage/VSCodeStorage';
 
 interface StreamingChunk {
     id: string;
-    type: 'workspace' | 'activeFile' | 'openFiles' | 'projectStructure' | 'gitContext' | 'complete';
+    type: 'workspace' | 'activeFile' | 'openFiles' | 'projectStructure' | 'gitContext' | 'problems' | 'complete';
     data: any;
     chunkIndex: number;
     totalChunks: number;
@@ -24,6 +25,7 @@ interface TerminalRequest {
     environmentVariables?: Record<string, string>;
     isBackground?: boolean;
     timeout?: number;
+    silent?: boolean; // Whether to show command in terminal UI
     operationType: 'terminal_command' | 'read_file' | 'write_file' | 'list_directory' | 'delete_file' | 'search_files';
     // Additional parameters for file operations
     filePath?: string;
@@ -93,24 +95,17 @@ export class ContextApiServer implements vscode.Disposable {
         // Health check endpoint
         this.app.get('/api/health', this.handleHealthCheck.bind(this));
 
-        // Context API routes
-        // Streaming context endpoint (main endpoint for coding agent)
-        this.app.get('/api/workspace/:workspaceId/context/stream', this.handleStreamingContext.bind(this));
 
-        // Legacy context endpoint (fallback)
-        this.app.get('/api/workspace/:workspaceId/context', this.handleLegacyContext.bind(this));
+        // NEW: On-demand context endpoints (excluding system-info and active-file which are always sent)
+        this.app.get('/api/context/problems', this.handleProblemsContext.bind(this));
+        this.app.get('/api/context/project-structure', this.handleProjectStructureContext.bind(this));
+        this.app.get('/api/context/git', this.handleGitContext.bind(this));
+        this.app.get('/api/context/open-files', this.handleOpenFilesContext.bind(this));
 
-        // Workspace metadata endpoint
-        this.app.get('/api/workspace/:workspaceId/metadata', this.handleWorkspaceMetadata.bind(this));
 
         // File content endpoint (on-demand)
         this.app.get('/api/workspace/:workspaceId/files/content', this.handleFileContent.bind(this));
 
-        // Workspace stats endpoint
-        this.app.get('/api/workspace/:workspaceId/stats', this.handleWorkspaceStats.bind(this));
-
-        // Force context collection endpoint
-        this.app.post('/api/workspace/:workspaceId/collect', this.handleForceCollection.bind(this));
 
         // Terminal Bridge API routes
         // Main terminal bridge endpoint - single endpoint for all operations
@@ -121,6 +116,9 @@ export class ContextApiServer implements vscode.Disposable {
 
         // Bridge info endpoint (for registration with backend)
         this.app.get('/api/bridge/info', this.handleBridgeInfo.bind(this));
+
+        // NEW: Directory listing endpoint (for list_directory tool)
+        this.app.post('/api/directory/list', this.handleDirectoryList.bind(this));
     }
 
     private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
@@ -154,80 +152,6 @@ export class ContextApiServer implements vscode.Disposable {
         }
     }
 
-    private async handleStreamingContext(req: express.Request, res: express.Response): Promise<void> {
-        const { workspaceId } = req.params;
-        const maxTokens = parseInt(req.query.maxTokens as string) || 50000;
-        const forceRefresh = req.query.forceRefresh === 'true';
-
-        try {
-            this.outputChannel.appendLine(`[ContextAPI] Streaming context for workspace: ${workspaceId}`);
-
-            // Set headers for Server-Sent Events
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Cache-Control'
-            });
-
-            // Send initial connection confirmation
-            this.sendSSEEvent(res, 'connection', {
-                workspaceId,
-                timestamp: new Date().toISOString(),
-                maxTokens
-            });
-
-            // Collect fresh context if needed
-            let context;
-            if (forceRefresh) {
-                this.sendSSEEvent(res, 'status', { message: 'Collecting fresh context...' });
-                const collectionResult = await this.contextManager.collectContext({
-                    collectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector'],
-                    options: {
-                        includeFileContent: true,
-                        maxFileSize: 1048576, // 1MB
-                        excludePatterns: ['node_modules', '.git', 'dist', 'build'],
-                        includeHiddenFiles: false,
-                        respectGitignore: true,
-                        maxDepth: 10,
-                        parallel: true,
-                        useCache: false
-                    },
-                    timeout: 30000,
-                    retryCount: 2
-                });
-                context = collectionResult.context;
-            } else {
-                context = await this.storage.getContextForAgent(workspaceId, undefined, maxTokens);
-            }
-
-            if (!context) {
-                this.sendSSEEvent(res, 'error', { message: 'No context available for workspace' });
-                res.end();
-                return;
-            }
-
-            // Stream context in chunks
-            await this.streamContextChunks(res, workspaceId, context);
-
-            // Send completion event
-            this.sendSSEEvent(res, 'complete', {
-                workspaceId,
-                totalTokens: context.totalTokens,
-                timestamp: new Date().toISOString()
-            });
-
-            res.end();
-
-        } catch (error) {
-            this.outputChannel.appendLine(`[ContextAPI] Streaming error: ${error}`);
-            this.sendSSEEvent(res, 'error', {
-                message: error instanceof Error ? error.message : String(error)
-            });
-            res.end();
-        }
-    }
 
     private async streamContextChunks(res: express.Response, workspaceId: string, context: any): Promise<void> {
         const chunks = this.createContextChunks(workspaceId, context);
@@ -309,6 +233,18 @@ export class ContextApiServer implements vscode.Disposable {
             workspaceId
         });
 
+        // Chunk 6: Problems context
+        if (context.problemsContext) {
+            chunks.push({
+                id: `${workspaceId}-problems`,
+                type: 'problems',
+                data: context.problemsContext,
+                chunkIndex: chunkIndex++,
+                totalChunks: 0,
+                workspaceId
+            });
+        }
+
         // Update total chunks count
         const totalChunks = chunks.length;
         chunks.forEach(chunk => {
@@ -323,82 +259,6 @@ export class ContextApiServer implements vscode.Disposable {
         res.write(eventData);
     }
 
-    private async handleLegacyContext(req: express.Request, res: express.Response): Promise<void> {
-        const { workspaceId } = req.params;
-        const maxTokens = parseInt(req.query.maxTokens as string) || 50000;
-
-        try {
-            const context = await this.storage.getContextForAgent(workspaceId, undefined, maxTokens);
-
-            if (!context) {
-                res.status(404).json({
-                    success: false,
-                    error: 'Context not found for workspace'
-                });
-                return;
-            }
-
-            // For legacy endpoint, truncate large content
-            const compactContext = this.createCompactContext(context);
-
-            res.json({
-                success: true,
-                context: compactContext,
-                workspaceId,
-                timestamp: new Date().toISOString()
-            });
-
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    }
-
-    private createCompactContext(context: any): any {
-        return {
-            ...context,
-            activeFile: context.activeFile ? {
-                ...context.activeFile,
-                content: context.activeFile.content ?
-                    context.activeFile.content.substring(0, 10000) + (context.activeFile.content.length > 10000 ? '...[truncated]' : '')
-                    : undefined
-            } : null,
-            openFiles: context.openFiles.map((file: any) => ({
-                ...file,
-                content: undefined // Remove content for compact version
-            }))
-        };
-    }
-
-    private async handleWorkspaceMetadata(req: express.Request, res: express.Response): Promise<void> {
-        const { workspaceId } = req.params;
-
-        try {
-            const workspace = await this.storage.getWorkspace(workspaceId);
-
-            if (!workspace) {
-                res.status(404).json({
-                    success: false,
-                    error: 'Workspace not found'
-                });
-                return;
-            }
-
-            res.json({
-                success: true,
-                workspace: workspace,
-                workspaceId
-            });
-
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    }
 
     private async handleFileContent(req: express.Request, res: express.Response): Promise<void> {
         const { workspaceId } = req.params;
@@ -425,68 +285,214 @@ export class ContextApiServer implements vscode.Disposable {
         }
     }
 
-    private async handleWorkspaceStats(req: express.Request, res: express.Response): Promise<void> {
-        const { workspaceId } = req.params;
+    // NEW: On-demand context endpoint handlers
+    private async handleProblemsContext(req: express.Request, res: express.Response): Promise<void> {
+        const filePath = req.query.filePath as string;
+        const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
 
         try {
-            const stats = await this.storage.getStorageStats();
-            const contextManagerStats = this.contextManager.getStats();
+            this.outputChannel.appendLine(`[ContextAPI] Getting problems context${filePath ? ` for file: ${filePath}` : ' for workspace'}`);
 
-            res.json({
-                success: true,
-                stats: {
-                    storage: stats,
-                    contextManager: contextManagerStats,
-                    workspaceId
-                }
-            });
+            // Set target file if specified
+            if (filePath) {
+                this.contextManager.setProblemsTargetFile(filePath);
+            }
 
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    }
-
-    private async handleForceCollection(req: express.Request, res: express.Response): Promise<void> {
-        const { workspaceId } = req.params;
-
-        try {
-            this.outputChannel.appendLine(`[ContextAPI] Forcing context collection for: ${workspaceId}`);
-
-            const collectionResult = await this.contextManager.collectContext({
-                collectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector'],
+            const result = await this.contextManager.collectContext({
+                collectors: ['ProblemsCollector'],
                 options: {
-                    includeFileContent: true,
-                    maxFileSize: 1048576, // 1MB
+                    includeFileContent: false,
+                    maxFileSize: 1048576,
                     excludePatterns: ['node_modules', '.git', 'dist', 'build'],
                     includeHiddenFiles: false,
                     respectGitignore: true,
                     maxDepth: 10,
-                    parallel: true,
-                    useCache: false
+                    parallel: false,
+                    useCache: true
                 },
-                timeout: 30000,
-                retryCount: 2
+                timeout: 10000,
+                retryCount: 1
             });
 
             res.json({
                 success: true,
-                result: {
-                    duration: collectionResult.totalDuration,
-                    collectors: collectionResult.metadata.collectorCount,
-                    successCount: collectionResult.metadata.successCount,
-                    errors: collectionResult.errors
-                },
+                type: 'problems',
                 workspaceId,
+                data: result.context?.problemsContext || null,
                 timestamp: new Date().toISOString()
             });
 
         } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting problems context: ${error}`);
             res.status(500).json({
                 success: false,
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
+                type: 'problems'
+            });
+        }
+    }
+
+    private async handleProjectStructureContext(req: express.Request, res: express.Response): Promise<void> {
+        const maxDepth = parseInt(req.query.maxDepth as string) || 6;
+        const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+
+        try {
+            this.outputChannel.appendLine(`[ContextAPI] Getting project structure context with maxDepth: ${maxDepth}`);
+
+            const result = await this.contextManager.collectContext({
+                collectors: ['ProjectStructureCollector'],
+                options: {
+                    includeFileContent: false,
+                    maxFileSize: 1048576,
+                    excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+                    includeHiddenFiles: false,
+                    respectGitignore: true,
+                    maxDepth,
+                    parallel: false,
+                    useCache: true
+                },
+                timeout: 15000,
+                retryCount: 1
+            });
+
+            res.json({
+                success: true,
+                type: 'project-structure',
+                workspaceId,
+                data: result.context?.projectStructure || null,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting project structure context: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                type: 'project-structure'
+            });
+        }
+    }
+
+    private async handleGitContext(req: express.Request, res: express.Response): Promise<void> {
+        const includeChanges = req.query.includeChanges !== 'false';
+        const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+
+        try {
+            this.outputChannel.appendLine(`[ContextAPI] Getting git context with includeChanges: ${includeChanges}`);
+
+            const result = await this.contextManager.collectContext({
+                collectors: ['GitContextCollector'],
+                options: {
+                    includeFileContent: includeChanges,
+                    maxFileSize: 1048576,
+                    excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+                    includeHiddenFiles: false,
+                    respectGitignore: true,
+                    maxDepth: 10,
+                    parallel: false,
+                    useCache: true
+                },
+                timeout: 15000,
+                retryCount: 1
+            });
+
+            res.json({
+                success: true,
+                type: 'git',
+                workspaceId,
+                data: result.context?.gitContext || null,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting git context: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                type: 'git'
+            });
+        }
+    }
+
+    private async handleOpenFilesContext(req: express.Request, res: express.Response): Promise<void> {
+        const includeContent = req.query.includeContent === 'true';
+        const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+
+        try {
+            this.outputChannel.appendLine(`[ContextAPI] Getting open files context with includeContent: ${includeContent}`);
+
+            const result = await this.contextManager.collectContext({
+                collectors: ['OpenFilesCollector'],
+                options: {
+                    includeFileContent: includeContent,
+                    maxFileSize: 1048576,
+                    excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+                    includeHiddenFiles: false,
+                    respectGitignore: true,
+                    maxDepth: 10,
+                    parallel: false,
+                    useCache: true
+                },
+                timeout: 10000,
+                retryCount: 1
+            });
+
+            res.json({
+                success: true,
+                type: 'open-files',
+                workspaceId,
+                data: result.context?.openFiles || null,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting open files context: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                type: 'open-files'
+            });
+        }
+    }
+
+    private async handleDirectoryList(req: express.Request, res: express.Response): Promise<void> {
+        const { dir_path, explanation } = req.body;
+        const workspaceId = this.contextManager.getWorkspaceId();
+
+        try {
+            this.outputChannel.appendLine(`[ContextAPI] Listing directory: ${dir_path || 'workspace root'} - ${explanation}`);
+
+            // Get the ProjectStructureCollector instance
+            const projectStructureCollector = this.contextManager.getCollector('ProjectStructureCollector') as ProjectStructureCollector;
+
+            if (!projectStructureCollector) {
+                throw new Error('ProjectStructureCollector not available');
+            }
+
+            // Use the new listSpecificDirectory method
+            const result = await projectStructureCollector.listSpecificDirectory(dir_path);
+
+            res.json({
+                success: result.success,
+                directory_path: result.directory_path,
+                paths: result.paths,
+                total_items: result.paths.length,
+                workspaceId,
+                explanation,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error listing directory: ${error}`);
+            res.status(500).json({
+                success: false,
+                directory_path: dir_path || '.',
+                paths: [],
+                total_items: 0,
+                error: error instanceof Error ? error.message : String(error),
+                workspaceId,
+                explanation,
+                timestamp: new Date().toISOString()
             });
         }
     }
@@ -576,7 +582,8 @@ export class ContextApiServer implements vscode.Disposable {
                 execute: '/api/terminal/execute',
                 health: '/api/health',
                 sessions: '/api/terminal/sessions',
-                context: '/api/workspace/{workspaceId}/context/stream'
+                context: '/api/workspace/{workspaceId}/context/stream',
+                directoryList: '/api/directory/list'
             },
             supportedOperations: [
                 'terminal_command',
@@ -598,7 +605,8 @@ export class ContextApiServer implements vscode.Disposable {
             workingDirectory: request.workingDirectory,
             environmentVariables: request.environmentVariables,
             isBackground: request.isBackground,
-            timeout: request.timeout
+            timeout: request.timeout,
+            silent: request.silent
         });
     }
 
@@ -772,7 +780,8 @@ export class ContextApiServer implements vscode.Disposable {
             command: searchCommand,
             workingDirectory: request.directoryPath
                 ? path.resolve(request.workspacePath, request.directoryPath)
-                : request.workspacePath
+                : request.workspacePath,
+            silent: true // File search should be invisible
         });
 
         return {
@@ -796,9 +805,11 @@ export class ContextApiServer implements vscode.Disposable {
                 this.outputChannel.appendLine(`[UnifiedAPI] Available endpoints:`);
                 this.outputChannel.appendLine(`[UnifiedAPI]   GET /api/health`);
                 this.outputChannel.appendLine(`[UnifiedAPI]   Context API:`);
-                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/workspace/{id}/context/stream`);
-                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/workspace/{id}/context`);
-                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/workspace/{id}/collect`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/context/problems`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/context/project-structure`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/context/git`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/context/open-files`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/directory/list`);
                 this.outputChannel.appendLine(`[UnifiedAPI]   Terminal Bridge API:`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/terminal/execute`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/terminal/sessions`);

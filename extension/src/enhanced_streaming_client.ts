@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as vscode from 'vscode';
-import { SystemInfo, getSystemInfo } from './utilities';
+import { getSystemInfo } from './utilities';
 
 // Event types from the TRUE streaming API
 interface StreamEvent {
@@ -10,11 +10,47 @@ interface StreamEvent {
     timestamp: number;
 }
 
+interface SystemInfo {
+    platform: string;
+    osVersion: string;
+    architecture: string;
+    workspacePath: string;
+    defaultShell: string;
+}
+
+interface ActiveFileContext {
+    path?: string;
+    relativePath?: string;
+    languageId?: string;
+    lineCount?: number;
+    fileSize?: number;
+    lastModified?: string;
+    content?: string;
+    cursorPosition?: {
+        line: number;
+        character: number;
+    };
+    selection?: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+    };
+    visibleRanges?: Array<{
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+    }>;
+    cursorLineContent?: {
+        current: string;
+        above?: string;
+        below?: string;
+    };
+}
+
 interface QueryRequest {
     query: string;
-    target_file_path?: string;
     workspace_path: string;
     system_info?: SystemInfo;
+    active_file_context?: ActiveFileContext;
+    context_mentions?: string[];
 }
 
 interface ThinkingState {
@@ -133,8 +169,8 @@ export class EnhancedStreamingClient {
             this.updateStatus("🚀 Starting TRUE streaming...");
             this.appendToOutput(`\n=== NEW QUERY ===`);
             this.appendToOutput(`Query: ${request.query}`);
-            if (request.target_file_path) {
-                this.appendToOutput(`Target file: ${request.target_file_path}`);
+            if (request.active_file_context?.relativePath) {
+                this.appendToOutput(`Active file: ${request.active_file_context.relativePath}`);
             }
             this.appendToOutput(`Workspace: ${systemInfo.workspacePath}`);
             this.appendToOutput(`Platform: ${systemInfo.platform} ${systemInfo.osVersion}`);
@@ -153,7 +189,7 @@ export class EnhancedStreamingClient {
                 webview.postMessage({
                     command: 'streamStart',
                     query: request.query,
-                    targetFile: request.target_file_path,
+                    activeFile: request.active_file_context?.relativePath,
                     systemInfo: systemInfo,
                     state: this.currentState
                 });
@@ -242,7 +278,18 @@ export class EnhancedStreamingClient {
             this.currentState.hasError = true;
             this.currentState.errorMessage = error instanceof Error ? error.message : String(error);
             this.updateStatus("❌ Streaming error");
+
+            // Enhanced error logging for debugging API contract issues
             this.appendToOutput(`❌ ERROR: ${error}`);
+
+            if (error instanceof Error && error.message.includes('422')) {
+                this.appendToOutput(`❌ 422 ERROR DETAILS: This indicates a request validation error`);
+                this.appendToOutput(`❌ Request payload that was rejected:`);
+                this.appendToOutput(`❌ ${JSON.stringify(request, null, 2)}`);
+                this.appendToOutput(`❌ The Python API expects exactly these fields:`);
+                this.appendToOutput(`❌ SystemInfo: platform, osVersion, architecture, workspacePath, defaultShell`);
+                this.appendToOutput(`❌ ActiveFileContext: path, relativePath, languageId, lineCount, fileSize, lastModified, content, cursorPosition, selection, visibleRanges, cursorLineContent`);
+            }
 
             if (webview) {
                 webview.postMessage({
@@ -431,6 +478,27 @@ export class EnhancedStreamingClient {
         }
 
         this.updateStatus(isError ? `❌ Tool error: ${toolName}` : `✅ Tool completed: ${toolName}`);
+
+        // Special handling for terminal commands - send terminal output event
+        if (toolName === 'run_terminal_command') {
+            // Update terminal state
+            this.currentState.terminal.output = content;
+            this.currentState.terminal.isExecuting = false;
+            this.currentState.terminal.hasError = isError;
+            this.currentState.terminal.endTime = Date.now();
+
+            if (webview) {
+                webview.postMessage({
+                    command: 'terminalOutput',
+                    content: content,
+                    terminalCommand: this.currentState.terminal.command,
+                    output: content,
+                    isExecuting: false,
+                    hasError: isError,
+                    metadata: metadata
+                });
+            }
+        }
 
         if (webview) {
             webview.postMessage({
