@@ -17,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def search_and_replace(
+async def search_and_replace_tool(
     query: str,
     replacement: str,
     explanation: str,
@@ -62,14 +62,16 @@ async def search_and_replace(
             # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"
 
 
-async def edit_file(target_file_path: str, code_snippet: str, explanation: str):
+async def edit_file_tool(
+    target_file_path: str, code_snippet: str, explanation: str
+):
     url = settings.EDIT_FILE_API
     payload = {
         "target_file_path": target_file_path,
@@ -95,7 +97,9 @@ async def edit_file(target_file_path: str, code_snippet: str, explanation: str):
         return f"Error: {str(e)}"
 
 
-async def reapply(target_file_path: str, code_snippet: str, explanation: str):
+async def reapply_tool(
+    target_file_path: str, code_snippet: str, explanation: str
+):
     url = settings.REAPPLY_API
     payload = {
         "target_file_path": target_file_path,

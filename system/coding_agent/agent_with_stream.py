@@ -7,9 +7,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 from config.settings import settings
-from mcp.client.session import ClientSession
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client
+from fastmcp import Client
 from memory.agent_memory import AgentMemory
 from motor.motor_asyncio import AsyncIOMotorClient
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
@@ -29,8 +27,7 @@ class AnthropicStreamingAgent:
     def __init__(self, model_name="claude-sonnet-4-20250514"):
         self.model_name = model_name
         self.agent_memory = AgentMemory()
-        self.session = None
-        self.client_context = None
+        self.client = None
         self.anthropic_tools = []
         self.workspace_path = None
         self.system_info = None
@@ -505,9 +502,6 @@ class AnthropicStreamingAgent:
                                         }
 
                                     elif event_type == "message_stop":
-                                        # The JSON parsing and validation already happens in content_block_stop
-                                        # No need to check current_content_blocks here as it contains the original
-                                        # blocks with partial_json, while complete_message["content"] has the cleaned blocks
 
                                         # Calculate API call duration
                                         duration = time.time() - start_time
@@ -650,66 +644,69 @@ class AnthropicStreamingAgent:
             # Clean up any existing session first
             await self.cleanup()
 
-            # Connect to MCP server
-            logger.info(f"Connecting to MCP server via {transport_type}...")
-            if transport_type.lower() == "sse":
-                self.client_context = sse_client(server_url)
-                streams = await self.client_context.__aenter__()
-            else:  # stdio
-                # Fix missing server parameter
-                self.client_context = stdio_client(server=server_url)
-                streams = await self.client_context.__aenter__()
+            # Connect to MCP server using FastMCP
+            logger.info(f"Connecting to FastMCP server via {transport_type}...")
+            try:
+                # Create a FastMCP client
+                if transport_type.lower() == "sse":
+                    # Use SSE transport with the server URL
+                    self.client = Client(server_url)
+                else:  # stdio
+                    # Use stdio transport with the server path
+                    self.client = Client(server_url)
 
-            # Create client session
-            self.session = ClientSession(streams[0], streams[1])
-            await self.session.__aenter__()
-            await self.session.initialize()
+                # Enter the client context
+                await self.client.__aenter__()
 
-            logger.info("✓ Connected to MCP server successfully!")
+                logger.info("✓ Connected to FastMCP server successfully!")
 
-            # Get available tools
-            logger.info("Loading available tools...")
-            tools = await self.session.list_tools()
+                # Get available tools
+                logger.info("Loading available tools...")
+                tools = await self.client.list_tools()
 
-            if not tools or not hasattr(tools, "tools") or not tools.tools:
-                logger.error("No tools available from the MCP server.")
-                return False
+                if not tools:
+                    logger.error("No tools available from the FastMCP server.")
+                    return False
 
-            # Log available tools
-            logger.info(f"Found {len(tools.tools)} available tools:")
-            for tool in tools.tools:
-                logger.info(f"  - {tool.name}: {tool.description}")
+                # Log available tools
+                logger.info(f"Found {len(tools)} available tools:")
+                for tool in tools:
+                    logger.info(f"  - {tool.name}: {tool.description}")
 
-            # Convert MCP tools to Anthropic format
-            self.anthropic_tools = []
-            for tool in tools.tools:
-                self.anthropic_tools.append(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.inputSchema,
-                        },
-                    }
+                # Convert FastMCP tools to Anthropic format
+                self.anthropic_tools = []
+                for tool in tools:
+                    self.anthropic_tools.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "parameters": tool.inputSchema,
+                            },
+                        }
+                    )
+
+                # Format system info context
+                system_info_context = format_system_info_context(
+                    system_info=self.system_info
                 )
 
-            # Format system info context
-            system_info_context = format_system_info_context(
-                system_info=self.system_info
-            )
+                # Use the actual workspace path and system info
+                system_message = CODING_AGENT_SYSTEM_PROMPT.format(
+                    system_info_context=system_info_context,
+                )
 
-            # Use the actual workspace path and system info
-            system_message = CODING_AGENT_SYSTEM_PROMPT.format(
-                system_info_context=system_info_context,
-            )
+                # Initialize agent memory with system message
+                logger.info(
+                    "Initializing agent system prompt with system information and workspace context"
+                )
+                self.agent_memory.initialize_with_system_message(system_message)
+                return True
 
-            # Initialize agent memory with system message
-            logger.info(
-                "Initializing agent system prompt with system information and workspace context"
-            )
-            self.agent_memory.initialize_with_system_message(system_message)
-            return True
+            except Exception as e:
+                logger.error(f"Error connecting to FastMCP server: {str(e)}")
+                return False
 
         except Exception as e:
             logger.error(f"Error initializing session: {str(e)}")
@@ -718,23 +715,12 @@ class AnthropicStreamingAgent:
     async def cleanup(self):
         """Clean up resources before exiting"""
         try:
-            if self.session:
+            if self.client:
                 try:
-                    await self.session.__aexit__(None, None, None)
-                except AttributeError as e:
-                    # Handle TaskGroup._exceptions AttributeError gracefully
-                    if "_exceptions" in str(e):
-                        logger.info("Handled known session closure issue")
-                    else:
-                        logger.error(f"Session attribute error: {str(e)}")
+                    await self.client.__aexit__(None, None, None)
+                    logger.info("FastMCP client closed successfully")
                 except Exception as e:
-                    logger.error(f"Error closing session: {str(e)}")
-
-            if self.client_context:
-                try:
-                    await self.client_context.__aexit__(None, None, None)
-                except Exception as e:
-                    logger.error(f"Error closing client context: {str(e)}")
+                    logger.error(f"Error closing FastMCP client: {str(e)}")
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
 

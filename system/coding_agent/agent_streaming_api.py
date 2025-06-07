@@ -85,7 +85,7 @@ async def stream_agent_response(
         print(f"   Active File: {active_file_context.relativePath}")
 
     # Check if agent is initialized
-    if not agent_instance or not agent_instance.session:
+    if not agent_instance or not agent_instance.client:
         try:
             agent_instance = AnthropicStreamingAgent()
             server_url = "http://localhost:8001/sse"
@@ -226,7 +226,7 @@ async def health_check():
         return {
             "status": "healthy",
             "streaming": True,
-            "session_initialized": bool(agent_instance.session),
+            "session_initialized": bool(agent_instance.client),
             "ready_for_requests": True,
         }
     else:
@@ -590,8 +590,8 @@ async def process_enhanced_streaming_tool_calls(
 
         # Enhanced tool execution with context injection
         try:
-            if not agent_instance.session:
-                raise Exception("Session is not initialized")
+            if not agent_instance.client:
+                raise Exception("Client is not initialized")
 
             # Enhanced workspace path injection for tools that need it (BEFORE tool call)
             tools_requiring_workspace_path = {
@@ -618,75 +618,10 @@ async def process_enhanced_streaming_tool_calls(
                     tool_input["dir_path"] = agent_instance.workspace_path
                     print(f"✅ Enhanced: Updated dir_path for {tool_name}")
 
-            # For each tool call, create a fresh session to avoid session corruption issues
-            # This is a temporary workaround for MCP SSE session reuse issues
-            print(
-                f"Enhanced: Creating fresh session for tool call: {tool_name}"
+            tool_result = await agent_instance.client.call_tool(
+                tool_name, tool_input
             )
-            try:
-                # Store original session info
-                original_workspace_path = agent_instance.workspace_path
-                original_system_info = agent_instance.system_info
-                original_tools = agent_instance.anthropic_tools
 
-                # Create a temporary agent instance for this tool call
-                from agent_with_stream import AnthropicStreamingAgent
-
-                temp_agent = AnthropicStreamingAgent()
-
-                # Initialize the temporary session
-                success = await temp_agent.initialize_session(
-                    "http://localhost:8001/sse",
-                    "sse",
-                    original_workspace_path,
-                    original_system_info,
-                )
-
-                if not success:
-                    raise Exception(
-                        "Failed to create temporary session for tool call"
-                    )
-
-                print(
-                    f"Enhanced: Fresh session created successfully for {tool_name}"
-                )
-                print(f"Enhanced: Tool input with workspace_path: {tool_input}")
-
-                # Use the temporary session for this tool call
-                tool_result = await temp_agent.session.call_tool(
-                    tool_name, tool_input
-                )
-
-                # Clean up the temporary session
-                await temp_agent.cleanup()
-
-                print(
-                    f"Enhanced: Tool call completed successfully with fresh session: {tool_name}"
-                )
-
-            except Exception as fresh_session_error:
-                print(
-                    f"Enhanced: Fresh session approach failed for {tool_name}: {str(fresh_session_error)}"
-                )
-                # Fallback to original session
-                print(
-                    f"Enhanced: Falling back to original session for {tool_name}"
-                )
-                try:
-                    tool_result = await agent_instance.session.call_tool(
-                        tool_name, tool_input
-                    )
-                except Exception as fallback_error:
-                    print(
-                        f"Enhanced: Original session also failed for {tool_name}: {str(fallback_error)}"
-                    )
-                    raise Exception(
-                        f"Both fresh session and original session failed: {str(fallback_error)}"
-                    )
-
-            print(
-                f"Enhanced: Using fresh session approach for tool: {tool_name}"
-            )
             print(f"Enhanced: Tool input: {tool_input}")
             print(
                 f"Enhanced: Received result from MCP server for tool: {tool_name}"

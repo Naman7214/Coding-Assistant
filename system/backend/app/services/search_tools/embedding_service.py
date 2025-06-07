@@ -83,10 +83,10 @@ class EmbeddingService:
             await self.error_repo.insert_error(
                 Error(
                     tool_name="code_base_search",
-                    error_message=f"Unknown Exception occured in voyageai_dense_embedding: {str(e)}",
+                    error_message=f"Unknown Exception occurred in voyageai_dense_embedding: {str(e)}",
                 )
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Unknown Exception occured in voyageai_dense_embedding: {str(e)}",
+                detail=f"Unknown Exception occurred in voyageai_dense_embedding: {str(e)}",
             )

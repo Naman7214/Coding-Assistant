@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def read_file(
+async def read_file_tool(
     file_path: str,
     explanation: str,
     start_line: Optional[int] = None,
@@ -42,20 +42,16 @@ async def read_file(
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"
 
 
-async def delete_file(
+async def delete_file_tool(
     path: str, explanation: str, workspace_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -89,14 +85,14 @@ async def delete_file(
             # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"
 
 
-async def list_directory(
+async def list_directory_tool(
     dir_path: Optional[str] = None,
     workspace_path: Optional[str] = None,
     explanation: str = "",
@@ -124,14 +120,14 @@ async def list_directory(
             # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"
 
 
-async def search_files(
+async def search_files_tool(
     query: str, workspace_path: str, explanation: str
 ) -> List[Dict[str, Any]]:
 
@@ -156,8 +152,8 @@ async def search_files(
             # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"

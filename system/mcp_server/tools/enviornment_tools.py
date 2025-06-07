@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def run_terminal_command(
+async def run_terminal_command_tool(
     command: str,
     workspace_path: str,
     is_background: bool = False,
@@ -59,6 +59,6 @@ async def run_terminal_command(
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"

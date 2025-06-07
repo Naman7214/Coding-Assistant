@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def web_search(
+async def web_search_tool(
     search_term: str, target_urls: list[str] = [], explanation: str = ""
 ) -> str:
 
@@ -40,8 +40,8 @@ async def web_search(
             # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
-        return f"HTTP Status error occured : {e.response.status_code} {e.response.text}"
+        return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:
-        return f"HTTP request error occured : {str(e)}"
+        return f"HTTP request error occurred : {str(e)}"
     except Exception as e:
-        return f"An error occured : {str(e)}"
+        return f"An error occurred : {str(e)}"
