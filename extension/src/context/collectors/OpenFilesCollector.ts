@@ -1,6 +1,5 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CacheManager } from '../storage/CacheManager';
 import { CollectorMetadata, OpenFilesCollectorData } from '../types/collectors';
 import { ContextData } from '../types/context';
 import { BaseCollector } from './base/BaseCollector';
@@ -13,13 +12,12 @@ interface FileScore {
 
 export class OpenFilesCollector extends BaseCollector {
     private disposables: vscode.Disposable[] = [];
-    private lastOpenFiles: Set<string> = new Set();
     private fileAccessTimes: Map<string, number> = new Map();
     private fileEditCounts: Map<string, number> = new Map();
 
     constructor(
         outputChannel: vscode.OutputChannel,
-        cacheManager: CacheManager,
+        cacheManager: any, // Keep parameter for compatibility with BaseCollector
         workspaceId: string
     ) {
         super(
@@ -30,7 +28,6 @@ export class OpenFilesCollector extends BaseCollector {
             cacheManager,
             workspaceId,
             {
-                cacheTimeout: 300, // 5 minutes cache
                 options: {
                     maxFiles: 50,
                     includeContent: false, // Never include content
@@ -124,7 +121,7 @@ export class OpenFilesCollector extends BaseCollector {
             version: '1.0.0',
             dependencies: ['vscode.workspace', 'vscode.window'],
             configurable: true,
-            cacheable: true,
+            cacheable: false, // Changed to false since we're removing caching
             priority: 8
         };
     }
@@ -259,7 +256,8 @@ export class OpenFilesCollector extends BaseCollector {
             const group = tabGroups[groupIndex];
             for (let tabIndex = 0; tabIndex < group.tabs.length; tabIndex++) {
                 const tab = group.tabs[tabIndex];
-                if (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === document.uri.toString()) {
+                // Fix for TabInputText type not existing
+                if (tab.input && typeof tab.input === 'object' && 'uri' in tab.input && tab.input.uri && tab.input.uri.toString() === document.uri.toString()) {
                     return tabIndex;
                 }
             }
@@ -315,7 +313,6 @@ export class OpenFilesCollector extends BaseCollector {
             vscode.workspace.onDidOpenTextDocument((document: vscode.TextDocument) => {
                 if (document.uri.scheme === 'file') {
                     this.fileAccessTimes.set(document.uri.fsPath, Date.now());
-                    this.invalidateCache();
                 }
             })
         );
@@ -323,9 +320,7 @@ export class OpenFilesCollector extends BaseCollector {
         // Track when documents are closed
         this.disposables.push(
             vscode.workspace.onDidCloseTextDocument((document: vscode.TextDocument) => {
-                if (document.uri.scheme === 'file') {
-                    this.invalidateCache();
-                }
+                // No-op, just track the event
             })
         );
 
@@ -336,9 +331,6 @@ export class OpenFilesCollector extends BaseCollector {
                     const filePath = event.document.uri.fsPath;
                     this.fileEditCounts.set(filePath, (this.fileEditCounts.get(filePath) || 0) + 1);
                     this.fileAccessTimes.set(filePath, Date.now());
-
-                    // Debounced cache invalidation
-                    setTimeout(() => this.invalidateCache(), 1000);
                 }
             })
         );
@@ -348,7 +340,6 @@ export class OpenFilesCollector extends BaseCollector {
             vscode.window.onDidChangeActiveTextEditor((editor: vscode.TextEditor | undefined) => {
                 if (editor?.document.uri.scheme === 'file') {
                     this.fileAccessTimes.set(editor.document.uri.fsPath, Date.now());
-                    this.invalidateCache();
                 }
             })
         );
@@ -361,33 +352,8 @@ export class OpenFilesCollector extends BaseCollector {
                         this.fileAccessTimes.set(editor.document.uri.fsPath, Date.now());
                     }
                 });
-                this.invalidateCache();
             })
         );
-    }
-
-    private invalidateCache(): void {
-        this.cacheManager.delete(this.generateCacheKey());
-    }
-
-    protected generateCacheKey(): string {
-        const openFileHashes = vscode.workspace.textDocuments
-            .filter(doc => doc.uri.scheme === 'file' || doc.uri.scheme === 'untitled')
-            .map(doc => this.hashString(doc.uri.toString()))
-            .sort()
-            .join('|');
-
-        return `${this.type}:${this.workspaceId}:${this.hashString(openFileHashes)}`;
-    }
-
-    private hashString(str: string): string {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32bit integer
-        }
-        return hash.toString();
     }
 
     getStats(): {

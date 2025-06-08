@@ -3,10 +3,10 @@ const path = require('path');
 const config = {
   target: 'node',
   mode: 'production',
-  entry: './src/extension_enhanced_streaming.ts',
+  entry: './src/extension_streaming.ts',
   output: {
     path: path.resolve(__dirname, 'out'),
-    filename: 'extension_enhanced_streaming.js',
+    filename: 'extension_streaming.js',
     libraryTarget: 'commonjs2',
     devtoolModuleFilenameTemplate: '../[resource-path]'
   },

@@ -14,26 +14,43 @@ export interface FileChangeEvent {
 
 export interface FileWatcherConfig {
     enabled: boolean;
-    useVSCodeWatcher: boolean;    // Use VS Code's built-in watcher
-    useChokidar: boolean;         // Use chokidar for more advanced watching
-    ignorePatterns: string[];     // Patterns to ignore
-    debounceDelay: number;        // Milliseconds to debounce events
-    maxDepth: number;             // Maximum directory depth to watch
-    followSymlinks: boolean;      // Whether to follow symbolic links
-    watchHiddenFiles: boolean;    // Whether to watch hidden files
+    useVSCodeWatcher: boolean;
+    useChokidarWatcher: boolean;
+    watchGlob: string;
+    excludePattern: string;
+    projectStructureChangeDebounce: number;
+    fileChangeDebounce: number;
+    watchOptions: {
+        recursive: boolean;
+        followSymlinks: boolean;
+        ignorePermissionErrors: boolean;
+    };
+    watchCreatedFiles: boolean;
+    watchDeletedFiles: boolean;
+    watchModifiedFiles: boolean;
+    watchRenamedFiles: boolean;
 }
 
 export class FileWatcher extends EventEmitter {
     private config: FileWatcherConfig;
-    private outputChannel: vscode.OutputChannel;
-    private vsCodeWatcher?: vscode.FileSystemWatcher;
-    private chokidarWatcher?: ReturnType<typeof chokidar.watch>;
     private workspacePath: string;
+    private outputChannel: vscode.OutputChannel;
+    private fsWatcher: vscode.FileSystemWatcher | null = null;
+    private chokidarWatcher: any | null = null;
+    private watchedPaths: Set<string> = new Set();
     private isWatching: boolean = false;
-    private pendingEvents: Map<string, FileChangeEvent> = new Map();
-    private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
-    private watchedFiles: Set<string> = new Set();
+    private events: FileChangeEvent[] = [];
+    private changeDebounceTimer: NodeJS.Timeout | null = null;
+    private projectStructureChangeDebounceTimer: NodeJS.Timeout | null = null;
     private disposables: vscode.Disposable[] = [];
+    private stats = {
+        changes: 0,
+        additions: 0,
+        deletions: 0,
+        renames: 0,
+        projectStructureChanges: 0,
+        errorCount: 0
+    };
 
     constructor(
         workspacePath: string,
@@ -41,30 +58,27 @@ export class FileWatcher extends EventEmitter {
         config?: Partial<FileWatcherConfig>
     ) {
         super();
-
         this.workspacePath = workspacePath;
         this.outputChannel = outputChannel;
 
         // Default configuration
         this.config = {
             enabled: true,
+            watchGlob: "**/*",
+            excludePattern: "**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/.cache/**",
+            projectStructureChangeDebounce: 500,
+            fileChangeDebounce: 300,
             useVSCodeWatcher: true,
-            useChokidar: true,
-            ignorePatterns: [
-                '**/node_modules/**',
-                '**/.git/**',
-                '**/.vscode/**',
-                '**/dist/**',
-                '**/build/**',
-                '**/*.log',
-                '**/tmp/**',
-                '**/.DS_Store',
-                '**/Thumbs.db'
-            ],
-            debounceDelay: 100,
-            maxDepth: 10,
-            followSymlinks: false,
-            watchHiddenFiles: false,
+            useChokidarWatcher: false,
+            watchOptions: {
+                recursive: true,
+                followSymlinks: false,
+                ignorePermissionErrors: true
+            },
+            watchCreatedFiles: true,
+            watchDeletedFiles: true,
+            watchModifiedFiles: true,
+            watchRenamedFiles: true,
             ...config
         };
 
@@ -72,37 +86,43 @@ export class FileWatcher extends EventEmitter {
     }
 
     /**
-     * Start watching files in the workspace
+     * Start watching for file changes
      */
-    async startWatching(): Promise<void> {
-        if (!this.config.enabled || this.isWatching) {
-            return;
+    async startWatching(): Promise<boolean> {
+        if (this.isWatching) {
+            return true;
         }
 
         try {
             this.outputChannel.appendLine('[FileWatcher] Starting file watching...');
 
-            // Start VS Code's built-in watcher
+            // Use VS Code's FileSystemWatcher if enabled
             if (this.config.useVSCodeWatcher) {
                 await this.startVSCodeWatcher();
             }
 
-            // Start Chokidar watcher for more advanced features
-            if (this.config.useChokidar) {
+            // Use chokidar watcher if enabled (can be used alongside VS Code watcher)
+            if (this.config.useChokidarWatcher) {
                 await this.startChokidarWatcher();
             }
 
-            // Watch for workspace folder changes
-            this.watchWorkspaceChanges();
+            // Listen for workspace folder changes
+            this.disposables.push(
+                vscode.workspace.onDidChangeWorkspaceFolders(this.handleWorkspaceFoldersChanged.bind(this))
+            );
+
+            // Listen for configuration changes
+            this.disposables.push(
+                vscode.workspace.onDidChangeConfiguration(this.handleConfigurationChanged.bind(this))
+            );
 
             this.isWatching = true;
             this.outputChannel.appendLine('[FileWatcher] File watching started successfully');
-
-            this.emit('watchingStarted');
-
+            return true;
         } catch (error) {
             this.outputChannel.appendLine(`[FileWatcher] Failed to start watching: ${error}`);
-            throw error;
+            this.stats.errorCount++;
+            return false;
         }
     }
 
@@ -120,15 +140,15 @@ export class FileWatcher extends EventEmitter {
         this.clearPendingEvents();
 
         // Dispose VS Code watcher
-        if (this.vsCodeWatcher) {
-            this.vsCodeWatcher.dispose();
-            this.vsCodeWatcher = undefined;
+        if (this.fsWatcher) {
+            this.fsWatcher.dispose();
+            this.fsWatcher = null;
         }
 
         // Close Chokidar watcher
         if (this.chokidarWatcher) {
             await this.chokidarWatcher.close();
-            this.chokidarWatcher = undefined;
+            this.chokidarWatcher = null;
         }
 
         // Dispose all VS Code disposables
@@ -136,7 +156,7 @@ export class FileWatcher extends EventEmitter {
         this.disposables = [];
 
         this.isWatching = false;
-        this.watchedFiles.clear();
+        this.watchedPaths.clear();
 
         this.outputChannel.appendLine('[FileWatcher] File watching stopped');
         this.emit('watchingStopped');
@@ -146,7 +166,7 @@ export class FileWatcher extends EventEmitter {
      * Add specific file or directory to watch list
      */
     async addToWatch(filePath: string): Promise<void> {
-        if (!this.isWatching || this.watchedFiles.has(filePath)) {
+        if (!this.isWatching || this.watchedPaths.has(filePath)) {
             return;
         }
 
@@ -154,7 +174,7 @@ export class FileWatcher extends EventEmitter {
             return;
         }
 
-        this.watchedFiles.add(filePath);
+        this.watchedPaths.add(filePath);
 
         // Add to chokidar watcher if available
         if (this.chokidarWatcher) {
@@ -168,11 +188,11 @@ export class FileWatcher extends EventEmitter {
      * Remove file or directory from watch list
      */
     async removeFromWatch(filePath: string): Promise<void> {
-        if (!this.watchedFiles.has(filePath)) {
+        if (!this.watchedPaths.has(filePath)) {
             return;
         }
 
-        this.watchedFiles.delete(filePath);
+        this.watchedPaths.delete(filePath);
 
         // Remove from chokidar watcher if available
         if (this.chokidarWatcher) {
@@ -186,7 +206,7 @@ export class FileWatcher extends EventEmitter {
      * Get list of currently watched files
      */
     getWatchedFiles(): string[] {
-        return Array.from(this.watchedFiles);
+        return Array.from(this.watchedPaths);
     }
 
     /**
@@ -207,25 +227,25 @@ export class FileWatcher extends EventEmitter {
      */
     private async startVSCodeWatcher(): Promise<void> {
         const pattern = new vscode.RelativePattern(this.workspacePath, '**/*');
-        this.vsCodeWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+        this.fsWatcher = vscode.workspace.createFileSystemWatcher(pattern);
 
         // File created
         this.disposables.push(
-            this.vsCodeWatcher.onDidCreate(uri => {
+            this.fsWatcher.onDidCreate(uri => {
                 this.handleFileEvent('created', uri.fsPath);
             })
         );
 
         // File modified
         this.disposables.push(
-            this.vsCodeWatcher.onDidChange(uri => {
+            this.fsWatcher.onDidChange(uri => {
                 this.handleFileEvent('modified', uri.fsPath);
             })
         );
 
         // File deleted
         this.disposables.push(
-            this.vsCodeWatcher.onDidDelete(uri => {
+            this.fsWatcher.onDidDelete(uri => {
                 this.handleFileEvent('deleted', uri.fsPath);
             })
         );
@@ -238,11 +258,11 @@ export class FileWatcher extends EventEmitter {
      */
     private async startChokidarWatcher(): Promise<void> {
         const chokidarOptions = {
-            ignored: this.config.ignorePatterns,
+            ignored: this.config.excludePattern,
             persistent: true,
             ignoreInitial: true,
-            followSymlinks: this.config.followSymlinks,
-            depth: this.config.maxDepth,
+            followSymlinks: this.config.watchOptions.followSymlinks,
+            depth: 999,
             awaitWriteFinish: {
                 stabilityThreshold: 100,
                 pollInterval: 100
@@ -281,55 +301,86 @@ export class FileWatcher extends EventEmitter {
     }
 
     /**
-     * Watch for workspace folder changes
+     * Handle workspace folder changes
      */
-    private watchWorkspaceChanges(): void {
-        // Watch for workspace folder changes
-        this.disposables.push(
-            vscode.workspace.onDidChangeWorkspaceFolders(event => {
-                this.outputChannel.appendLine('[FileWatcher] Workspace folders changed');
+    private handleWorkspaceFoldersChanged(event: vscode.WorkspaceFoldersChangeEvent): void {
+        this.outputChannel.appendLine('[FileWatcher] Workspace folders changed');
 
-                event.added.forEach(folder => {
-                    this.outputChannel.appendLine(`[FileWatcher] Workspace folder added: ${folder.uri.fsPath}`);
-                });
+        // Handle added folders
+        for (const folder of event.added) {
+            this.outputChannel.appendLine(`[FileWatcher] Workspace folder added: ${folder.uri.fsPath}`);
+        }
 
-                event.removed.forEach(folder => {
-                    this.outputChannel.appendLine(`[FileWatcher] Workspace folder removed: ${folder.uri.fsPath}`);
-                });
+        // Handle removed folders
+        for (const folder of event.removed) {
+            this.outputChannel.appendLine(`[FileWatcher] Workspace folder removed: ${folder.uri.fsPath}`);
+        }
 
-                this.emit('workspaceChanged', event);
-            })
-        );
+        // Emit a structure change event with a special case for workspace changes
+        this.emitStructuralChange('created', '');
+    }
 
-        // Watch for configuration changes
-        this.disposables.push(
-            vscode.workspace.onDidChangeConfiguration(event => {
-                if (event.affectsConfiguration('files.watcherExclude') ||
-                    event.affectsConfiguration('search.exclude')) {
-                    this.outputChannel.appendLine('[FileWatcher] File watching configuration changed');
-                    this.emit('configurationChanged', event);
-                }
-            })
-        );
+    /**
+     * Handle configuration changes
+     */
+    private handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): void {
+        // Check if our relevant configuration changed
+        if (event.affectsConfiguration('files.watcherExclude') ||
+            event.affectsConfiguration('files.exclude')) {
+            this.outputChannel.appendLine('[FileWatcher] File watching configuration changed');
+
+            // Consider restarting watchers with new configuration
+            if (this.isWatching) {
+                this.stopWatching().then(() => this.startWatching());
+            }
+        }
+    }
+
+    /**
+     * Emit a project structure change event for file/directory operations
+     */
+    private emitProjectStructureChangeEvent(type: 'created' | 'modified' | 'deleted' | 'renamed', relativePath: string): void {
+        this.emitStructuralChange(type, relativePath);
+    }
+
+    /**
+     * Common method to emit structural changes in the project
+     */
+    private emitStructuralChange(type: 'created' | 'modified' | 'deleted' | 'renamed', relativePath: string): void {
+        const event: FileChangeEvent = {
+            type,
+            filePath: path.join(this.workspacePath, relativePath),
+            relativePath,
+            timestamp: Date.now()
+        };
+
+        if (this.projectStructureChangeDebounceTimer) {
+            clearTimeout(this.projectStructureChangeDebounceTimer);
+        }
+
+        this.projectStructureChangeDebounceTimer = setTimeout(() => {
+            this.emit('projectStructureChange', event);
+            this.stats.projectStructureChanges++;
+            this.outputChannel.appendLine(`[FileWatcher] Project structure change: ${type} - ${relativePath}`);
+        }, this.config.projectStructureChangeDebounce);
     }
 
     /**
      * Handle file change events with debouncing
      */
     private handleFileEvent(type: FileChangeEvent['type'], filePath: string): void {
-        if (this.shouldIgnorePath(filePath)) {
+        if (!this.config.enabled || this.shouldIgnorePath(filePath)) {
             return;
         }
 
         const relativePath = path.relative(this.workspacePath, filePath);
 
-        // Clear existing timer for this file
-        const existingTimer = this.debounceTimers.get(filePath);
-        if (existingTimer) {
-            clearTimeout(existingTimer);
+        // Skip if file is in an ignored pattern
+        if (this.shouldIgnorePath(filePath)) {
+            return;
         }
 
-        // Create file change event
+        // Create event data
         const event: FileChangeEvent = {
             type,
             filePath,
@@ -337,31 +388,47 @@ export class FileWatcher extends EventEmitter {
             timestamp: Date.now()
         };
 
-        // Debounce the event
-        const timer = setTimeout(async () => {
-            // Get file stats if file exists
-            if (type !== 'deleted') {
-                try {
-                    event.stats = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
-                } catch {
-                    // File might have been deleted between event and stat
+        // Check if event affects project structure (creation, deletion, or renaming)
+        const affectsProjectStructure =
+            type === 'created' ||
+            type === 'deleted' ||
+            type === 'renamed';
+
+        // Get file key for debouncing (can be a directory)
+        const fileKey = filePath;
+
+        // Cancel existing timer for the same file
+        if (this.changeDebounceTimer) {
+            clearTimeout(this.changeDebounceTimer);
+        }
+
+        // Store the event
+        this.events.push(event);
+
+        // Set up debounce timer
+        this.changeDebounceTimer = setTimeout(() => {
+            const pendingEvents = this.events.filter(e => e.filePath === filePath);
+            if (pendingEvents.length > 0) {
+                // Emit the file change event
+                this.emit('fileChange', pendingEvents[0]);
+
+                // Emit additional event for project structure changes
+                if (affectsProjectStructure) {
+                    this.emit('projectStructureChange', pendingEvents[0]);
+                    this.outputChannel.appendLine(`[FileWatcher] Project structure change detected: ${pendingEvents[0].type} - ${pendingEvents[0].relativePath}`);
                 }
+
+                this.debug(`File ${pendingEvents[0].type}: ${pendingEvents[0].relativePath}`);
+
+                // Remove from pending events
+                this.events = this.events.filter(e => e.filePath !== filePath);
             }
+        }, this.config.fileChangeDebounce);
 
-            // Remove from pending events and timers
-            this.pendingEvents.delete(filePath);
-            this.debounceTimers.delete(filePath);
-
-            // Emit the event
-            this.emit('fileChanged', event);
-
-            this.debug(`File ${type}: ${relativePath}`);
-
-        }, this.config.debounceDelay);
-
-        // Store timer and event
-        this.debounceTimers.set(filePath, timer);
-        this.pendingEvents.set(filePath, event);
+        // Store the timer
+        if (this.changeDebounceTimer) {
+            this.changeDebounceTimer = this.changeDebounceTimer;
+        }
     }
 
     /**
@@ -371,12 +438,12 @@ export class FileWatcher extends EventEmitter {
         const relativePath = path.relative(this.workspacePath, filePath);
 
         // Check if it's a hidden file and we're not watching them
-        if (!this.config.watchHiddenFiles && path.basename(filePath).startsWith('.')) {
+        if (!this.config.watchOptions.followSymlinks && path.basename(filePath).startsWith('.')) {
             return true;
         }
 
         // Check against ignore patterns
-        for (const pattern of this.config.ignorePatterns) {
+        for (const pattern of this.config.excludePattern.split(',')) {
             if (this.matchesGlob(relativePath, pattern)) {
                 return true;
             }
@@ -403,11 +470,11 @@ export class FileWatcher extends EventEmitter {
      */
     private clearPendingEvents(): void {
         // Clear all debounce timers
-        this.debounceTimers.forEach((timer) => {
-            clearTimeout(timer);
-        });
-        this.debounceTimers.clear();
-        this.pendingEvents.clear();
+        if (this.changeDebounceTimer) {
+            clearTimeout(this.changeDebounceTimer);
+            this.changeDebounceTimer = null;
+        }
+        this.events = [];
     }
 
     /**
@@ -423,7 +490,7 @@ export class FileWatcher extends EventEmitter {
      */
     private debug(message: string): void {
         // Only log if debugging is enabled
-        if (this.config.ignorePatterns.includes('debug')) {
+        if (this.config.excludePattern.includes('debug')) {
             this.outputChannel.appendLine(`[FileWatcher] DEBUG: ${message}`);
         }
     }
@@ -441,9 +508,9 @@ export class FileWatcher extends EventEmitter {
     } {
         return {
             isWatching: this.isWatching,
-            watchedFilesCount: this.watchedFiles.size,
-            pendingEventsCount: this.pendingEvents.size,
-            activeTimersCount: this.debounceTimers.size,
+            watchedFilesCount: this.watchedPaths.size,
+            pendingEventsCount: this.events.length,
+            activeTimersCount: this.changeDebounceTimer ? 1 : 0,
             workspacePath: this.workspacePath,
             config: { ...this.config }
         };

@@ -1,10 +1,9 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { ContextApiServer } from './api/ContextApiServer';
 import { ContextManager } from './context/ContextManager';
 import { ProcessedContext } from './context/types/context';
-import { EnhancedStreamingClient } from './enhanced_streaming_client';
+import { IndexingManager, IndexingStatusInfo } from './indexing';
+import { EnhancedStreamingClient } from './streaming_client';
 import { getSystemInfo, getWebviewContent } from './utilities';
 
 const STREAMING_API_URL = 'http://0.0.0.0:5001';
@@ -18,7 +17,9 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   private context: vscode.ExtensionContext;
   private contextManager: ContextManager | null = null;
   private contextApiServer: ContextApiServer | null = null;
+  private indexingManager: IndexingManager | null = null;
   private isContextManagerReady = false;
+  private isIndexingReady = false;
   private workspaceDisposables: vscode.Disposable[] = [];
 
   constructor(
@@ -51,6 +52,12 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      // Check if context manager is already initialized or in progress
+      if (this.contextManager !== null) {
+        this.outputChannel.appendLine('[Extension] Context manager already exists, skipping initialization');
+        return;
+      }
+
       this.outputChannel.appendLine(`[Extension] Workspace detected: ${vscode.workspace.workspaceFolders![0].name}`);
       await this.createAndInitializeContextManager();
 
@@ -68,6 +75,12 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     try {
       this.outputChannel.appendLine('[Extension] Creating context manager...');
 
+      // Check if the context manager already exists
+      if (this.contextManager !== null) {
+        this.outputChannel.appendLine('[Extension] Context manager already exists, reusing existing instance');
+        return;
+      }
+
       // Initialize the context manager with safe defaults
       this.contextManager = new ContextManager(this.context, this.outputChannel, {
         enabled: true,
@@ -83,22 +96,28 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       this.outputChannel.appendLine('[Extension] Initializing context manager...');
       await this.contextManager.initialize();
 
-      // Create and start API server
-      this.outputChannel.appendLine('[Extension] Creating Context API server...');
-      this.contextApiServer = new ContextApiServer(
-        this.contextManager.getStorage(),
-        this.contextManager,
-        this.outputChannel
-      );
+      // Create and start API server only if it doesn't exist already
+      if (!this.contextApiServer) {
+        this.outputChannel.appendLine('[Extension] Creating Context API server...');
+        this.contextApiServer = new ContextApiServer(
+          this.contextManager,
+          this.outputChannel
+        );
 
-      this.outputChannel.appendLine('[Extension] Starting Context API server...');
-      await this.contextApiServer.start();
+        this.outputChannel.appendLine('[Extension] Starting Context API server...');
+        await this.contextApiServer.start();
+      } else {
+        this.outputChannel.appendLine('[Extension] Context API server already exists');
+      }
 
       this.isContextManagerReady = true;
       this.outputChannel.appendLine('[Extension] Context manager and API server ready');
 
       // Set up event listeners now that context manager is ready
       this.setupContextManagerEventListeners();
+
+      // Initialize indexing manager alongside context manager
+      await this.createAndInitializeIndexingManager();
 
       // Notify webview that context manager is now ready
       this.notifyWebviewContextManagerReady(true);
@@ -118,6 +137,50 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Create and initialize the indexing manager
+   */
+  private async createAndInitializeIndexingManager(): Promise<void> {
+    try {
+      this.outputChannel.appendLine('[Extension] Creating indexing manager...');
+
+      // Check if the indexing manager already exists
+      if (this.indexingManager !== null) {
+        this.outputChannel.appendLine('[Extension] Indexing manager already exists, reusing existing instance');
+        return;
+      }
+
+      // Initialize the indexing manager
+      this.indexingManager = new IndexingManager(this.context, this.outputChannel, {
+        enabled: true,
+        indexingInterval: 10 * 60 * 1000, // 10 minutes
+        maxFileSize: 1 * 1024 * 1024, // 1MB
+        excludePatterns: [".venv/**", "node_modules/**", ".git/**", "dist/**", "build/**", "**/*.log"],
+        serverUrl: 'http://localhost:8000' // Use the backend server URL
+      });
+
+      this.outputChannel.appendLine('[Extension] Initializing indexing manager...');
+      await this.indexingManager.initialize();
+
+      this.isIndexingReady = true;
+      this.outputChannel.appendLine('[Extension] Indexing manager ready');
+
+      // Set up indexing event listeners
+      this.setupIndexingEventListeners();
+
+      // Notify webview about indexing status
+      this.notifyWebviewIndexingReady(true);
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[Extension] Failed to initialize indexing manager: ${error}`);
+      this.isIndexingReady = false;
+      this.notifyWebviewIndexingReady(false, `Indexing initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+
+      // Don't throw error - indexing is optional
+      this.outputChannel.appendLine('[Extension] Continuing without indexing...');
+    }
+  }
+
+  /**
    * Setup workspace watcher for delayed initialization
    */
   private setupWorkspaceWatcher(): void {
@@ -126,6 +189,10 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       if (event.added.length > 0 && !this.isContextManagerReady) {
         this.outputChannel.appendLine('[Extension] Workspace folder added - initializing context manager...');
         await this.createAndInitializeContextManager();
+      }
+      if (event.added.length > 0 && !this.isIndexingReady) {
+        this.outputChannel.appendLine('[Extension] Workspace folder added - initializing indexing manager...');
+        await this.createAndInitializeIndexingManager();
       }
     });
 
@@ -137,6 +204,10 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         clearInterval(intervalCheck);
         this.outputChannel.appendLine('[Extension] Workspace detected via polling - initializing context manager...');
         await this.createAndInitializeContextManager();
+      }
+      if (!this.isIndexingReady && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        this.outputChannel.appendLine('[Extension] Workspace detected via polling - initializing indexing manager...');
+        await this.createAndInitializeIndexingManager();
       }
     }, 2000); // Check every 2 seconds
 
@@ -182,6 +253,50 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       this._view.webview.postMessage({
         command: 'contextManagerReady',
+        ready,
+        error
+      });
+    }
+  }
+
+  /**
+   * Setup indexing manager event listeners
+   */
+  private setupIndexingEventListeners(): void {
+    if (!this.indexingManager) return;
+
+    this.indexingManager.on('statusChanged', (status: IndexingStatusInfo) => {
+      if (this._view) {
+        this._view.webview.postMessage({
+          command: 'indexingStatusChanged',
+          status
+        });
+      }
+    });
+
+    this.indexingManager.on('indexingCompleted', (event: any) => {
+      this.outputChannel.appendLine(`[Extension] Indexing completed: ${event.chunks} chunks processed`);
+      if (this._view) {
+        this._view.webview.postMessage({
+          command: 'indexingCompleted',
+          chunks: event.chunks,
+          timestamp: event.timestamp
+        });
+      }
+    });
+
+    this.indexingManager.on('initialized', (event: any) => {
+      this.outputChannel.appendLine(`[Extension] Indexing initialized for workspace: ${event.workspaceHash}`);
+    });
+  }
+
+  /**
+   * Notify webview about indexing manager status
+   */
+  private notifyWebviewIndexingReady(ready: boolean, error?: string): void {
+    if (this._view) {
+      this._view.webview.postMessage({
+        command: 'indexingManagerReady',
         ready,
         error
       });
@@ -254,7 +369,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   private async handleMessage(message: any) {
     switch (message.command) {
       case 'sendQuery':
-        await this.handleSimpleQuery(message.text);
+        await this.handleQuery(message.text);
         return;
 
       case 'checkStreamingHealth':
@@ -269,16 +384,9 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         await this.clearStreamingState();
         return;
 
-      case 'exportLogs':
-        await this.exportStreamingLogs();
-        return;
 
       case 'refreshContext':
         await this.refreshWorkspaceContext();
-        return;
-
-      case 'exportContext':
-        await this.exportWorkspaceContext();
         return;
 
       case 'collectContext':
@@ -289,8 +397,8 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         await this.initializeForWorkspace();
         return;
 
-      case 'handleSimpleQuery':
-        await this.handleSimpleQuery(message.query);
+      case 'handleQuery':
+        await this.handleQuery(message.query);
         return;
 
       case 'handleContextRequest':
@@ -299,6 +407,14 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
       case 'getAvailableFiles':
         await this.getAvailableFiles();
+        return;
+
+      case 'getIndexingStatus':
+        await this.getIndexingStatus();
+        return;
+
+      case 'triggerIndexing':
+        await this.triggerIndexingManually();
         return;
     }
   }
@@ -355,9 +471,9 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Handle queries from the simplified UI
+   * Handle queries from the UI
    */
-  public async handleSimpleQuery(query: string) {
+  public async handleQuery(query: string) {
     if (!this._view) return;
 
     try {
@@ -390,10 +506,16 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
       // Parse @ mentions from query
       const contextMentions = this.parseContextMentions(query);
-      this.outputChannel.appendLine(`[SimpleQuery] Detected context mentions: ${JSON.stringify(contextMentions)}`);
+      this.outputChannel.appendLine(`[Query] Detected context mentions: ${JSON.stringify(contextMentions)}`);
 
-      // Collect always-send context (system info + active file)
+      // Collect always-send context (system info + active file + open files)
       const alwaysSendContext = await this.collectAlwaysSendContext();
+
+      // Log what context is being sent
+      this.outputChannel.appendLine(`[Query] Always-send context summary:`);
+      this.outputChannel.appendLine(`[Query] - System info: OS=${alwaysSendContext.systemInfo.platform}, Shell=${alwaysSendContext.systemInfo.defaultShell}`);
+      this.outputChannel.appendLine(`[Query] - Active file: ${alwaysSendContext.activeFile?.relativePath || 'None'}`);
+      this.outputChannel.appendLine(`[Query] - Open files: ${alwaysSendContext.openFiles?.length || 0} files`);
 
       // Send query with always-send context to backend
       if (this.enhancedStreamingClient) {
@@ -402,6 +524,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           workspace_path: alwaysSendContext.workspace.path,
           system_info: alwaysSendContext.systemInfo,
           active_file_context: alwaysSendContext.activeFile,
+          open_files_context: alwaysSendContext.openFiles,
           context_mentions: contextMentions
         };
 
@@ -410,21 +533,24 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         };
 
         // DEBUG: Log the exact request being sent
-        this.outputChannel.appendLine(`[SimpleQuery] Sending request with context mentions: ${JSON.stringify(contextMentions)}`);
-        this.outputChannel.appendLine(`[SimpleQuery] Workspace: ${streamRequest.workspace_path}`);
-        this.outputChannel.appendLine(`[SimpleQuery] System Info: ${JSON.stringify(streamRequest.system_info)}`);
+        this.outputChannel.appendLine(`[Query] Sending request with context mentions: ${JSON.stringify(contextMentions)}`);
+        this.outputChannel.appendLine(`[Query] Workspace: ${streamRequest.workspace_path}`);
+        this.outputChannel.appendLine(`[Query] System Info: ${JSON.stringify(streamRequest.system_info)}`);
         if (streamRequest.active_file_context) {
-          this.outputChannel.appendLine(`[SimpleQuery] Active File: ${streamRequest.active_file_context.relativePath}`);
+          this.outputChannel.appendLine(`[Query] Active File: ${streamRequest.active_file_context.relativePath}`);
+        }
+        if (streamRequest.open_files_context) {
+          this.outputChannel.appendLine(`[Query] Open Files: ${JSON.stringify(streamRequest.open_files_context)}`);
         }
 
-        // Stream the query with comprehensive event handling for SimpleApp
+        // Stream the query with comprehensive event handling for App
         await this.enhancedStreamingClient.streamQuery(
           streamRequest,
           this._view.webview,
           async (event, state) => {
-            this.outputChannel.appendLine(`[SimpleQuery] Event: ${event.type} - ${event.content.substring(0, 100)}...`);
+            this.outputChannel.appendLine(`[Query] Event: ${event.type} - ${event.content.substring(0, 100)}...`);
 
-            // Comprehensive event handling for the SimpleApp UI
+            // Comprehensive event handling for the App UI
             switch (event.type) {
               case 'thinking':
                 // Forward thinking events to UI for transparency
@@ -499,12 +625,12 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
               case 'context_request':
                 // Handle context requests from the agent
-                this.outputChannel.appendLine(`[SimpleQuery] Context request: ${event.metadata?.context_type}`);
+                this.outputChannel.appendLine(`[Query] Context request: ${event.metadata?.context_type}`);
                 break;
 
               default:
                 // Log unhandled event types for debugging
-                this.outputChannel.appendLine(`[SimpleQuery] Unhandled event type: ${event.type}`);
+                this.outputChannel.appendLine(`[Query] Unhandled event type: ${event.type}`);
                 break;
             }
           },
@@ -513,7 +639,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       }
 
     } catch (error) {
-      this.outputChannel.appendLine(`[SimpleQuery] Error: ${error}`);
+      this.outputChannel.appendLine(`[Query] Error: ${error}`);
       this._view.webview.postMessage({
         command: 'streamError',
         error: error instanceof Error ? error.message : String(error)
@@ -555,7 +681,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Collect always-send context (system info + active file)
+   * Collect always-send context (system info + active file + open files)
    */
   private async collectAlwaysSendContext(): Promise<any> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -563,69 +689,145 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     // Get system info using the utility function that matches Python model
     const systemInfo = await getSystemInfo();
 
-    // Collect active file context and transform to match Python ActiveFileContext model
+    // Initialize context objects
     let activeFileContext: any = null;
-    if (this.contextManager) {
-      try {
-        const activeFileResult = await this.contextManager.collectContext({
-          collectors: ['ActiveFileCollector'],
-          options: {
-            includeFileContent: true,
-            maxFileSize: 1048576,
-            excludePatterns: ['node_modules', '.git', 'dist', 'build'],
-            includeHiddenFiles: false,
-            respectGitignore: true,
-            maxDepth: 10,
-            parallel: false,
-            useCache: true
-          },
-          timeout: 5000,
-          retryCount: 1
-        });
+    let openFilesContext: any[] = [];
 
-        if (activeFileResult.success && activeFileResult.context) {
-          const activeFile = activeFileResult.context.activeFile;
+    try {
+      // Directly use VS Code API to get active file info
+      const activeEditor = vscode.window.activeTextEditor;
+      if (activeEditor) {
+        const document = activeEditor.document;
 
-          if (activeFile) {
-            // Transform to match Python ActiveFileContext model exactly
-            activeFileContext = {
-              path: activeFile.path || null,
-              relativePath: activeFile.relativePath || null,
-              languageId: activeFile.languageId || null,
-              lineCount: activeFile.lineCount || null,
-              fileSize: activeFile.fileSize || null,
-              lastModified: activeFile.lastModified || null,
-              content: null, // Don't send content for now to reduce size
-              cursorPosition: activeFile.cursorPosition ? {
-                line: activeFile.cursorPosition.line,
-                character: activeFile.cursorPosition.character
-              } : null,
-              selection: activeFile.selection ? {
-                start: {
-                  line: activeFile.selection.start.line,
-                  character: activeFile.selection.start.character
-                },
-                end: {
-                  line: activeFile.selection.end.line,
-                  character: activeFile.selection.end.character
-                }
-              } : null,
-              visibleRanges: activeFile.visibleRanges ? activeFile.visibleRanges.map((range: any) => ({
-                start: { line: range.start.line, character: range.start.character },
-                end: { line: range.end.line, character: range.end.character }
-              })) : null,
-              cursorLineContent: activeFile.cursorLineContent || null
-            };
+        // Only include file-scheme documents (not output, terminal, etc.)
+        if (document.uri.scheme === 'file') {
+          let relativePath = '';
+          if (workspaceFolder) {
+            relativePath = vscode.workspace.asRelativePath(document.uri, false);
+          }
+
+          // Get file stats for lastModified
+          let lastModified: string;
+          try {
+            const stats = await vscode.workspace.fs.stat(document.uri);
+            lastModified = new Date(stats.mtime).toISOString();
+          } catch {
+            lastModified = new Date().toISOString();
+          }
+
+          // Get cursor position and selection
+          const position = activeEditor.selection.active;
+          const selection = activeEditor.selection;
+
+          // Get current line content
+          const currentLine = document.lineAt(position.line);
+          const currentLineContent = currentLine.text;
+
+          // Get surrounding lines
+          let lineAboveContent: string | undefined;
+          if (position.line > 0) {
+            lineAboveContent = document.lineAt(position.line - 1).text;
+          }
+
+          let lineBelowContent: string | undefined;
+          if (position.line < document.lineCount - 1) {
+            lineBelowContent = document.lineAt(position.line + 1).text;
+          }
+
+          // Create active file context
+          activeFileContext = {
+            path: document.uri.fsPath,
+            relativePath: relativePath,
+            languageId: document.languageId,
+            lineCount: document.lineCount,
+            fileSize: Buffer.byteLength(document.getText(), 'utf8'),
+            lastModified: lastModified,
+            content: document.getText(), // Include content for active file
+            cursorPosition: {
+              line: position.line,
+              character: position.character
+            },
+            selection: {
+              start: {
+                line: selection.start.line,
+                character: selection.start.character
+              },
+              end: {
+                line: selection.end.line,
+                character: selection.end.character
+              }
+            },
+            visibleRanges: activeEditor.visibleRanges.map(range => ({
+              start: { line: range.start.line, character: range.start.character },
+              end: { line: range.end.line, character: range.end.character }
+            })),
+            cursorLineContent: {
+              current: currentLineContent,
+              above: lineAboveContent,
+              below: lineBelowContent
+            }
+          };
+
+          this.outputChannel.appendLine(`[AlwaysSendContext] Active file detected: ${relativePath}`);
+        }
+      }
+
+      // Directly use VS Code API to get open files
+      const openDocuments = vscode.workspace.textDocuments.filter(doc => {
+        // Only include file documents, not untitled or others
+        return doc.uri.scheme === 'file';
+      });
+
+      if (openDocuments.length > 0) {
+        for (const doc of openDocuments) {
+          if (workspaceFolder) {
+            const relativePath = vscode.workspace.asRelativePath(doc.uri, false);
+
+            // Skip files not in workspace
+            if (!doc.uri.fsPath.startsWith(workspaceFolder.uri.fsPath)) {
+              continue;
+            }
+
+            // Skip files that should be excluded
+            if (relativePath.includes('node_modules') ||
+              relativePath.includes('.git') ||
+              relativePath.includes('dist') ||
+              relativePath.includes('build')) {
+              continue;
+            }
+
+            // Get file stats
+            let lastModified: string;
+            try {
+              const stats = await vscode.workspace.fs.stat(doc.uri);
+              lastModified = new Date(stats.mtime).toISOString();
+            } catch {
+              lastModified = new Date().toISOString();
+            }
+
+            // Create open file info (without content)
+            openFilesContext.push({
+              path: doc.uri.fsPath,
+              relativePath: relativePath,
+              languageId: doc.languageId,
+              fileSize: Buffer.byteLength(doc.getText(), 'utf8'),
+              lastModified: lastModified,
+              isActive: activeFileContext?.path === doc.uri.fsPath
+            });
           }
         }
-      } catch (error) {
-        this.outputChannel.appendLine(`[AlwaysSendContext] Failed to collect active file: ${error}`);
+
+        this.outputChannel.appendLine(`[AlwaysSendContext] Collected ${openFilesContext.length} open files`);
       }
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[AlwaysSendContext] Failed to collect context: ${error}`);
     }
 
     return {
       systemInfo,
       activeFile: activeFileContext,
+      openFiles: openFilesContext,
       workspace: {
         path: workspaceFolder?.uri.fsPath || '',
         name: workspaceFolder?.name || ''
@@ -654,7 +856,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
             options: {
               includeFileContent: false,
               maxFileSize: 1048576,
-              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              excludePatterns: [".venv/**", 'node_modules', '.git', 'dist', 'build'],
               includeHiddenFiles: false,
               respectGitignore: true,
               maxDepth: 10,
@@ -672,12 +874,12 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
             options: {
               includeFileContent: false,
               maxFileSize: 1048576,
-              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              excludePatterns: [".venv/**", 'node_modules', '.git', 'dist', 'build'],
               includeHiddenFiles: false,
               respectGitignore: true,
               maxDepth: params.maxDepth || 6,
               parallel: false,
-              useCache: true
+              useCache: true // Project structure should be cached and re-cached on file changes
             },
             timeout: 15000,
             retryCount: 1
@@ -690,12 +892,12 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
             options: {
               includeFileContent: params.includeChanges !== false,
               maxFileSize: 1048576,
-              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              excludePatterns: [".venv/**", 'node_modules', '.git', 'dist', 'build'],
               includeHiddenFiles: false,
               respectGitignore: true,
               maxDepth: 10,
               parallel: false,
-              useCache: true
+              useCache: false // Never cache git context
             },
             timeout: 15000,
             retryCount: 1
@@ -708,12 +910,12 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
             options: {
               includeFileContent: params.includeContent === true,
               maxFileSize: 1048576,
-              excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+              excludePatterns: [".venv/**", 'node_modules', '.git', 'dist', 'build'],
               includeHiddenFiles: false,
               respectGitignore: true,
               maxDepth: 10,
               parallel: false,
-              useCache: true
+              useCache: false // Never cache open files context
             },
             timeout: 10000,
             retryCount: 1
@@ -850,57 +1052,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async exportStreamingLogs() {
-    try {
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage('No workspace folder found for exporting logs');
-        return;
-      }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const logFileName = `enhanced-streaming-logs-${timestamp}.txt`;
-      const logFilePath = path.join(workspaceFolder.uri.fsPath, logFileName);
-
-      const currentState = this.enhancedStreamingClient?.getCurrentState();
-      const contextStats = this.contextManager?.getStats();
-
-      const logContent = [
-        '=== ENHANCED STREAMING LOGS ===',
-        `Timestamp: ${new Date().toLocaleString()}`,
-        `Streaming API URL: ${STREAMING_API_URL}`,
-        `Workspace ID: ${this.contextManager?.getWorkspaceId() || 'N/A'}`,
-        `Context Manager Ready: ${this.isContextManagerReady}`,
-        '',
-        '=== CURRENT STATE ===',
-        JSON.stringify(currentState, null, 2),
-        '',
-        '=== CONTEXT MANAGER STATS ===',
-        JSON.stringify(contextStats, null, 2),
-        '',
-        '=== OUTPUT CHANNEL LOGS ===',
-        '(Check VSCode Output Channel for detailed logs)',
-        '',
-        '=== END OF LOGS ==='
-      ].join('\n');
-
-      await fs.promises.writeFile(logFilePath, logContent);
-
-      vscode.window.showInformationMessage(
-        `Enhanced streaming logs exported to: ${logFileName}`,
-        'Open File'
-      ).then(selection => {
-        if (selection === 'Open File') {
-          vscode.window.showTextDocument(vscode.Uri.file(logFilePath));
-        }
-      });
-
-      this.outputChannel.appendLine(`[EXPORT] Logs exported to: ${logFilePath}`);
-    } catch (error) {
-      vscode.window.showErrorMessage(`Failed to export logs: ${error}`);
-      this.outputChannel.appendLine(`[EXPORT] Error: ${error}`);
-    }
-  }
 
   private getEnhancedWebviewContent(webview: vscode.Webview): string {
     return getWebviewContent(webview, this._extensionUri);
@@ -909,7 +1060,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   /**
    * Refreshes the workspace context and sends it to the webview
    */
-  private async refreshWorkspaceContext() {
+  public async refreshWorkspaceContext(): Promise<void> {
     try {
       if (!this.isContextManagerReady || !this.contextManager) {
         this.outputChannel.appendLine('[Context] Cannot refresh - context manager not ready');
@@ -957,70 +1108,11 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /**
-   * Exports the current workspace context to a file
-   */
-  private async exportWorkspaceContext() {
-    try {
-      if (!this.isContextManagerReady || !this.contextManager) {
-        vscode.window.showErrorMessage('Context manager is not ready yet. Please wait for initialization to complete.');
-        return;
-      }
-
-      const collectionResult = await this.contextManager!.collectContext();
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-
-      if (!workspaceFolder) {
-        vscode.window.showErrorMessage('No workspace folder found for exporting context');
-        return;
-      }
-
-      if (!collectionResult.success || !collectionResult.context) {
-        throw new Error('Failed to collect workspace context for export');
-      }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const contextFileName = `workspace-context-${timestamp}.json`;
-      const contextFilePath = path.join(workspaceFolder.uri.fsPath, contextFileName);
-
-      const exportContext = {
-        ...collectionResult.context,
-        activeFile: collectionResult.context.activeFile ? {
-          ...collectionResult.context.activeFile,
-          content: `[Content Length: ${collectionResult.context.activeFile.content?.length || 0} characters]`
-        } : null,
-        collectionMetadata: {
-          timestamp: collectionResult.metadata.timestamp,
-          duration: collectionResult.totalDuration,
-          collectors: collectionResult.metadata.collectorCount,
-          successCount: collectionResult.metadata.successCount,
-          errors: collectionResult.errors,
-          workspaceId: this.contextManager!.getWorkspaceId()
-        }
-      };
-
-      await fs.promises.writeFile(contextFilePath, JSON.stringify(exportContext, null, 2));
-
-      vscode.window.showInformationMessage(
-        `Workspace context exported to: ${contextFileName}`,
-        'Open File'
-      ).then(selection => {
-        if (selection === 'Open File') {
-          vscode.window.showTextDocument(vscode.Uri.file(contextFilePath));
-        }
-      });
-
-      this.outputChannel.appendLine(`[EXPORT] Context exported to: ${contextFilePath}`);
-    } catch (error) {
-      vscode.window.showErrorMessage(`Failed to export workspace context: ${error}`);
-      this.outputChannel.appendLine(`[EXPORT] Context export error: ${error}`);
-    }
-  }
 
   /**
    * Manually trigger context collection
    */
-  private async collectContextManually() {
+  public async collectContextManually(): Promise<void> {
     try {
       if (!this.isContextManagerReady || !this.contextManager) {
         this.outputChannel.appendLine('[Context] Cannot collect - context manager not ready');
@@ -1067,6 +1159,80 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       );
     } catch (error) {
       this.outputChannel.appendLine(`[Context] Manual collection failed: ${error}`);
+    }
+  }
+
+  /**
+   * Get current indexing status
+   */
+  private async getIndexingStatus(): Promise<void> {
+    try {
+      if (!this.indexingManager) {
+        this._view?.webview.postMessage({
+          command: 'indexingStatus',
+          status: {
+            isIndexed: false,
+            workspaceHash: '',
+            gitBranch: 'default',
+            status: 'disabled'
+          }
+        });
+        return;
+      }
+
+      const status = this.indexingManager.getStatus();
+      this._view?.webview.postMessage({
+        command: 'indexingStatus',
+        status
+      });
+
+      this.outputChannel.appendLine(`[IndexingStatus] Status: ${status.status}, Indexed: ${status.isIndexed}`);
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[IndexingStatus] Error: ${error}`);
+      this._view?.webview.postMessage({
+        command: 'indexingStatus',
+        status: {
+          isIndexed: false,
+          workspaceHash: '',
+          gitBranch: 'default',
+          status: 'error'
+        }
+      });
+    }
+  }
+
+  /**
+   * Manually trigger indexing
+   */
+  private async triggerIndexingManually(): Promise<void> {
+    try {
+      if (!this.indexingManager) {
+        this._view?.webview.postMessage({
+          command: 'indexingTriggerResult',
+          success: false,
+          error: 'Indexing manager not available'
+        });
+        return;
+      }
+
+      this.outputChannel.appendLine('[IndexingTrigger] Manual indexing triggered');
+      await this.indexingManager.triggerIndexing();
+
+      this._view?.webview.postMessage({
+        command: 'indexingTriggerResult',
+        success: true
+      });
+
+      this.outputChannel.appendLine('[IndexingTrigger] Manual indexing completed');
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[IndexingTrigger] Error: ${error}`);
+      this._view?.webview.postMessage({
+        command: 'indexingTriggerResult',
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
@@ -1141,6 +1307,14 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         this.contextApiServer = null;
       }
 
+      // Cleanup indexing manager
+      if (this.indexingManager) {
+        this.outputChannel.appendLine('[Extension] Disposing indexing manager...');
+        await this.indexingManager.dispose();
+        this.indexingManager = null;
+        this.isIndexingReady = false;
+      }
+
       // Cleanup context manager
       if (this.contextManager) {
         this.outputChannel.appendLine('[Extension] Disposing context manager...');
@@ -1163,136 +1337,72 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   }
 
   private updateStatusBar() {
-    if (this.isContextManagerReady) {
-      this.statusBarItem.text = '$(plug) Enhanced Agent Server (TRUE Streaming + Context Collection)';
-      this.statusBarItem.tooltip = 'Enhanced Agent Server Status (TRUE Streaming + Context Collection)';
+    const contextStatus = this.isContextManagerReady ? 'Context' : '';
+    const indexingStatus = this.isIndexingReady ? 'Indexing' : '';
+
+    const features = [contextStatus, indexingStatus].filter(Boolean);
+
+    if (features.length > 0) {
+      this.statusBarItem.text = `$(plug) Enhanced Agent Server (TRUE Streaming + ${features.join(' + ')})`;
+      this.statusBarItem.tooltip = `Enhanced Agent Server Status (TRUE Streaming + ${features.join(' + ')})`;
     } else {
       this.statusBarItem.text = '$(plug) Enhanced Agent Server';
       this.statusBarItem.tooltip = 'Enhanced Agent Server Status (Original)';
+    }
+
+    // Add indexing status information if available
+    if (this.indexingManager && this.isIndexingReady) {
+      const status = this.indexingManager.getStatus();
+      if (status.isIndexed && status.lastIndexTime) {
+        const lastIndexed = new Date(status.lastIndexTime).toLocaleTimeString();
+        this.statusBarItem.tooltip += `\nCodebase indexed at ${lastIndexed}`;
+      }
     }
   }
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log('Activating Enhanced Assistant Sidebar extension with improved workspace handling');
-
-  const outputChannel = vscode.window.createOutputChannel('Enhanced Agent Assistant');
-  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  statusBarItem.text = '$(plug) Enhanced Agent Server';
-  statusBarItem.tooltip = 'Enhanced Agent Server Status (TRUE Streaming + Context Collection)';
-  statusBarItem.command = 'enhanced-assistant-sidebar.refreshConnection';
+  const outputChannel = vscode.window.createOutputChannel('Enhanced Assistant');
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.text = '$(rocket) Enhanced Assistant';
+  statusBarItem.tooltip = 'Enhanced Assistant Status';
   statusBarItem.show();
 
-  const provider = new EnhancedAssistantViewProvider(context.extensionUri, context, outputChannel, statusBarItem);
+  outputChannel.appendLine('[Extension] Activating Enhanced Assistant extension...');
 
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      EnhancedAssistantViewProvider.viewType,
-      provider
-    )
+  // Create the view provider
+  const provider = new EnhancedAssistantViewProvider(
+    context.extensionUri,
+    context,
+    outputChannel,
+    statusBarItem
   );
 
-  // Register enhanced commands
-  context.subscriptions.push(
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.sendQuery', () => {
-      vscode.window.showInformationMessage('Enhanced Send Query command executed');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.startStreamingServer', async () => {
-      try {
-        const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!workspacePath) {
-          vscode.window.showErrorMessage('No workspace folder is open. Please open a folder first.');
-          return;
-        }
-
-        outputChannel.appendLine(`[SERVER] Starting streaming server from workspace: ${workspacePath}`);
-
-        const terminal = vscode.window.createTerminal('Enhanced Streaming Agent Server');
-        terminal.sendText(`cd "${workspacePath}"`);
-        terminal.sendText(`echo "Starting streaming server from: $(pwd)"`);
-        terminal.sendText(`python3 system/coding_agent/agent_streaming_api.py`);
-        terminal.show();
-
-        outputChannel.appendLine(`[SERVER] Terminal commands sent to start server from ${workspacePath}`);
-        vscode.window.showInformationMessage('Enhanced TRUE streaming agent server started from workspace');
-
-        setTimeout(() => {
-          provider.refreshEnhancedStreamingConnection();
-        }, 3000);
-      } catch (error) {
-        const errorMessage = `Failed to start enhanced streaming server: ${error instanceof Error ? error.message : String(error)}`;
-        outputChannel.appendLine(`[SERVER ERROR] ${errorMessage}`);
-        vscode.window.showErrorMessage(errorMessage);
-      }
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.refreshConnection', async () => {
-      await provider.refreshEnhancedStreamingConnection();
-      vscode.window.showInformationMessage('Enhanced connection status refreshed');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.showOutput', () => {
-      outputChannel.show();
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.askAgent', async () => {
-      const query = await vscode.window.showInputBox({
-        prompt: 'What would you like to ask the enhanced agent?',
-        placeHolder: 'Enter your question or request...'
-      });
-
-      // if (query) {
-      //   await provider.handleEnhancedQuery(query, true);
-      // }
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.collectContext', async () => {
-      outputChannel.appendLine('[COMMAND] Manually collecting workspace context...');
-      vscode.window.showInformationMessage('Context collection initiated');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.clearState', async () => {
-      outputChannel.appendLine('[COMMAND] Clearing enhanced streaming state...');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.exportLogs', async () => {
-      outputChannel.appendLine('[COMMAND] Exporting enhanced streaming logs...');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.refreshContext', async () => {
-      outputChannel.appendLine('[COMMAND] Refreshing workspace context...');
-      vscode.window.showInformationMessage('Workspace context refresh initiated');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.exportContext', async () => {
-      outputChannel.appendLine('[COMMAND] Exporting workspace context...');
-      vscode.window.showInformationMessage('Workspace context export initiated');
-    }),
-
-    vscode.commands.registerCommand('enhanced-assistant-sidebar.openWorkspace', async () => {
-      const result = await vscode.window.showOpenDialog({
-        canSelectFiles: false,
-        canSelectFolders: true,
-        canSelectMany: false,
-        openLabel: 'Open Workspace Folder'
-      });
-
-      if (result && result[0]) {
-        await vscode.commands.executeCommand('vscode.openFolder', result[0]);
-      }
-    })
+  // Register the provider
+  const view = vscode.window.registerWebviewViewProvider(
+    EnhancedAssistantViewProvider.viewType,
+    provider
   );
 
-  context.subscriptions.push({
-    dispose: async () => {
-      await provider.cleanup();
-    }
+  context.subscriptions.push(view);
+  context.subscriptions.push(statusBarItem);
+
+  // Register commands
+  const refreshCommand = vscode.commands.registerCommand('enhancedAssistant.refresh', () => {
+    provider.refreshEnhancedStreamingConnection();
   });
 
-  context.subscriptions.push(outputChannel, statusBarItem);
+  const collectContextCommand = vscode.commands.registerCommand('enhancedAssistant.collectContext', () => {
+    provider.collectContextManually();
+  });
 
-  console.log('Enhanced Assistant Sidebar extension activated with robust workspace handling');
+  const refreshWorkspaceCommand = vscode.commands.registerCommand('enhancedAssistant.refreshWorkspace', () => {
+    provider.refreshWorkspaceContext();
+  });
+
+  context.subscriptions.push(refreshCommand, collectContextCommand, refreshWorkspaceCommand);
+
+  outputChannel.appendLine('[Extension] Enhanced Assistant extension activated');
 }
 
 export function deactivate() {

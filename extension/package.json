@@ -28,7 +28,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./out/extension_enhanced_streaming.js",
+  "main": "./out/extension_streaming.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -267,6 +267,10 @@
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^15.6.1",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "merkletreejs": "^0.5.2",
+    "piscina": "^4.1.0",
+    "axios": "^1.6.0",
+    "chonkie": "0.2.5"
   }
 }

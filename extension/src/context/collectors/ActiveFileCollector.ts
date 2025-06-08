@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { CacheManager } from '../storage/CacheManager';
 import { ActiveFileCollectorData, CollectorMetadata } from '../types/collectors';
 import { ContextData } from '../types/context';
 import { BaseCollector } from './base/BaseCollector';
@@ -11,7 +10,7 @@ export class ActiveFileCollector extends BaseCollector {
 
     constructor(
         outputChannel: vscode.OutputChannel,
-        cacheManager: CacheManager,
+        cacheManager: any, // Keep parameter but don't use it
         workspaceId: string
     ) {
         super(
@@ -19,10 +18,10 @@ export class ActiveFileCollector extends BaseCollector {
             'active_file',
             10.0, // High weight - active file is very important
             outputChannel,
-            cacheManager,
+            cacheManager, // Pass through to base class
             workspaceId,
             {
-                cacheTimeout: 60, // 1 minute cache - active file changes frequently
+                cacheTimeout: 0, // Disable caching by setting timeout to 0
                 options: {
                     includeSurroundingLines: 20,
                     analyzeContext: true,
@@ -67,7 +66,6 @@ export class ActiveFileCollector extends BaseCollector {
             // Gather cursor and selection context (fix cursor position)
             const cursorContext = await this.gatherCursorContext(activeEditor, document);
 
-
             // Gather viewport context
             const viewportContext = await this.gatherViewportContext(activeEditor, document);
 
@@ -91,9 +89,6 @@ export class ActiveFileCollector extends BaseCollector {
                 }
             );
 
-            // Track this file access
-            await this.trackFileAccess(document);
-
             return contextData;
 
         } catch (error) {
@@ -109,7 +104,7 @@ export class ActiveFileCollector extends BaseCollector {
             version: '1.0.0',
             dependencies: ['vscode.window', 'vscode.workspace'],
             configurable: true,
-            cacheable: true,
+            cacheable: false, // Explicitly mark as not cacheable
             priority: 10
         };
     }
@@ -377,19 +372,6 @@ export class ActiveFileCollector extends BaseCollector {
     }
 
     /**
-     * Track file access for analytics
-     */
-    private async trackFileAccess(document: vscode.TextDocument): Promise<void> {
-        // This would integrate with VSCodeStorage to track file access patterns
-        // For now, just log the access
-        this.debug(`Tracking access to file: ${document.uri.fsPath}`);
-
-        // Note: Actual storage of file access with cursor line content happens in ContextManager
-        // when the context session is stored. The cursor line content is already captured
-        // in the cursor context and will be passed through the ProcessedContext.
-    }
-
-    /**
      * Set up event listeners for real-time updates
      */
     private setupEventListeners(): void {
@@ -398,7 +380,6 @@ export class ActiveFileCollector extends BaseCollector {
             vscode.window.onDidChangeActiveTextEditor(editor => {
                 if (editor && editor !== this.lastActiveEditor) {
                     this.lastActiveEditor = editor;
-                    this.invalidateCache();
                     this.debug('Active editor changed');
                 }
             })
@@ -411,7 +392,6 @@ export class ActiveFileCollector extends BaseCollector {
                 if (!this.lastCursorPosition ||
                     !newPosition.isEqual(this.lastCursorPosition)) {
                     this.lastCursorPosition = newPosition;
-                    this.invalidateCache();
                     this.debug('Cursor position changed');
                 }
             })
@@ -422,7 +402,6 @@ export class ActiveFileCollector extends BaseCollector {
             vscode.workspace.onDidChangeTextDocument(event => {
                 const activeEditor = vscode.window.activeTextEditor;
                 if (activeEditor && event.document === activeEditor.document) {
-                    this.invalidateCache();
                     this.debug('Active document changed');
                 }
             })
@@ -433,7 +412,6 @@ export class ActiveFileCollector extends BaseCollector {
             vscode.workspace.onDidSaveTextDocument(document => {
                 const activeEditor = vscode.window.activeTextEditor;
                 if (activeEditor && document === activeEditor.document) {
-                    this.invalidateCache();
                     this.debug('Active document saved');
                 }
             })
@@ -441,42 +419,10 @@ export class ActiveFileCollector extends BaseCollector {
     }
 
     /**
-     * Invalidate cache when active file context changes
+     * Override shouldUseCache to always return false
      */
-    private invalidateCache(): void {
-        const cacheKey = this.generateCacheKey();
-        this.cacheManager.delete(`ctx:${this.workspaceId}:${this.type}:${cacheKey}`);
-    }
-
-    /**
-     * Generate cache key based on file and cursor position
-     */
-    protected generateCacheKey(): string {
-        const activeEditor = vscode.window.activeTextEditor;
-        if (!activeEditor) {
-            return 'no_active_file';
-        }
-
-        const document = activeEditor.document;
-        const position = activeEditor.selection.active;
-        const hash = this.hashString(
-            `${document.uri.fsPath}_${position.line}_${position.character}_${document.version}`
-        );
-
-        return `active_file_${hash}`;
-    }
-
-    /**
-     * Simple string hashing for cache keys
-     */
-    private hashString(str: string): string {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-        return Math.abs(hash).toString(36);
+    protected shouldUseCache(): boolean {
+        return false;
     }
 
     /**

@@ -47,7 +47,7 @@ export class GitContextCollector extends BaseCollector {
             cacheManager,
             workspaceId,
             {
-                cacheTimeout: 600, // 10 minutes cache - git changes frequently during development
+                cacheTimeout: 0, // Disable caching by setting timeout to 0
                 options: {
                     maxCommits: 50,
                     maxDiffLines: 1000,
@@ -62,6 +62,11 @@ export class GitContextCollector extends BaseCollector {
                 }
             }
         );
+    }
+
+    // Override to always return false - we never want to use cache
+    protected shouldUseCache(): boolean {
+        return false;
     }
 
     async canCollect(): Promise<boolean> {
@@ -130,7 +135,7 @@ export class GitContextCollector extends BaseCollector {
             version: '1.0.0',
             dependencies: ['git', 'vscode.workspace'],
             configurable: true,
-            cacheable: true,
+            cacheable: false, // Set cacheable to false
             priority: 6
         };
     }
@@ -305,7 +310,7 @@ export class GitContextCollector extends BaseCollector {
     }
 
     /**
-     * Get diff information using VSCode's Git API
+     * Get diff information using git commands
      */
     private async getDiffInfo(workspacePath: string): Promise<GitCollectorData['diff']> {
         const diff: GitCollectorData['diff'] = {
@@ -315,66 +320,29 @@ export class GitContextCollector extends BaseCollector {
         };
 
         try {
-            // Try to use VSCode's git extension API first
-            const gitExtension = vscode.extensions.getExtension('vscode.git');
-            if (gitExtension?.isActive) {
-                const gitApi = gitExtension.exports.getAPI(1);
-                const repository = gitApi.repositories.find((repo: any) =>
-                    repo.rootUri.fsPath === workspacePath || workspacePath.startsWith(repo.rootUri.fsPath)
-                );
+            // Get staged changes
+            diff.stagedChanges = await this.getStagedDiffFromCommand(workspacePath);
 
-                if (repository) {
-                    // Get staged changes
-                    const stagedFiles = repository.state.indexChanges;
-                    if (stagedFiles.length > 0) {
-                        const stagedDiffs = await Promise.all(
-                            stagedFiles.slice(0, 5).map(async (change: any) => {
-                                try {
-                                    return await this.getFileDiffFromGit(workspacePath, change.uri.fsPath, true);
-                                } catch {
-                                    return `${change.uri.fsPath}: ${change.status}`;
-                                }
-                            })
-                        );
-                        diff.stagedChanges = stagedDiffs.join('\n\n');
-                    }
+            // Get unstaged changes
+            diff.unstagedChanges = await this.getUnstagedDiffFromCommand(workspacePath);
 
-                    // Get unstaged changes
-                    const unstagedFiles = repository.state.workingTreeChanges;
-                    if (unstagedFiles.length > 0) {
-                        const unstagedDiffs = await Promise.all(
-                            unstagedFiles.slice(0, 5).map(async (change: any) => {
-                                try {
-                                    return await this.getFileDiffFromGit(workspacePath, change.uri.fsPath, false);
-                                } catch {
-                                    return `${change.uri.fsPath}: ${change.status}`;
-                                }
-                            })
-                        );
-                        diff.unstagedChanges = unstagedDiffs.join('\n\n');
-                    }
+            // Get conflict files
+            try {
+                const conflictResult = await this.executeGitCommand({
+                    command: 'git',
+                    args: ['diff', '--name-only', '--diff-filter=U'],
+                    cwd: workspacePath
+                });
 
-                    // Find conflict files
-                    diff.conflictFiles = repository.state.mergeChanges.map((change: any) => change.uri.fsPath);
+                if (conflictResult.stdout.trim()) {
+                    diff.conflictFiles = conflictResult.stdout.trim().split('\n');
                 }
-            }
-
-            // Fallback to git commands if VSCode API doesn't work
-            if (!diff.stagedChanges && !diff.unstagedChanges) {
-                diff.stagedChanges = await this.getStagedDiffFromCommand(workspacePath);
-                diff.unstagedChanges = await this.getUnstagedDiffFromCommand(workspacePath);
+            } catch (conflictError) {
+                this.debug(`Failed to get conflict files: ${conflictError}`);
             }
 
         } catch (error) {
             this.debug(`Failed to get diff info: ${error}`);
-
-            // Final fallback to basic git commands
-            try {
-                diff.stagedChanges = await this.getStagedDiffFromCommand(workspacePath);
-                diff.unstagedChanges = await this.getUnstagedDiffFromCommand(workspacePath);
-            } catch (fallbackError) {
-                this.debug(`Fallback diff also failed: ${fallbackError}`);
-            }
         }
 
         return diff;
@@ -434,29 +402,6 @@ export class GitContextCollector extends BaseCollector {
             return this.truncateDiff(detailedResult.stdout, this.config.options.maxDiffLines || 1000);
         } catch (error) {
             this.debug(`Failed to get unstaged diff: ${error}`);
-            return '';
-        }
-    }
-
-    /**
-     * Get file diff using git command
-     */
-    private async getFileDiffFromGit(workspacePath: string, filePath: string, staged: boolean): Promise<string> {
-        try {
-            const relativePath = path.relative(workspacePath, filePath);
-            const args = staged
-                ? ['diff', '--cached', '--unified=3', relativePath]
-                : ['diff', '--unified=3', relativePath];
-
-            const result = await this.executeGitCommand({
-                command: 'git',
-                args,
-                cwd: workspacePath
-            });
-
-            return result.stdout;
-        } catch (error) {
-            this.debug(`Failed to get file diff for ${filePath}: ${error}`);
             return '';
         }
     }
@@ -717,29 +662,5 @@ export class GitContextCollector extends BaseCollector {
                 reject(new Error('Git command timed out'));
             }, 30000);
         });
-    }
-
-    /**
-     * Generate cache key based on git state
-     */
-    protected generateCacheKey(): string {
-        // Cache key should change when git state changes
-        const workspacePath = this.getWorkspacePath();
-        const timestamp = Math.floor(Date.now() / (60 * 1000)); // Change every minute
-
-        return `git_context_${this.hashString(workspacePath)}_${timestamp}`;
-    }
-
-    /**
-     * Simple string hashing for cache keys
-     */
-    private hashString(str: string): string {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-        return Math.abs(hash).toString(36);
     }
 } 

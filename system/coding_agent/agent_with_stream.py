@@ -185,6 +185,8 @@ class AnthropicStreamingAgent:
                             system_text += block.get("text", "")
                     system_content = system_text
                 break
+            
+        print(f"System content: {system_content}")
 
         # Prepare normal messages, skipping system message
         anthropic_messages = []

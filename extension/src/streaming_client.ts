@@ -50,6 +50,7 @@ interface QueryRequest {
     workspace_path: string;
     system_info?: SystemInfo;
     active_file_context?: ActiveFileContext;
+    open_files_context?: any[];
     context_mentions?: string[];
 }
 
@@ -146,12 +147,11 @@ export class EnhancedStreamingClient {
             // Reset state for new query
             this.resetState();
 
-            // Get system information and add to request
-            const systemInfo = await getSystemInfo();
-            const enhancedRequest = {
-                ...request,
-                system_info: systemInfo
-            };
+            // Get system information and add to request if not already provided
+            if (!request.system_info) {
+                const systemInfo = await getSystemInfo();
+                request.system_info = systemInfo;
+            }
 
             // Prepare headers with workspace ID if available from vscode workspace
             const requestHeaders = {
@@ -160,11 +160,6 @@ export class EnhancedStreamingClient {
                 ...headers // Include any additional headers passed in (including X-Workspace-ID)
             };
 
-            // Workspace ID should be provided in headers for new SQLite-based context system
-            if (!requestHeaders['X-Workspace-ID']) {
-                this.appendToOutput(`⚠️ No workspace ID provided - agent will have limited context`);
-            }
-
             // Show initial status
             this.updateStatus("🚀 Starting TRUE streaming...");
             this.appendToOutput(`\n=== NEW QUERY ===`);
@@ -172,16 +167,13 @@ export class EnhancedStreamingClient {
             if (request.active_file_context?.relativePath) {
                 this.appendToOutput(`Active file: ${request.active_file_context.relativePath}`);
             }
-            this.appendToOutput(`Workspace: ${systemInfo.workspacePath}`);
-            this.appendToOutput(`Platform: ${systemInfo.platform} ${systemInfo.osVersion}`);
-            this.appendToOutput(`Shell: ${systemInfo.defaultShell}`);
-            this.appendToOutput(`Timestamp: ${new Date().toLocaleString()}`);
-
-            // Log workspace ID if present
-            if (requestHeaders['X-Workspace-ID']) {
-                this.appendToOutput(`Workspace ID: ${requestHeaders['X-Workspace-ID']}`);
+            if (request.open_files_context && request.open_files_context.length > 0) {
+                this.appendToOutput(`Open files: ${request.open_files_context.length} files`);
             }
-
+            this.appendToOutput(`Workspace: ${request.system_info?.workspacePath || 'unknown'}`);
+            this.appendToOutput(`Platform: ${request.system_info?.platform} ${request.system_info?.osVersion}`);
+            this.appendToOutput(`Shell: ${request.system_info?.defaultShell}`);
+            this.appendToOutput(`Timestamp: ${new Date().toLocaleString()}`);
             this.appendToOutput(`=================\n`);
 
             // Send initial message to webview with system info
@@ -190,13 +182,14 @@ export class EnhancedStreamingClient {
                     command: 'streamStart',
                     query: request.query,
                     activeFile: request.active_file_context?.relativePath,
-                    systemInfo: systemInfo,
+                    openFilesCount: request.open_files_context?.length || 0,
+                    systemInfo: request.system_info,
                     state: this.currentState
                 });
             }
 
             // Use axios with responseType 'stream' for TRUE streaming
-            const response = await axios.post(`${this.baseUrl}/stream`, enhancedRequest, {
+            const response = await axios.post(`${this.baseUrl}/stream`, request, {
                 headers: requestHeaders,
                 responseType: 'stream',
                 timeout: 300000 // 5 minutes timeout for long operations

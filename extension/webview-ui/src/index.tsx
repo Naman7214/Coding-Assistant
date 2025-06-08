@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import SimpleApp from './SimpleApp';
+import App from './App';
 
 // Declare vscode for TypeScript
 declare global {
@@ -14,4 +14,4 @@ if (!container) {
 }
 
 const root = createRoot(container);
-root.render(<SimpleApp />); 
+root.render(<App />); 

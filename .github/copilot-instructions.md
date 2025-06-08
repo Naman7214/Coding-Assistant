@@ -1,15 +1,86 @@
 Never write the test file, readme.md, guide.md, what you have done.md etc., or scripts to run the code written by you at the end of the code generation. never write the testing logic never give the summary of what you have done so far.
 The architecture should be scalable, maintainable, and easy to understand. The code should be modular and reusable. don't stuff the single file with too many functions, classes, or methods.
-This is the coding agent extension, like your cursor. 
+This is the coding agent extension, like cursor Agent. 
 
-Frontend: extension/webview-ui, it's a chat interface that streams the response from the agent. the chat interface should be same like cursor agent have that shows the agent thinking , which tool is agent using.
+<ARCHITECTURE>
+Layer 1 : UI react webview UI (part of the extension) (Client Side)
+* minimal cursor IDE like UI that shows the : query → thinking of agent → tool → thinking of agent → tool ……… → final response.
+* user enter the query + have option to attach some context with @ symbol like can refer to the file in the codebase, refer to the gitcontext.
+* available context with @ sign : all files, git context, Repo Map,Project Structure, linter error in current file.
+* can upload the image also
+* here the agent's response, thinking, tool use is streamed and permission taken before the terminal command use and until the user give the permission for the run terminal command the whole flow should be on hold position
+Layer 2 : VScode Extension (Client Side)
+* send the user request to the coding agent running in the server side with attaching the must send context and context user mentioned with the @ on UI side.
+* All the context collectors of the client side are written here
+* have the caching logic use node-caching for the context.
+* have one persistent terminal this terminal bridge is used by all the tools from the backend who needs terminal access this terminal bridge provides the access of the user terminal in server.
+* provides the context API for the context which are collected on the client side. if cache found then send from the cache otherwise collect context and then send the context.
+* have the event listeners for to invalidate and recache some context
+* show the diff of the code edits streamed by the apply and reapply tool in green and red color.
+Layer 3 : Coding agent (Server Side)
+* coding agent running in the server side this is the agent have access of tools hosted in the mcp server.
+* agent is anthropic’s tool calling in the loop
+* it recursively calls the tool until get the final response or the depth reached.
+* if the agent requires the run terminal command tool then first ask for the permission from the user if user approved then continue otherwise continue without the command execution.
+* streams thinking, tool call, response to the extension UI
+* if the apply or reapply tools are required then directly send call the fastapi tool from the agent and stream the get streamed response from it and apply the changes in the editor. after the apply or reapply tool the linter error is checked and if present then the error is sent to the agent then agent generate the new code and again use the apply or reapply tool.
+Layer 4 : Model context protocol (Server Side)
+* MCP provides the unified way for tool use. written using the fastMCP
+* MCP send the request to the tool endpoint
+* all the tools which are in server side + context from the client side are also invoked from here if the agent needs some context from the client side then that’s are defined as the tool like gitcontex, repo map etc. so their context API is invoked and context given back to the agent.
+Layer 5 : Server Side tools FastAPI backend (Server Side)
+* all server side tools are implemented in fastAPI.
+* use the terminal bridge from the extension when requires the terminal of the user.
+</ARCHITECTURE>
 
-extension : extension/src, the extension layer gets the query from the frontend, then attaches some must-have context and has an API to provide other context to the agent on demand; it has a persistent terminal
+<code_base_indexing>
+build the merkle tree of the codebase in client side vscode extension and then chunk them using the chonkie te chunked and for each chunk below is the schema :
+{
+  chunk_hash: String,
+  content: String, 
+  obfuscated_path: String,
+  start_line: Number,
+  end_line: Number,
+  language: String,           // "python", "javascript" - helps with embedding context
+  chunk_type: String,         // "function", "class", "import", "method", "variables" etc  - minimal semantic info
+  git_branch: String,         // current git branch
+  token_count : number
+}
+then in server side send all the chunks as single json file compressed using the Gzipped or other best compression algorithm. then on the server side calculate the embedding of chunks and store the hash and embedding in the monogodb database. then store the embedding and metadata in pinecone vector database.
+now for every 10 minutes the new merkle tree is built and compared with the previous one and files whose hash changed are re chunked and that chunks are sent to the server side and server first checks if the chunk's hash is already present in the database then it skips the chunk otherwise it calculates the embedding and stores the chunk in the database.
+if the git branch is changed then the whole codebase is reindexed and sent to the server side. and then server check of the hash is already present in the database then use that embedding otherwise it calculates the embedding and stores the chunk in the database. 
 
-Coding agent: system/coding_agent. This is the coding agent that uses the anthropic tool calling and does the recursive tool calling and asks for the permission for the terminal commands. It also streams the response.
 
-MCP server : system/mcp_server; this hosts the 11 tools useful for the agent.
-
-Tools : system/backend, the actual implementaion of the 11 tools in the form of the fastapi which are hosted in the MCP server
+naming logic :
+hashed workspace path is the unique key, in the mongodb the new collection is created with the hashed workspace path name, then inside that all the chunks are stored of that workspace.
+for the pinecone the the one index is created with the name as the hashed workspace path,
+then inside that the namespace name is the git branch to separate the chunks while semantic search.
+in both case if git does not exist then the git_branch = default
+</code_base_indexing>
 
 The final AIM is to build the intelligent coding agent extension, like your cursor with smart context.
+
+# Context and Tools
+
+| Client Side                                                        | Server Side        | Must given                                   | On Demand                                |
+| ------------------------------------------------------------------ | ------------------ | -------------------------------------------- | ---------------------------------------- |
+| ActiveFile Context                                                 |
+| shouldn't be cached given fresh context                             | web search         | System Information in system prompt of Agent | those which are not in Must Given column |
+| System Information one time only                                   |
+| cached for the 24 hour and only recached when the workspace change | Apply              | ActiveFile Context with every user query     |                                          |
+| Project structure:                                                 |
+| cached and reacached when the file, directory created or deleted   | ReApply            | Recent Edits with every user query           |                                          |
+| Linter Error                                                       |
+| shouldn't be cached                                                 | codebase search    |                                              |                                          |
+| Recent Edits                                                       |
+| shouldn't be cached                                                 | read file          |                                              |                                          |
+| GIt Context                                                        |
+| shouldn't be cached                                                 | run terminal cmd   |                                              |                                          |
+| List of Open Files in workspace                                    |
+| shouldn't be cached                                                 | grep search        |                                              |                                          |
+| Repo Map                                                           |
+| shouldn’t be cached                                                | search and replace |                                              |                                          |
+| Image                                                              |
+| shouldn't be cached                                                 | file search        |                                              |                                          |
+| List Directory                                                     |
+| shouldn't be cached                                                 | delete file        |                                              |                                          |

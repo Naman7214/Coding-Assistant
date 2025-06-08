@@ -72,7 +72,7 @@ export class ProblemsCollector extends BaseCollector {
             cacheManager,
             workspaceId,
             {
-                cacheTimeout: 120, // 2 minutes cache - problems change moderately
+                cacheTimeout: 0, // Disable caching by setting timeout to 0
                 options: {
                     includeAllSeverities: true,
                     includeRelatedInformation: true,
@@ -109,7 +109,7 @@ export class ProblemsCollector extends BaseCollector {
      */
     setTargetFilePath(filePath?: string): void {
         this.requestedFilePath = filePath;
-        this.invalidateCache(); // Clear cache when target changes
+        // No need to invalidate cache as caching is disabled
     }
 
     async collect(): Promise<ContextData | null> {
@@ -175,9 +175,16 @@ export class ProblemsCollector extends BaseCollector {
             version: '1.0.0',
             dependencies: ['vscode.languages', 'vscode.workspace'],
             configurable: true,
-            cacheable: true,
+            cacheable: false, // Mark as not cacheable
             priority: 8
         };
+    }
+
+    /**
+     * Override the shouldUseCache method to always return false
+     */
+    protected shouldUseCache(): boolean {
+        return false;
     }
 
     /**
@@ -425,55 +432,78 @@ export class ProblemsCollector extends BaseCollector {
                 if (this.config.options.debug) {
                     this.debug(`Diagnostics changed for ${event.uris.length} files`);
                 }
-                this.invalidateCache();
+                // No caching operations needed
             })
         );
 
         // Listen for workspace changes
         this.disposables.push(
             vscode.workspace.onDidOpenTextDocument(() => {
-                this.invalidateCache();
+                // No caching operations needed
             })
         );
 
         this.disposables.push(
             vscode.workspace.onDidCloseTextDocument(() => {
-                this.invalidateCache();
+                // No caching operations needed
             })
         );
     }
 
     /**
-     * Invalidate cache when problems change
+     * Override the base collectSafely method to bypass the cache
+     * but still retain the retry, error handling, and other functionality
      */
-    private invalidateCache(): void {
-        const cacheKey = this.generateCacheKey();
-        const fullCacheKey = `ctx:${this.workspaceId}:${this.type}:${cacheKey}`;
-        this.cacheManager.delete(fullCacheKey);
-    }
-
-    /**
-     * Generate cache key including requested file path
-     */
-    protected generateCacheKey(): string {
-        const baseKey = `${this.name}_${this.type}`;
-        if (this.requestedFilePath) {
-            return `${baseKey}_${this.hashString(this.requestedFilePath)}`;
+    async collectSafely(): Promise<ContextData | null> {
+        if (!this.config.enabled || this.isDisposed) {
+            return null;
         }
-        return baseKey;
-    }
 
-    /**
-     * Simple hash function for cache keys
-     */
-    private hashString(str: string): string {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32-bit integer
+        const startTime = Date.now();
+        let attempt = 0;
+        let lastError: Error | null = null;
+
+        while (attempt < this.config.maxRetries) {
+            try {
+                // Check if collection is possible
+                if (!(await this.canCollect())) {
+                    this.outputChannel.appendLine(`[${this.name}] Cannot collect at this time`);
+                    return null;
+                }
+
+                // Perform collection - directly call collect() without checking cache
+                const data = await this.collect();
+
+                if (data) {
+                    // The base class will handle performance metrics
+                    this.outputChannel.appendLine(
+                        `[${this.name}] Collected successfully (${Date.now() - startTime}ms)`
+                    );
+                    return data;
+                }
+
+                return null;
+
+            } catch (error) {
+                lastError = error as Error;
+                attempt++;
+
+                this.outputChannel.appendLine(
+                    `[${this.name}] Collection failed (attempt ${attempt}/${this.config.maxRetries}): ${error}`
+                );
+
+                if (attempt < this.config.maxRetries) {
+                    // Wait before retry with exponential backoff
+                    await this.sleep(Math.pow(2, attempt) * 100);
+                }
+            }
         }
-        return Math.abs(hash).toString(36);
+
+        this.outputChannel.appendLine(
+            `[${this.name}] Collection failed after ${this.config.maxRetries} attempts: ${lastError?.message}`
+        );
+
+        return null;
     }
 
     dispose(): void {

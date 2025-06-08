@@ -5,18 +5,8 @@ import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { PersistentTerminalManager } from '../bridge/PersistentTerminalManager';
-import { ProjectStructureCollector } from '../context/collectors/ProjectStructureCollector';
 import { ContextManager } from '../context/ContextManager';
-import { VSCodeStorage } from '../context/storage/VSCodeStorage';
 
-interface StreamingChunk {
-    id: string;
-    type: 'workspace' | 'activeFile' | 'openFiles' | 'projectStructure' | 'gitContext' | 'problems' | 'complete';
-    data: any;
-    chunkIndex: number;
-    totalChunks: number;
-    workspaceId: string;
-}
 
 interface TerminalRequest {
     command: string;
@@ -54,7 +44,6 @@ export class ContextApiServer implements vscode.Disposable {
     private terminalManager: PersistentTerminalManager;
 
     constructor(
-        private storage: VSCodeStorage,
         private contextManager: ContextManager,
         outputChannel: vscode.OutputChannel
     ) {
@@ -106,7 +95,6 @@ export class ContextApiServer implements vscode.Disposable {
         // File content endpoint (on-demand)
         this.app.get('/api/workspace/:workspaceId/files/content', this.handleFileContent.bind(this));
 
-
         // Terminal Bridge API routes
         // Main terminal bridge endpoint - single endpoint for all operations
         this.app.post('/api/terminal/execute', this.handleTerminalRequest.bind(this));
@@ -129,7 +117,6 @@ export class ContextApiServer implements vscode.Disposable {
             res.json({
                 success: true,
                 status: 'healthy',
-                storage: this.storage.initialized,
                 contextManager: this.contextManager ? 'ready' : 'not_ready',
                 terminalBridge: {
                     ready: true,
@@ -153,127 +140,46 @@ export class ContextApiServer implements vscode.Disposable {
     }
 
 
-    private async streamContextChunks(res: express.Response, workspaceId: string, context: any): Promise<void> {
-        const chunks = this.createContextChunks(workspaceId, context);
-
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            this.sendSSEEvent(res, 'chunk', chunk);
-
-            // Small delay between chunks to prevent overwhelming
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
-    }
-
-    private createContextChunks(workspaceId: string, context: any): StreamingChunk[] {
-        const chunks: StreamingChunk[] = [];
-        let chunkIndex = 0;
-
-        // Chunk 1: Workspace metadata (always small)
-        chunks.push({
-            id: `${workspaceId}-workspace`,
-            type: 'workspace',
-            data: context.workspace,
-            chunkIndex: chunkIndex++,
-            totalChunks: 0, // Will be updated later
-            workspaceId
-        });
-
-        // Chunk 2: Active file (can be large due to content)
-        if (context.activeFile) {
-            const activeFileChunk = { ...context.activeFile };
-
-            // If content is too large, truncate or reference it
-            if (activeFileChunk.content && activeFileChunk.content.length > 100000) {
-                activeFileChunk.contentTruncated = true;
-                activeFileChunk.contentLength = activeFileChunk.content.length;
-                activeFileChunk.content = activeFileChunk.content.substring(0, 100000) + '\n\n... [Content truncated]';
-            }
-
-            chunks.push({
-                id: `${workspaceId}-activeFile`,
-                type: 'activeFile',
-                data: activeFileChunk,
-                chunkIndex: chunkIndex++,
-                totalChunks: 0,
-                workspaceId
-            });
-        }
-
-        // Chunk 3: Open files (metadata only, no content)
-        chunks.push({
-            id: `${workspaceId}-openFiles`,
-            type: 'openFiles',
-            data: context.openFiles.map((file: any) => ({
-                ...file,
-                content: undefined // Remove content to reduce size
-            })),
-            chunkIndex: chunkIndex++,
-            totalChunks: 0,
-            workspaceId
-        });
-
-        // Chunk 4: Project structure
-        chunks.push({
-            id: `${workspaceId}-projectStructure`,
-            type: 'projectStructure',
-            data: context.projectStructure,
-            chunkIndex: chunkIndex++,
-            totalChunks: 0,
-            workspaceId
-        });
-
-        // Chunk 5: Git context
-        chunks.push({
-            id: `${workspaceId}-gitContext`,
-            type: 'gitContext',
-            data: context.gitContext,
-            chunkIndex: chunkIndex++,
-            totalChunks: 0,
-            workspaceId
-        });
-
-        // Chunk 6: Problems context
-        if (context.problemsContext) {
-            chunks.push({
-                id: `${workspaceId}-problems`,
-                type: 'problems',
-                data: context.problemsContext,
-                chunkIndex: chunkIndex++,
-                totalChunks: 0,
-                workspaceId
-            });
-        }
-
-        // Update total chunks count
-        const totalChunks = chunks.length;
-        chunks.forEach(chunk => {
-            chunk.totalChunks = totalChunks;
-        });
-
-        return chunks;
-    }
-
-    private sendSSEEvent(res: express.Response, event: string, data: any): void {
-        const eventData = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-        res.write(eventData);
-    }
-
-
     private async handleFileContent(req: express.Request, res: express.Response): Promise<void> {
-        const { workspaceId } = req.params;
-        const filePaths = req.query.paths as string | string[];
-        const pathsArray = Array.isArray(filePaths) ? filePaths : [filePaths];
+        const { paths, workspaceId } = req.query;
+
+        if (!paths) {
+            res.status(400).json({
+                success: false,
+                error: 'File paths are required'
+            });
+            return;
+        }
+
+        const pathsArray = Array.isArray(paths) ? paths : [paths];
 
         try {
-            const files = await this.storage.getFileStats(workspaceId, 1000);
-            const requestedFiles = files.filter(file =>
-                pathsArray.some(path => file.path.includes(path))
+            // Use the file system directly to get the file contents
+            const fileContents = await Promise.all(
+                pathsArray.map(async (filePath) => {
+                    try {
+                        const uri = vscode.Uri.file(filePath as string);
+                        const content = await vscode.workspace.fs.readFile(uri);
+                        const stats = await vscode.workspace.fs.stat(uri);
+
+                        return {
+                            path: filePath,
+                            content: content.toString(),
+                            size: stats.size,
+                            lastModified: new Date(stats.mtime).toISOString()
+                        };
+                    } catch (err) {
+                        return {
+                            path: filePath,
+                            error: err instanceof Error ? err.message : String(err)
+                        };
+                    }
+                })
             );
 
             res.json({
                 success: true,
-                files: requestedFiles,
+                files: fileContents,
                 workspaceId
             });
 
@@ -298,6 +204,7 @@ export class ContextApiServer implements vscode.Disposable {
                 this.contextManager.setProblemsTargetFile(filePath);
             }
 
+            // Use direct collection without cache
             const result = await this.contextManager.collectContext({
                 collectors: ['ProblemsCollector'],
                 options: {
@@ -308,17 +215,34 @@ export class ContextApiServer implements vscode.Disposable {
                     respectGitignore: true,
                     maxDepth: 10,
                     parallel: false,
-                    useCache: true
+                    useCache: false // Don't use cache as requested
                 },
                 timeout: 10000,
                 retryCount: 1
             });
 
+            // Extract problems data from collector results
+            let problemsContext = null;
+
+            // Safely extract data
+            if (result.results && Array.isArray(result.results)) {
+                for (const r of result.results) {
+                    if (r.collector === 'ProblemsCollector' && r.data && r.data.data) {
+                        problemsContext = r.data.data;
+                        break;
+                    }
+                }
+            }
+
+            // Add debug logging
+            const hasData = problemsContext !== null;
+            this.outputChannel.appendLine(`[ContextAPI] Problems context result: ${hasData ? 'Success' : 'Empty or null'}`);
+
             res.json({
                 success: true,
                 type: 'problems',
                 workspaceId,
-                data: result.context?.problemsContext || null,
+                data: problemsContext,
                 timestamp: new Date().toISOString()
             });
 
@@ -334,11 +258,13 @@ export class ContextApiServer implements vscode.Disposable {
 
     private async handleProjectStructureContext(req: express.Request, res: express.Response): Promise<void> {
         const maxDepth = parseInt(req.query.maxDepth as string) || 6;
+        // Workspace ID is optional, only use if provided
         const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
 
         try {
             this.outputChannel.appendLine(`[ContextAPI] Getting project structure context with maxDepth: ${maxDepth}`);
 
+            // Project structure can use cache as specified by user
             const result = await this.contextManager.collectContext({
                 collectors: ['ProjectStructureCollector'],
                 options: {
@@ -349,17 +275,33 @@ export class ContextApiServer implements vscode.Disposable {
                     respectGitignore: true,
                     maxDepth,
                     parallel: false,
-                    useCache: true
+                    useCache: true // Can use cache for project structure
                 },
                 timeout: 15000,
                 retryCount: 1
             });
 
+            // Extract project structure data from collector results
+            let projectStructure = null;
+
+            // Safely extract data
+            if (result.results && Array.isArray(result.results)) {
+                for (const r of result.results) {
+                    if (r.collector === 'ProjectStructureCollector' && r.data && r.data.data) {
+                        projectStructure = r.data.data;
+                        break;
+                    }
+                }
+            }
+
+            // Add debug logging
+            this.outputChannel.appendLine(`[ContextAPI] Project structure result: ${projectStructure ? 'Success' : 'Empty or null'}`);
+
             res.json({
                 success: true,
                 type: 'project-structure',
                 workspaceId,
-                data: result.context?.projectStructure || null,
+                data: projectStructure,
                 timestamp: new Date().toISOString()
             });
 
@@ -375,11 +317,13 @@ export class ContextApiServer implements vscode.Disposable {
 
     private async handleGitContext(req: express.Request, res: express.Response): Promise<void> {
         const includeChanges = req.query.includeChanges !== 'false';
+        // Workspace ID is optional, only use if provided
         const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
 
         try {
             this.outputChannel.appendLine(`[ContextAPI] Getting git context with includeChanges: ${includeChanges}`);
 
+            // Don't use cache for git context
             const result = await this.contextManager.collectContext({
                 collectors: ['GitContextCollector'],
                 options: {
@@ -390,17 +334,36 @@ export class ContextApiServer implements vscode.Disposable {
                     respectGitignore: true,
                     maxDepth: 10,
                     parallel: false,
-                    useCache: true
+                    useCache: false // Don't use cache as requested
                 },
                 timeout: 15000,
                 retryCount: 1
             });
 
+            // Extract git context data from collector results
+            let gitContext = null;
+
+            // Safely extract data
+            if (result.results && Array.isArray(result.results)) {
+                for (const r of result.results) {
+                    if (r.collector === 'GitContextCollector' && r.data && r.data.data) {
+                        gitContext = r.data.data;
+                        break;
+                    }
+                }
+            }
+
+            // Add debug logging
+            this.outputChannel.appendLine(`[ContextAPI] Git context result: ${gitContext ? 'Success' : 'Empty or null'}`);
+            if (!gitContext) {
+                this.outputChannel.appendLine(`[ContextAPI] Raw context result: ${JSON.stringify(result.context || {})}`);
+            }
+
             res.json({
                 success: true,
                 type: 'git',
                 workspaceId,
-                data: result.context?.gitContext || null,
+                data: gitContext,
                 timestamp: new Date().toISOString()
             });
 
@@ -416,11 +379,13 @@ export class ContextApiServer implements vscode.Disposable {
 
     private async handleOpenFilesContext(req: express.Request, res: express.Response): Promise<void> {
         const includeContent = req.query.includeContent === 'true';
+        // Workspace ID is optional, only use if provided
         const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
 
         try {
             this.outputChannel.appendLine(`[ContextAPI] Getting open files context with includeContent: ${includeContent}`);
 
+            // Don't use cache for open files
             const result = await this.contextManager.collectContext({
                 collectors: ['OpenFilesCollector'],
                 options: {
@@ -431,17 +396,34 @@ export class ContextApiServer implements vscode.Disposable {
                     respectGitignore: true,
                     maxDepth: 10,
                     parallel: false,
-                    useCache: true
+                    useCache: false // Don't use cache as requested
                 },
                 timeout: 10000,
                 retryCount: 1
             });
 
+            // Extract open files data from collector results
+            let openFiles = [];
+
+            // Safely extract data
+            if (result.results && Array.isArray(result.results)) {
+                for (const r of result.results) {
+                    if (r.collector === 'OpenFilesCollector' && r.data && r.data.data && r.data.data.files) {
+                        openFiles = r.data.data.files;
+                        break;
+                    }
+                }
+            }
+
+            // Add debug logging
+            const filesCount = Array.isArray(openFiles) ? openFiles.length : 0;
+            this.outputChannel.appendLine(`[ContextAPI] Open files result: ${filesCount > 0 ? `Found ${filesCount} files` : 'No open files found'}`);
+
             res.json({
                 success: true,
                 type: 'open-files',
                 workspaceId,
-                data: result.context?.openFiles || null,
+                data: openFiles,
                 timestamp: new Date().toISOString()
             });
 
@@ -456,42 +438,194 @@ export class ContextApiServer implements vscode.Disposable {
     }
 
     private async handleDirectoryList(req: express.Request, res: express.Response): Promise<void> {
-        const { dir_path, explanation } = req.body;
-        const workspaceId = this.contextManager.getWorkspaceId();
-
         try {
-            this.outputChannel.appendLine(`[ContextAPI] Listing directory: ${dir_path || 'workspace root'} - ${explanation}`);
+            const { directoryPath } = req.body;
+            const workspaceId = req.body.workspaceId || this.contextManager.getWorkspaceId();
 
-            // Get the ProjectStructureCollector instance
-            const projectStructureCollector = this.contextManager.getCollector('ProjectStructureCollector') as ProjectStructureCollector;
-
-            if (!projectStructureCollector) {
-                throw new Error('ProjectStructureCollector not available');
+            // Ensure directory path is provided
+            if (!directoryPath) {
+                throw new Error('Directory path is required');
             }
 
-            // Use the new listSpecificDirectory method
-            const result = await projectStructureCollector.listSpecificDirectory(dir_path);
+            this.outputChannel.appendLine(`[ContextAPI] Listing directory: ${directoryPath}`);
+
+            // Better way to get workspace folders
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                throw new Error('No workspace folders available');
+            }
+
+            // Use the first workspace folder as the root
+            const workspaceFolder = workspaceFolders[0];
+            const workspacePath = workspaceFolder.uri.fsPath;
+
+            this.outputChannel.appendLine(`[ContextAPI] Using workspace folder: ${workspaceFolder.name} at ${workspacePath}`);
+
+            // Resolve directory path - support both absolute and relative paths
+            let targetDirPath: string;
+
+            if (path.isAbsolute(directoryPath)) {
+                // For absolute paths, use as is
+                targetDirPath = directoryPath;
+            } else {
+                // For relative paths, resolve against workspace path
+                targetDirPath = path.resolve(workspacePath, directoryPath);
+            }
+
+            // Normalize all paths to handle any platform-specific differences
+            const normalizedWorkspacePath = path.normalize(workspacePath);
+            const normalizedTargetPath = path.normalize(targetDirPath);
+
+            this.outputChannel.appendLine(`[ContextAPI] Resolved paths:`);
+            this.outputChannel.appendLine(`[ContextAPI] - Workspace: ${normalizedWorkspacePath}`);
+            this.outputChannel.appendLine(`[ContextAPI] - Target dir: ${normalizedTargetPath}`);
+
+            // Define directories to exclude from listing
+            const excludePatterns = [
+                'node_modules',
+                '.venv',
+                'venv',
+                'env',
+                '.env',
+                '.git',
+                '.github',
+                '.vscode',
+                'dist',
+                'build',
+                '__pycache__',
+                '.pytest_cache',
+                '.next',
+                '.nuxt',
+                'target',
+                'bin',
+                'obj',
+                '.idea',
+                '.vs',
+                'coverage',
+                '.nyc_output',
+                'temp',
+                'tmp'
+            ];
+
+            // Helper function to check if an entry should be excluded
+            const shouldExclude = (entryName: string): boolean => {
+                const lowerName = entryName.toLowerCase();
+                return excludePatterns.some(pattern => lowerName === pattern.toLowerCase());
+            };
+
+            // Create a helper function to check if path is within workspace
+            const isPathWithinWorkspace = (checkPath: string, basePath: string): boolean => {
+                // Normalize both paths to handle any path separator differences
+                const normalizedCheckPath = path.normalize(checkPath);
+                const normalizedBasePath = path.normalize(basePath);
+
+                // On Windows, paths may have different drive letters, so check that
+                if (process.platform === 'win32') {
+                    const checkDrive = path.parse(normalizedCheckPath).root.toLowerCase();
+                    const baseDrive = path.parse(normalizedBasePath).root.toLowerCase();
+                    if (checkDrive !== baseDrive) {
+                        return false;
+                    }
+                }
+
+                // Check if the normalized path starts with the normalized workspace path
+                // Also consider the case when they are exactly equal
+                return normalizedCheckPath === normalizedBasePath ||
+                    normalizedCheckPath.startsWith(normalizedBasePath + path.sep);
+            };
+
+            // Security check - ensure directory is within workspace
+            if (!isPathWithinWorkspace(normalizedTargetPath, normalizedWorkspacePath)) {
+                this.outputChannel.appendLine(`[ContextAPI] Security check failed: ${normalizedTargetPath} is not within ${normalizedWorkspacePath}`);
+                throw new Error(`Access denied: Directory "${directoryPath}" is outside workspace "${workspaceFolder.name}"`);
+            }
+
+            // Use VS Code API for directory listing (more reliable)
+            let entries;
+            try {
+                // Use the VS Code API first
+                const targetUri = vscode.Uri.file(targetDirPath);
+                this.outputChannel.appendLine(`[ContextAPI] Reading directory with VS Code API: ${targetUri.fsPath}`);
+                entries = await vscode.workspace.fs.readDirectory(targetUri);
+                this.outputChannel.appendLine(`[ContextAPI] Successfully read directory, found ${entries.length} entries`);
+            } catch (err) {
+                // Fall back to Node fs if VS Code API fails
+                this.outputChannel.appendLine(`[ContextAPI] VS Code API failed, falling back to Node fs: ${err}`);
+                entries = await fs.promises.readdir(targetDirPath, { withFileTypes: true });
+            }
+
+            const items: Array<{
+                name: string;
+                path: string;
+                type: string;
+                size: number | null;
+                modified: Date;
+                created: Date;
+            }> = [];
+
+            let filteredEntries = 0;
+            let totalEntries = 0;
+
+            for (const entry of entries) {
+                totalEntries++;
+                try {
+                    const entryName = entry[0] || entry.name;
+
+                    // Skip excluded directories
+                    if (shouldExclude(entryName)) {
+                        filteredEntries++;
+                        this.outputChannel.appendLine(`[ContextAPI] Excluding entry: ${entryName}`);
+                        continue;
+                    }
+
+                    const entryType = entry[1] !== undefined ?
+                        (entry[1] === vscode.FileType.Directory ? 'directory' : 'file') :
+                        (entry.isDirectory() ? 'directory' : 'file');
+
+                    const entryPath = path.join(targetDirPath, entryName);
+                    const relativePath = path.relative(workspacePath, entryPath);
+
+                    let stats;
+                    if (vscode.workspace.fs) {
+                        const uri = vscode.Uri.file(entryPath);
+                        stats = await vscode.workspace.fs.stat(uri);
+                    } else {
+                        stats = await fs.promises.stat(entryPath);
+                    }
+
+                    items.push({
+                        name: entryName,
+                        path: relativePath,
+                        type: entryType,
+                        size: entryType === 'file' ? stats.size : null,
+                        modified: new Date(stats.mtime),
+                        created: new Date(stats.ctime || stats.birthtime || 0)
+                    });
+                } catch (statError) {
+                    // Skip entries that can't be accessed
+                    this.outputChannel.appendLine(`[ContextAPI] Warning: Could not stat entry: ${statError}`);
+                }
+            }
+
+            this.outputChannel.appendLine(`[ContextAPI] Found ${items.length} items in directory ${directoryPath} (excluded ${filteredEntries} of ${totalEntries} total entries)`);
 
             res.json({
-                success: result.success,
-                directory_path: result.directory_path,
-                paths: result.paths,
-                total_items: result.paths.length,
+                success: true,
                 workspaceId,
-                explanation,
+                directoryPath,
+                contents: {
+                    directory: directoryPath || '.',
+                    items: items,
+                    totalItems: items.length,
+                    filteredItems: filteredEntries
+                },
                 timestamp: new Date().toISOString()
             });
-
         } catch (error) {
-            this.outputChannel.appendLine(`[ContextAPI] Error listing directory: ${error}`);
+            this.outputChannel.appendLine(`[ContextAPI] Directory list error: ${error}`);
             res.status(500).json({
                 success: false,
-                directory_path: dir_path || '.',
-                paths: [],
-                total_items: 0,
                 error: error instanceof Error ? error.message : String(error),
-                workspaceId,
-                explanation,
                 timestamp: new Date().toISOString()
             });
         }
@@ -798,6 +932,34 @@ export class ContextApiServer implements vscode.Disposable {
             return;
         }
 
+        // Check if port is in use before starting
+        const isPortInUse = await this.checkIfPortInUse(this.port);
+        if (isPortInUse) {
+            this.outputChannel.appendLine(`[UnifiedAPI] Port ${this.port} is already in use. Attempting to close existing connection.`);
+
+            // Try to force close any existing connection
+            try {
+                // Create a server that attempts to take over the port
+                const tempServer = http.createServer();
+                tempServer.once('error', () => {
+                    // If we can't take over the port, it's genuinely in use
+                    this.outputChannel.appendLine(`[UnifiedAPI] Unable to reclaim port ${this.port}. Please check for other running processes.`);
+                });
+
+                await new Promise<void>((resolve) => {
+                    tempServer.listen(this.port, 'localhost', () => {
+                        // If we successfully bind, we can close it and reuse
+                        tempServer.close(() => {
+                            this.outputChannel.appendLine(`[UnifiedAPI] Successfully released port ${this.port}`);
+                            resolve();
+                        });
+                    });
+                });
+            } catch (error) {
+                this.outputChannel.appendLine(`[UnifiedAPI] Error trying to reclaim port: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+
         return new Promise((resolve, reject) => {
             this.server = this.app.listen(this.port, 'localhost', () => {
                 this.isRunning = true;
@@ -825,17 +987,32 @@ export class ContextApiServer implements vscode.Disposable {
 
             this.server.on('error', (error: any) => {
                 if (error.code === 'EADDRINUSE') {
-                    this.outputChannel.appendLine(`[UnifiedAPI] Port ${this.port} in use, trying ${this.port + 1}`);
-                    this.port++;
-                    if (this.server) {
-                        this.server.listen(this.port, 'localhost');
-                    }
+                    this.outputChannel.appendLine(`[UnifiedAPI] Failed to start server on port ${this.port}. Port is in use.`);
+                    reject(new Error(`Port ${this.port} is already in use. Please close any other applications using this port.`));
                 } else {
                     this.isRunning = false;
                     this.outputChannel.appendLine(`[UnifiedAPI] Server error: ${error.message}`);
                     reject(error);
                 }
             });
+        });
+    }
+
+    /**
+     * Check if a port is in use
+     */
+    private async checkIfPortInUse(port: number): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            const tester = http.createServer()
+                .once('error', () => {
+                    // Error means port is in use
+                    resolve(true);
+                })
+                .once('listening', () => {
+                    // Success means port is free
+                    tester.close(() => resolve(false));
+                })
+                .listen(port, 'localhost');
         });
     }
 

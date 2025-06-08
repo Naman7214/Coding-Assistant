@@ -9,8 +9,43 @@ import { ProjectStructureCollector } from './collectors/ProjectStructureCollecto
 import { FileChangeEvent, FileWatcher } from './FileWatcher';
 import { CacheManager } from './storage/CacheManager';
 import { VSCodeStorage } from './storage/VSCodeStorage';
-import { CollectionRequest, CollectionResult, IContextCollector } from './types/collectors';
-import { ContextOptimizationOptions, ContextSession, ProcessedContext, WorkspaceMetadata } from './types/context';
+import { CollectionRequest, CollectionResult, CollectorResult, IContextCollector } from './types/collectors';
+import { ContextOptimizationOptions, ProcessedContext, WorkspaceMetadata } from './types/context';
+
+// Constants for different context types
+export enum ContextType {
+    SYSTEM_INFO = 'systemInfo',
+    ACTIVE_FILE = 'activeFile',
+    OPEN_FILES = 'openFiles',
+    PROJECT_STRUCTURE = 'projectStructure',
+    GIT_CONTEXT = 'gitContext',
+    PROBLEMS = 'problems',
+    REPO_MAP = 'repoMap',
+    RECENT_EDITS = 'recentEdits'
+}
+
+// Cache TTL constants (in seconds)
+export const CACHE_TTL = {
+    SYSTEM_INFO: 24 * 60 * 60, // 24 hours
+    PROJECT_STRUCTURE: 3600, // 1 hour
+    REPO_MAP: 3600, // 1 hour
+    NO_CACHE: 0 // No caching
+};
+
+// Define which context types should be cached
+export const CACHEABLE_CONTEXTS = [
+    ContextType.SYSTEM_INFO,
+    ContextType.PROJECT_STRUCTURE,
+    ContextType.REPO_MAP
+];
+
+// Define which contexts must be sent with every query
+export const MUST_SEND_CONTEXTS = [
+    ContextType.SYSTEM_INFO,
+    ContextType.ACTIVE_FILE,
+    ContextType.OPEN_FILES,
+    ContextType.RECENT_EDITS
+];
 
 export interface ContextManagerConfig {
     enabled: boolean;
@@ -38,6 +73,7 @@ export class ContextManager extends EventEmitter {
     private disposables: vscode.Disposable[] = [];
     private autoCollectTimer?: NodeJS.Timeout;
     private lastCollectionTime: number = 0;
+    private lastWorkspacePath: string = '';
 
     constructor(
         context: vscode.ExtensionContext,
@@ -121,6 +157,7 @@ export class ContextManager extends EventEmitter {
             }
 
             this.outputChannel.appendLine(`[ContextManager] Found workspace: ${workspaceFolder.name} at ${workspaceFolder.uri.fsPath}`);
+            this.lastWorkspacePath = workspaceFolder.uri.fsPath;
 
             // Initialize workspace metadata
             this.outputChannel.appendLine('[ContextManager] Initializing workspace metadata...');
@@ -156,11 +193,9 @@ export class ContextManager extends EventEmitter {
             this.outputChannel.appendLine('[ContextManager] Setting up event listeners...');
             this.setupEventListeners();
 
-            // Start auto-collection if enabled
-            if (this.config.autoCollectOnChange) {
-                this.outputChannel.appendLine('[ContextManager] Starting auto-collection...');
-                this.startAutoCollection();
-            }
+            // Pre-cache contexts that need to be available immediately
+            this.outputChannel.appendLine('[ContextManager] Pre-caching important contexts...');
+            await this.preCacheRequiredContexts();
 
             this.isInitialized = true;
             this.outputChannel.appendLine('[ContextManager] Successfully initialized');
@@ -190,6 +225,168 @@ export class ContextManager extends EventEmitter {
 
             throw error;
         }
+    }
+
+    /**
+     * Pre-cache required contexts that should be available immediately
+     */
+    private async preCacheRequiredContexts(): Promise<void> {
+        try {
+            // Pre-cache system information
+            await this.collectSystemInformation();
+
+            // Pre-cache project structure
+            if (this.collectors.has('ProjectStructureCollector')) {
+                const collector = this.collectors.get('ProjectStructureCollector');
+                if (collector) {
+                    const data = await collector.collectSafely();
+                    if (data) {
+                        await this.cacheManager.storeContextData(
+                            this.workspaceId,
+                            ContextType.PROJECT_STRUCTURE,
+                            data,
+                            CACHE_TTL.PROJECT_STRUCTURE
+                        );
+                        this.outputChannel.appendLine('[ContextManager] Project structure pre-cached successfully');
+                    }
+                }
+            }
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextManager] Error during pre-caching: ${error}`);
+        }
+    }
+
+    /**
+     * Collect and cache system information
+     */
+    private async collectSystemInformation(): Promise<any> {
+        try {
+            this.outputChannel.appendLine('[ContextManager] Collecting system information...');
+
+            // Get fresh system info
+            const systemInfo = await this.getSystemInfo();
+
+            if (!systemInfo) {
+                this.outputChannel.appendLine('[ContextManager] Failed to collect system information');
+                return null;
+            }
+
+            // Format system info with proper metadata for storage
+            const systemInfoData = {
+                id: this.generateId(),
+                type: ContextType.SYSTEM_INFO,
+                timestamp: Date.now(),
+                weight: 1,
+                data: systemInfo,
+                metadata: {
+                    collector: 'SystemInfoCollector',
+                    cacheable: true,
+                    cacheTimeout: CACHE_TTL.SYSTEM_INFO
+                }
+            };
+
+            // Store in cache with 24-hour TTL
+            const cacheKey = this.generateCacheKey('SystemInfoCollector', ContextType.SYSTEM_INFO);
+            await this.cacheManager.storeContextData(
+                this.workspaceId,
+                ContextType.SYSTEM_INFO,
+                systemInfoData,
+                CACHE_TTL.SYSTEM_INFO // 24 hours
+            );
+
+            this.outputChannel.appendLine(`[ContextManager] System information cached with 24-hour TTL (${CACHE_TTL.SYSTEM_INFO} seconds)`);
+            return systemInfoData;
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextManager] Error collecting system information: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Get system information
+     */
+    private async getSystemInfo(): Promise<any> {
+        try {
+            const vscodeVersion = vscode.version;
+            const extensionVersion = vscode.extensions.getExtension('vscode.enhanced-assistant')?.packageJSON.version || 'unknown';
+            const platform = process.platform;
+            const architecture = process.arch;
+            const osVersion = process.platform === 'darwin' ? 'macOS' :
+                process.platform === 'win32' ? 'Windows' :
+                    process.platform === 'linux' ? 'Linux' : 'Unknown';
+
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            const workspacePath = workspaceFolder?.uri.fsPath || '';
+            const workspaceName = workspaceFolder?.name || '';
+
+            return {
+                vscode: {
+                    version: vscodeVersion,
+                    extensionVersion
+                },
+                system: {
+                    platform,
+                    architecture,
+                    osVersion
+                },
+                workspace: {
+                    path: workspacePath,
+                    name: workspaceName
+                },
+                timestamp: Date.now()
+            };
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextManager] Error getting system info: ${error}`);
+            return {
+                error: 'Failed to get system information',
+                timestamp: Date.now()
+            };
+        }
+    }
+
+    /**
+     * Check if a context type should be cached
+     */
+    isCacheableContext(contextType: string): boolean {
+        return CACHEABLE_CONTEXTS.includes(contextType as ContextType);
+    }
+
+    /**
+     * Check if a context must be sent with every query
+     */
+    isMustSendContext(contextType: string): boolean {
+        return MUST_SEND_CONTEXTS.includes(contextType as ContextType);
+    }
+
+    /**
+     * Get TTL for a specific context type
+     */
+    getContextTTL(contextType: string): number {
+        switch (contextType) {
+            case ContextType.SYSTEM_INFO:
+                return CACHE_TTL.SYSTEM_INFO;
+            case ContextType.PROJECT_STRUCTURE:
+                return CACHE_TTL.PROJECT_STRUCTURE;
+            case ContextType.REPO_MAP:
+                return CACHE_TTL.REPO_MAP;
+            default:
+                return CACHE_TTL.NO_CACHE;
+        }
+    }
+
+    /**
+     * Check if workspace has changed since last check
+     */
+    private hasWorkspaceChanged(): boolean {
+        const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+        const hasChanged = this.lastWorkspacePath !== currentWorkspace && currentWorkspace !== '';
+
+        if (hasChanged) {
+            this.outputChannel.appendLine(`[ContextManager] Workspace changed from ${this.lastWorkspacePath} to ${currentWorkspace}`);
+        }
+
+        return hasChanged;
     }
 
     /**
@@ -240,6 +437,13 @@ export class ContextManager extends EventEmitter {
         const results: any[] = [];
         const errors: any[] = [];
 
+        // Check if workspace has changed, and if so, recache system info
+        if (this.hasWorkspaceChanged()) {
+            this.outputChannel.appendLine('[ContextManager] Workspace changed, recaching system information');
+            this.lastWorkspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+            await this.collectSystemInformation();
+        }
+
         try {
             // Log collection strategy
             this.outputChannel.appendLine(
@@ -248,328 +452,284 @@ export class ContextManager extends EventEmitter {
 
             // Collect from each collector
             const collectorPromises = fullRequest.collectors.map(async (collectorName) => {
-                this.outputChannel.appendLine(`[ContextManager] 🔍 Looking for collector: ${collectorName}`);
                 const collector = this.collectors.get(collectorName);
                 if (!collector) {
                     const error = `Collector not found: ${collectorName}`;
-                    this.outputChannel.appendLine(`[ContextManager] ❌ ${error}`);
-                    errors.push({
-                        collector: collectorName,
-                        error,
-                        timestamp: Date.now()
-                    });
+                    errors.push({ collector: collectorName, error });
+                    this.outputChannel.appendLine(`[ContextManager] ${error}`);
                     return null;
                 }
-                this.outputChannel.appendLine(`[ContextManager] ✅ Found collector: ${collectorName}`);
 
                 try {
-                    this.outputChannel.appendLine(`[ContextManager] 🔄 Starting ${collectorName}...`);
-                    const collectorStartTime = Date.now();
+                    // For non-cacheable contexts or when cache is disabled, always collect fresh data
+                    if (!this.isCacheableContext(collector.type) || !fullRequest.options.useCache) {
+                        const data = await collector.collectSafely();
+                        if (data) {
+                            results.push(data);
+                            return data;
+                        }
+                        return null;
+                    }
+
+                    // For cacheable contexts, check cache first
+                    const cacheKey = this.generateCacheKey(collector.name, collector.type);
+                    const cached = await this.cacheManager.getContextData(
+                        this.workspaceId,
+                        collector.type,
+                        cacheKey
+                    );
+
+                    if (cached) {
+                        this.outputChannel.appendLine(`[ContextManager] Using cached data for ${collectorName}`);
+                        results.push(cached);
+                        return cached;
+                    }
+
+                    // If not in cache, collect and cache
                     const data = await collector.collectSafely();
-                    const collectorDuration = Date.now() - collectorStartTime;
+                    if (data) {
+                        results.push(data);
 
-                    this.outputChannel.appendLine(`[ContextManager] ✅ ${collectorName} completed (${collectorDuration}ms)`);
+                        // Cache the data if it's a cacheable context type
+                        if (this.isCacheableContext(collector.type)) {
+                            const ttl = this.getContextTTL(collector.type);
+                            await this.cacheManager.storeContextData(
+                                this.workspaceId,
+                                collector.type,
+                                data,
+                                ttl
+                            );
+                        }
 
-                    return {
-                        collector: collectorName,
-                        success: true,
-                        data,
-                        duration: collectorDuration,
-                        fromCache: false // This would be determined by the collector
-                    };
+                        return data;
+                    }
+
+                    return null;
                 } catch (error) {
-                    const collectorDuration = Date.now() - startTime;
-                    this.outputChannel.appendLine(`[ContextManager] ❌ ${collectorName} failed: ${error instanceof Error ? error.message : String(error)}`);
-
-                    const errorResult = {
-                        collector: collectorName,
-                        error: error instanceof Error ? error.message : String(error),
-                        timestamp: Date.now()
-                    };
-                    errors.push(errorResult);
-                    return {
-                        collector: collectorName,
-                        success: false,
-                        error: errorResult.error,
-                        duration: collectorDuration,
-                        fromCache: false
-                    };
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    errors.push({ collector: collectorName, error: errorMsg });
+                    this.outputChannel.appendLine(`[ContextManager] Error collecting from ${collectorName}: ${errorMsg}`);
+                    return null;
                 }
             });
 
-            // Execute collectors (parallel or sequential based on options)
-            let collectorResults;
+            // Process collections based on requested execution mode
             if (fullRequest.options.parallel) {
-                collectorResults = await Promise.allSettled(collectorPromises);
+                await Promise.all(collectorPromises);
             } else {
-                collectorResults = [];
                 for (const promise of collectorPromises) {
-                    try {
-                        const result = await promise;
-                        collectorResults.push({ status: 'fulfilled', value: result });
-                    } catch (error) {
-                        collectorResults.push({ status: 'rejected', reason: error });
-                    }
+                    await promise;
                 }
             }
 
-            // Process results
-            collectorResults.forEach((result, index) => {
-                if (result.status === 'fulfilled' && result.value) {
-                    results.push(result.value);
-                } else if (result.status === 'rejected') {
-                    this.outputChannel.appendLine(`[ContextManager] ❌ Collector promise rejected: ${result.reason}`);
-                    errors.push({
-                        collector: fullRequest.collectors[index],
-                        error: result.reason,
-                        timestamp: Date.now()
-                    });
-                }
-            });
-
-            this.outputChannel.appendLine(`[ContextManager] 🔧 Building processed context from ${results.length} successful collectors...`);
-
-            // Build processed context
+            // Process results into unified context structure
             const processedContext = await this.buildProcessedContext(results);
 
-            // Store context session if VS Code storage is enabled
-            if (this.config.storageConfig.enableStorage && processedContext) {
-                this.outputChannel.appendLine(`[ContextManager] 💾 Storing context session to storage...`);
-
-                const session: ContextSession = {
-                    id: collectionId,
-                    workspaceId: this.workspaceId,
-                    contextData: processedContext,
-                    tokenCount: processedContext.totalTokens,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    version: '1.0.0'
-                };
-
-                await this.storage.storeContextSession(session);
-                this.outputChannel.appendLine(`[ContextManager] ✅ Context session stored (${processedContext.totalTokens} tokens)`);
-            }
-
-            const totalDuration = Date.now() - startTime;
+            const duration = Date.now() - startTime;
             this.lastCollectionTime = Date.now();
 
-            const collectionResult: CollectionResult = {
+            // Convert results to CollectorResult[] format as expected by the interface
+            const collectorResults: CollectorResult[] = results.map(r => ({
+                collector: r.metadata?.collector || 'unknown',
+                success: true,
+                data: r,
+                duration: 0, // We don't have individual durations here
+                fromCache: false // We don't know if it's from cache
+            }));
+
+            const result: CollectionResult = {
                 success: errors.length === 0,
-                results,
-                errors,
-                totalDuration,
+                results: collectorResults,
+                errors: errors.length > 0 ? errors.map(e => ({
+                    collector: e.collector,
+                    error: e.error,
+                    timestamp: Date.now()
+                })) : [],
+                totalDuration: duration,
                 context: processedContext,
                 metadata: {
                     collectionId,
                     timestamp: Date.now(),
                     collectorCount: fullRequest.collectors.length,
-                    successCount: results.filter(r => r.success).length,
-                    cacheHitCount: results.filter(r => r.fromCache).length
+                    successCount: collectorResults.length,
+                    cacheHitCount: 0 // We don't know this yet
                 }
             };
 
-            this.outputChannel.appendLine(
-                `[ContextManager] 🎉 Context collection completed (${totalDuration}ms, ` +
-                `${collectionResult.metadata.successCount}/${collectionResult.metadata.collectorCount} successful)`
-            );
-
             this.emit('collectionCompleted', {
                 collectionId,
-                result: collectionResult,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                duration,
+                result
             });
 
-            return collectionResult;
+            this.outputChannel.appendLine(
+                `[ContextManager] Collection completed in ${duration}ms with ${results.length} results and ${errors.length} errors`
+            );
+
+            return result;
 
         } catch (error) {
-            this.outputChannel.appendLine(`[ContextManager] ❌ Context collection failed: ${error}`);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            this.outputChannel.appendLine(`[ContextManager] Collection failed: ${errorMsg}`);
 
-            this.emit('collectionError', {
+            const result: CollectionResult = {
+                success: false,
+                results: [],
+                errors: [{
+                    collector: 'ContextManager',
+                    error: errorMsg,
+                    timestamp: Date.now()
+                }],
+                totalDuration: Date.now() - startTime,
+                context: null,
+                metadata: {
+                    collectionId,
+                    timestamp: Date.now(),
+                    collectorCount: fullRequest.collectors.length,
+                    successCount: 0,
+                    cacheHitCount: 0
+                }
+            };
+
+            this.emit('collectionFailed', {
                 collectionId,
-                error: error instanceof Error ? error.message : String(error),
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                error: errorMsg
             });
 
-            throw error;
+            return result;
         }
     }
 
     /**
-     * Get context for agent (used by agent to retrieve context)
+     * Collect all contexts that must be sent with every query
      */
-    async getContextForAgent(
-        sessionId?: string,
-        maxTokens: number = 50000
-    ): Promise<ProcessedContext | null> {
-        if (!this.isInitialized || !this.config.storageConfig.enableStorage) {
-            // Fallback to live collection
-            const result = await this.collectContext();
-            return result.context;
+    async collectMustSendContexts(): Promise<Map<string, any>> {
+        const contexts = new Map<string, any>();
+
+        // Check and update system info if needed (expired or workspace changed)
+        if (this.hasWorkspaceChanged()) {
+            await this.collectSystemInformation();
         }
 
-        return await this.storage.getContextForAgent(
+        // Get system info from cache
+        const systemInfo = await this.cacheManager.getContextData(
             this.workspaceId,
-            sessionId,
-            maxTokens
+            ContextType.SYSTEM_INFO,
+            'SystemInfoCollector'
         );
-    }
 
-    /**
-     * Get workspace ID for agent requests
-     */
-    getWorkspaceId(): string {
-        return this.workspaceId;
-    }
-
-    /**
-     * Get workspace metadata
-     */
-    getWorkspaceMetadata(): WorkspaceMetadata | null {
-        return this.workspaceMetadata;
-    }
-
-    /**
-     * Get storage instance
-     */
-    getStorage(): VSCodeStorage {
-        return this.storage;
-    }
-
-    /**
-     * Get a specific collector by name
-     */
-    getCollector(name: string): IContextCollector | undefined {
-        return this.collectors.get(name);
-    }
-
-    /**
-     * Set target file path for ProblemsCollector
-     */
-    setProblemsTargetFile(filePath?: string): void {
-        const problemsCollector = this.collectors.get('ProblemsCollector');
-        if (problemsCollector && 'setTargetFilePath' in problemsCollector) {
-            (problemsCollector as any).setTargetFilePath(filePath);
-            this.outputChannel.appendLine(`[ContextManager] Set problems target file: ${filePath || 'all workspace'}`);
-        }
-    }
-
-    /**
-     * Update configuration
-     */
-    updateConfig(newConfig: Partial<ContextManagerConfig>): void {
-        this.config = { ...this.config, ...newConfig };
-        this.outputChannel.appendLine('[ContextManager] Configuration updated');
-
-        // Update collector configurations
-        this.collectors.forEach(collector => {
-            if ('updateConfig' in collector && typeof collector.updateConfig === 'function') {
-                collector.updateConfig({
-                    enabled: this.config.enabled
-                });
-            }
-        });
-    }
-
-    /**
-     * Initialize workspace metadata
-     */
-    private async initializeWorkspaceMetadata(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
-        const languages = new Set<string>();
-        const packageManagers: string[] = [];
-
-        // Detect package managers
-        const packageFiles = ['package.json', 'requirements.txt', 'Cargo.toml', 'go.mod', 'pom.xml'];
-        for (const file of packageFiles) {
-            try {
-                const uri = vscode.Uri.joinPath(workspaceFolder.uri, file);
-                await vscode.workspace.fs.stat(uri);
-                packageManagers.push(path.extname(file) || file);
-            } catch {
-                // File doesn't exist
+        if (systemInfo) {
+            contexts.set(ContextType.SYSTEM_INFO, systemInfo);
+        } else {
+            // If not in cache, collect and cache it
+            const newSystemInfo = await this.collectSystemInformation();
+            if (newSystemInfo) {
+                contexts.set(ContextType.SYSTEM_INFO, newSystemInfo);
             }
         }
 
-        // Detect main language from open files
-        vscode.workspace.textDocuments.forEach(doc => {
-            if (doc.languageId !== 'plaintext') {
-                languages.add(doc.languageId);
+        // Always collect fresh active file context
+        if (this.collectors.has('ActiveFileCollector')) {
+            const collector = this.collectors.get('ActiveFileCollector');
+            if (collector) {
+                const data = await collector.collectSafely();
+                if (data) {
+                    contexts.set(ContextType.ACTIVE_FILE, data);
+                }
             }
-        });
+        }
 
-        this.workspaceMetadata = {
-            path: workspaceFolder.uri.fsPath,
-            folders: [workspaceFolder.uri.fsPath],
-            languages: [],
-            mainLanguage: undefined,
-            packageManagers: []
-        };
+        // Always collect fresh open files context
+        if (this.collectors.has('OpenFilesCollector')) {
+            const collector = this.collectors.get('OpenFilesCollector');
+            if (collector) {
+                const data = await collector.collectSafely();
+                if (data) {
+                    contexts.set(ContextType.OPEN_FILES, data);
+                }
+            }
+        }
+
+        return contexts;
     }
 
     /**
-     * Ensure workspace exists in database
+     * Collect context for a specific type (on-demand context)
      */
-    private async ensureWorkspaceInDatabase(): Promise<string> {
-        if (!this.workspaceMetadata) {
-            throw new Error('Workspace metadata not initialized');
+    async collectSpecificContext(contextType: string): Promise<any> {
+        // For system info, get from cache or collect if not available
+        if (contextType === ContextType.SYSTEM_INFO) {
+            const cached = await this.cacheManager.getContextData(
+                this.workspaceId,
+                ContextType.SYSTEM_INFO,
+                'SystemInfoCollector'
+            );
+
+            if (cached) {
+                return cached;
+            }
+
+            return await this.collectSystemInformation();
         }
 
-        // Check if workspace already exists
-        const existing = await this.storage.getWorkspace(this.workspaceMetadata.path);
-        if (existing) {
-            return existing.id;
+        // For git context, always collect fresh
+        if (contextType === ContextType.GIT_CONTEXT && this.collectors.has('GitContextCollector')) {
+            const collector = this.collectors.get('GitContextCollector');
+            if (collector) {
+                return await collector.collectSafely();
+            }
         }
 
-        // Create new workspace
-        return await this.storage.createOrUpdateWorkspace(this.workspaceMetadata);
+        // For project structure, check cache first
+        if (contextType === ContextType.PROJECT_STRUCTURE && this.collectors.has('ProjectStructureCollector')) {
+            const collector = this.collectors.get('ProjectStructureCollector');
+            if (collector) {
+                const cacheKey = this.generateCacheKey(collector.name, collector.type);
+                const cached = await this.cacheManager.getContextData(
+                    this.workspaceId,
+                    ContextType.PROJECT_STRUCTURE,
+                    cacheKey
+                );
+
+                if (cached) {
+                    return cached;
+                }
+
+                const data = await collector.collectSafely();
+                if (data) {
+                    await this.cacheManager.storeContextData(
+                        this.workspaceId,
+                        ContextType.PROJECT_STRUCTURE,
+                        data,
+                        CACHE_TTL.PROJECT_STRUCTURE
+                    );
+                    return data;
+                }
+            }
+        }
+
+        // For active file or open files, always collect fresh
+        if ((contextType === ContextType.ACTIVE_FILE && this.collectors.has('ActiveFileCollector')) ||
+            (contextType === ContextType.OPEN_FILES && this.collectors.has('OpenFilesCollector'))) {
+            const collectorName = contextType === ContextType.ACTIVE_FILE ?
+                'ActiveFileCollector' : 'OpenFilesCollector';
+
+            const collector = this.collectors.get(collectorName);
+            if (collector) {
+                return await collector.collectSafely();
+            }
+        }
+
+        return null;
     }
 
     /**
-     * Initialize default collectors
+     * Generate cache key for a collector
      */
-    private async initializeCollectors(): Promise<void> {
-        // Initialize ActiveFileCollector
-        const activeFileCollector = new ActiveFileCollector(
-            this.outputChannel,
-            this.cacheManager,
-            this.workspaceId
-        );
-        this.collectors.set('ActiveFileCollector', activeFileCollector);
-
-        // Initialize OpenFilesCollector
-        const openFilesCollector = new OpenFilesCollector(
-            this.outputChannel,
-            this.cacheManager,
-            this.workspaceId
-        );
-        this.collectors.set('OpenFilesCollector', openFilesCollector);
-
-        // Initialize ProjectStructureCollector
-        const projectStructureCollector = new ProjectStructureCollector(
-            this.outputChannel,
-            this.cacheManager,
-            this.workspaceId
-        );
-        this.collectors.set('ProjectStructureCollector', projectStructureCollector);
-
-        // Initialize GitContextCollector
-        const gitContextCollector = new GitContextCollector(
-            this.outputChannel,
-            this.cacheManager,
-            this.workspaceId
-        );
-        this.collectors.set('GitContextCollector', gitContextCollector);
-
-        // Initialize ProblemsCollector
-        const problemsCollectorInstance = new ProblemsCollector(
-            this.outputChannel,
-            this.cacheManager,
-            this.workspaceId
-        );
-        this.collectors.set('ProblemsCollector', problemsCollectorInstance);
-
-        this.outputChannel.appendLine(
-            `[ContextManager] Initialized ${this.collectors.size} collectors: ${Array.from(this.collectors.keys()).join(', ')}`
-        );
+    private generateCacheKey(collectorName: string, contextType: string): string {
+        return `${collectorName}_${contextType}`;
     }
 
     /**
@@ -603,10 +763,13 @@ export class ContextManager extends EventEmitter {
                 fileSize: activeFileData.file?.fileSize || 0,
                 lastModified: activeFileData.file?.lastModified || new Date().toISOString(),
                 cursorPosition: activeFileData.cursor ? new vscode.Position(
-                    Math.max(0, (activeFileData.cursor.line || 1) - 1), // Convert back to 0-indexed for VSCode
+                    Math.max(0, (activeFileData.cursor.line || 0)),
                     Math.max(0, (activeFileData.cursor.character || 1) - 1)
                 ) : new vscode.Position(0, 0),
-                selection: activeFileData.cursor?.selection || new vscode.Selection(0, 0, 0, 0),
+                selection: activeFileData.cursor?.selection || new vscode.Selection(
+                    new vscode.Position(0, 0),
+                    new vscode.Position(0, 0)
+                ),
                 visibleRanges: activeFileData.viewport?.visibleRanges || [],
                 cursorLineContent: activeFileData.cursor?.lineContent || undefined
             } : null,
@@ -703,6 +866,14 @@ export class ContextManager extends EventEmitter {
             totalTokens: this.estimateTokenCount(activeFileData, openFilesData, projectStructureData, gitContextData, problemsData)
         };
 
+        // Add system info
+        if (results.some(r => r.collector === 'SystemInfoCollector')) {
+            const systemInfo = results.find(r => r.collector === 'SystemInfoCollector' && r.success)?.data?.data;
+            if (systemInfo) {
+                processedContext.relevanceScores['systemInfo'] = systemInfo;
+            }
+        }
+
         return processedContext;
     }
 
@@ -785,40 +956,56 @@ export class ContextManager extends EventEmitter {
     }
 
     /**
-     * Setup event listeners
+     * Set up event listeners for file changes and other events
      */
     private setupEventListeners(): void {
-        // File watcher events
-        this.fileWatcher?.on('fileChanged', (event: FileChangeEvent) => {
-            this.handleFileChange(event);
+        if (!this.fileWatcher) {
+            return;
+        }
+
+        // Listen for file changes
+        this.fileWatcher.on('fileChange', async (event: FileChangeEvent) => {
+            this.emit('fileChanged', event);
+            this.outputChannel.appendLine(`[ContextManager] File changed: ${event.relativePath} (${event.type})`);
         });
 
-        // VS Code workspace events
-        this.disposables.push(
-            vscode.workspace.onDidChangeWorkspaceFolders(() => {
-                this.outputChannel.appendLine('[ContextManager] Workspace folders changed');
-                this.reinitialize();
-            })
-        );
+        // Listen for project structure changes (file/directory creation, deletion, renaming)
+        this.fileWatcher.on('projectStructureChange', async (event: FileChangeEvent) => {
+            this.outputChannel.appendLine(`[ContextManager] Project structure changed: ${event.relativePath} (${event.type})`);
+
+            // Invalidate project structure cache and recollect
+            await this.recacheProjectStructure();
+        });
+
+        // Add other event listeners as needed
     }
 
     /**
-     * Handle file change events
+     * Recache the project structure when files/directories are created or deleted
      */
-    private handleFileChange(event: FileChangeEvent): void {
-        this.outputChannel.appendLine(
-            `[ContextManager] File ${event.type}: ${event.relativePath}`
-        );
+    private async recacheProjectStructure(): Promise<void> {
+        if (this.collectors.has('ProjectStructureCollector')) {
+            this.outputChannel.appendLine('[ContextManager] Recaching project structure...');
 
-        // Invalidate relevant caches
-        this.cacheManager.clear(`file:${this.workspaceId}:*`);
+            const collector = this.collectors.get('ProjectStructureCollector');
+            if (collector) {
+                // Clear existing cache for project structure
+                const cacheKey = this.generateCacheKey(collector.name, ContextType.PROJECT_STRUCTURE);
+                this.cacheManager.delete(cacheKey);
 
-        // Trigger collection if auto-collect is enabled
-        if (this.config.autoCollectOnChange) {
-            this.scheduleCollection();
+                // Collect fresh project structure
+                const data = await collector.collectSafely();
+                if (data) {
+                    await this.cacheManager.storeContextData(
+                        this.workspaceId,
+                        ContextType.PROJECT_STRUCTURE,
+                        data,
+                        CACHE_TTL.PROJECT_STRUCTURE
+                    );
+                    this.outputChannel.appendLine('[ContextManager] Project structure recached successfully');
+                }
+            }
         }
-
-        this.emit('fileChanged', event);
     }
 
     /**
@@ -926,5 +1113,255 @@ export class ContextManager extends EventEmitter {
         this.removeAllListeners();
 
         this.outputChannel.appendLine('[ContextManager] Disposed');
+    }
+
+    /**
+     * Initialize workspace metadata
+     */
+    private async initializeWorkspaceMetadata(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
+        const languages = new Set<string>();
+        const packageManagers: string[] = [];
+
+        // Detect package managers
+        const packageFiles = ['package.json', 'requirements.txt', 'Cargo.toml', 'go.mod', 'pom.xml'];
+        for (const file of packageFiles) {
+            try {
+                const uri = vscode.Uri.joinPath(workspaceFolder.uri, file);
+                await vscode.workspace.fs.stat(uri);
+                packageManagers.push(path.extname(file) || file);
+            } catch {
+                // File doesn't exist
+            }
+        }
+
+        // Detect main language from open files
+        vscode.workspace.textDocuments.forEach(doc => {
+            if (doc.languageId !== 'plaintext') {
+                languages.add(doc.languageId);
+            }
+        });
+
+        this.workspaceMetadata = {
+            path: workspaceFolder.uri.fsPath,
+            folders: [workspaceFolder.uri.fsPath],
+            languages: Array.from(languages),
+            mainLanguage: languages.size > 0 ? Array.from(languages)[0] : undefined,
+            projectType: packageManagers.length > 0 ? packageManagers[0] : undefined,
+            packageManagers: packageManagers
+        };
+    }
+
+    /**
+     * Ensure workspace exists in database
+     */
+    private async ensureWorkspaceInDatabase(): Promise<string> {
+        // Generate a workspace ID
+        return this.generateId();
+    }
+
+    /**
+     * Initialize default collectors
+     */
+    private async initializeCollectors(): Promise<void> {
+        // Initialize ActiveFileCollector
+        const activeFileCollector = new ActiveFileCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId
+        );
+        this.collectors.set('ActiveFileCollector', activeFileCollector);
+
+        // Initialize OpenFilesCollector
+        const openFilesCollector = new OpenFilesCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId
+        );
+        this.collectors.set('OpenFilesCollector', openFilesCollector);
+
+        // Initialize ProjectStructureCollector
+        const projectStructureCollector = new ProjectStructureCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId
+        );
+        this.collectors.set('ProjectStructureCollector', projectStructureCollector);
+
+        // Initialize GitContextCollector
+        const gitContextCollector = new GitContextCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId
+        );
+        this.collectors.set('GitContextCollector', gitContextCollector);
+
+        // Initialize ProblemsCollector
+        const problemsCollectorInstance = new ProblemsCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId
+        );
+        this.collectors.set('ProblemsCollector', problemsCollectorInstance);
+
+        this.outputChannel.appendLine(
+            `[ContextManager] Initialized ${this.collectors.size} collectors: ${Array.from(this.collectors.keys()).join(', ')}`
+        );
+    }
+
+    /**
+     * Get context for agent with proper caching behavior
+     */
+    async getContextForAgent(
+        sessionId?: string,
+        maxTokens: number = 50000
+    ): Promise<ProcessedContext | null> {
+        if (!this.isInitialized) {
+            throw new Error('ContextManager not initialized');
+        }
+
+        // Collect all must-send contexts
+        const mustSendContexts = await this.collectMustSendContexts();
+
+        // Start building the processed context
+        const processedContext: ProcessedContext = {
+            workspace: this.workspaceMetadata || {
+                path: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+                folders: [vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''],
+                languages: [],
+                packageManagers: []
+            },
+            activeFile: null,
+            openFiles: [],
+            projectStructure: '',
+            gitContext: {
+                branch: '',
+                hasChanges: false,
+                changedFiles: [],
+                recentCommits: [],
+                uncommittedChanges: [],
+                isRepo: false
+            },
+            lspContext: {
+                symbols: [],
+                diagnostics: [],
+                references: [],
+                definitions: []
+            },
+            problemsContext: {
+                problems: [],
+                summary: {
+                    totalProblems: 0,
+                    errorCount: 0,
+                    warningCount: 0,
+                    infoCount: 0,
+                    hintCount: 0,
+                    filesWithProblems: 0,
+                    problemsByFile: {},
+                    problemsBySeverity: {},
+                    problemsBySource: {}
+                },
+                timestamp: Date.now(),
+                workspacePath: this.workspaceMetadata?.path || ''
+            },
+            terminalContext: {
+                currentDirectory: this.workspaceMetadata?.path || '',
+                recentCommands: [],
+                activeShell: '',
+                environmentVariables: {}
+            },
+            userBehavior: {
+                recentFiles: [],
+                searchHistory: [],
+                navigationPatterns: [],
+                editingPatterns: [],
+                commandUsage: {}
+            },
+            relevanceScores: {},
+            totalTokens: 0
+        };
+
+        // Add system info
+        if (mustSendContexts.has(ContextType.SYSTEM_INFO)) {
+            const systemInfo = mustSendContexts.get(ContextType.SYSTEM_INFO);
+            processedContext.relevanceScores['systemInfo'] = systemInfo.data;
+        }
+
+        // Add active file
+        if (mustSendContexts.has(ContextType.ACTIVE_FILE)) {
+            const activeFileData = mustSendContexts.get(ContextType.ACTIVE_FILE);
+            processedContext.activeFile = activeFileData.data;
+        }
+
+        // Add open files
+        if (mustSendContexts.has(ContextType.OPEN_FILES)) {
+            const openFilesData = mustSendContexts.get(ContextType.OPEN_FILES);
+            processedContext.openFiles = openFilesData.data.files || [];
+        }
+
+        // Get project structure from cache
+        const projectStructureData = await this.cacheManager.getContextData(
+            this.workspaceId,
+            ContextType.PROJECT_STRUCTURE,
+            this.generateCacheKey('ProjectStructureCollector', ContextType.PROJECT_STRUCTURE)
+        );
+
+        if (projectStructureData) {
+            processedContext.projectStructure = projectStructureData.data;
+        }
+
+        // Estimate token count
+        processedContext.totalTokens = this.estimateTokenCount(
+            processedContext.activeFile,
+            processedContext.openFiles,
+            processedContext.projectStructure,
+            processedContext.gitContext,
+            processedContext.problemsContext
+        );
+
+        return processedContext;
+    }
+
+    /**
+     * Get workspace ID for agent requests
+     */
+    getWorkspaceId(): string {
+        return this.workspaceId;
+    }
+
+    /**
+     * Get workspace metadata
+     */
+    getWorkspaceMetadata(): WorkspaceMetadata | null {
+        return this.workspaceMetadata;
+    }
+
+    /**
+     * Set target file path for ProblemsCollector
+     */
+    setProblemsTargetFile(filePath?: string): void {
+        const problemsCollector = this.collectors.get('ProblemsCollector');
+        if (problemsCollector && 'setTargetFilePath' in problemsCollector) {
+            (problemsCollector as any).setTargetFilePath(filePath);
+            this.outputChannel.appendLine(`[ContextManager] Set problems target file: ${filePath || 'all workspace'}`);
+        }
+    }
+
+    /**
+     * Get stats for files in the workspace
+     */
+    async getFileStats(workspaceId: string, limit: number = 1000): Promise<any[]> {
+        // If we have the project structure collector, use that to get file stats
+        if (this.collectors.has('ProjectStructureCollector')) {
+            const collector = this.collectors.get('ProjectStructureCollector');
+            if (collector) {
+                const data = await collector.collectSafely();
+                if (data && data.data && data.data.files) {
+                    return data.data.files.slice(0, limit);
+                }
+            }
+        }
+
+        // Fallback: return empty array
+        return [];
     }
 } 
