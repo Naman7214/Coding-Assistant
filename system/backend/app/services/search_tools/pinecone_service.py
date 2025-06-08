@@ -163,23 +163,9 @@ class PineconeService:
                 "chunk_type": chunks[i].get("chunk_type"),
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
-            # Generate a unique ID if _id doesn't exist
-            if "_id" in chunks[i]:
-                vector_id = chunks[i]["_id"]
-            else:
-                # Use a filename or path if available, otherwise generate a timestamp-based ID
-                if "path" in chunks[i]:
-                    vector_id = f"{chunks[i]['path']}-{i}"
-                elif "filename" in chunks[i]:
-                    vector_id = f"{chunks[i]['filename']}-{i}"
-                else:
-                    vector_id = f"chunk-{int(time.time())}-{i}"
-
-                # Add the generated ID back to metadata
-                metadata["generated_id"] = vector_id
 
             result = {
-                "id": vector_id,
+                "id": chunks[i].get("chunk_hash"),
                 "values": vector_embeddings[i],
                 "metadata": metadata,
                 # "sparse_values": {
@@ -486,3 +472,67 @@ class PineconeService:
                 status_code=500,
                 detail=f"Error extracting host from index details: {str(e)}",
             )
+
+    async def delete_vectors(
+        self, index_host: str, vector_ids: list, namespace: str = "default"
+    ) -> Dict[str, Any]:
+        """Delete vectors from Pinecone index by their IDs"""
+        headers = {
+            "Api-Key": self.pinecone_api_key,
+            "Content-Type": "application/json",
+            "X-Pinecone-API-Version": self.api_version,
+        }
+
+        # Construct the delete URL (assuming it follows pattern similar to other operations)
+        delete_url = f"https://{index_host}/vectors/delete"
+
+        payload = {"ids": vector_ids, "namespace": namespace}
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout, verify=False
+            ) as client:
+                response = await client.post(
+                    url=delete_url, headers=headers, json=payload
+                )
+                response.raise_for_status()
+
+                # Pinecone delete doesn't return much, just success
+                loggers["main"].info(
+                    f"Successfully deleted {len(vector_ids)} vectors from namespace '{namespace}'"
+                )
+
+                return {"deleted": len(vector_ids)}
+
+        except httpx.HTTPStatusError as e:
+            await self.error_repo.insert_error(
+                Error(
+                    tool_name="pinecone_service",
+                    error_message=f"Error deleting vectors http status error: {str(e)} - {e.response.text}",
+                )
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error deleting vectors http status error: {str(e)} - {e.response.text}",
+            )
+
+        except httpx.HTTPError as e:
+            await self.error_repo.insert_error(
+                Error(
+                    tool_name="pinecone_service",
+                    error_message=f"Error deleting vectors http error: {str(e)}",
+                )
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error deleting vectors http error: {str(e)}",
+            )
+
+        except Exception as e:
+            await self.error_repo.insert_error(
+                Error(
+                    tool_name="pinecone_service",
+                    error_message=f"Error deleting vectors: {str(e)}",
+                )
+            )
+            raise HTTPException(status_code=500, detail=str(e))

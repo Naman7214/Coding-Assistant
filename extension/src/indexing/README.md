@@ -116,8 +116,9 @@ Main coordinator that manages the entire indexing process:
 const orchestrator = new IndexingOrchestrator(context, workspacePath);
 await orchestrator.initialize();
 
-orchestrator.onChunksReady((chunks) => {
-  // Handle new chunks
+orchestrator.onChunksReady((chunks, deletedFiles) => {
+  console.log(`Received ${chunks.length} chunks and ${deletedFiles.length} deleted files`);
+  // Send to server
 });
 ```
 
@@ -190,8 +191,8 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     
     // Set up callbacks
-    orchestrator.onChunksReady((chunks) => {
-      console.log(`Received ${chunks.length} new chunks`);
+    orchestrator.onChunksReady((chunks, deletedFiles) => {
+      console.log(`Received ${chunks.length} chunks and ${deletedFiles.length} deleted files`);
     });
   }
 }
@@ -407,3 +408,8 @@ Expected logs should show:
 - File change detection per branch
 - Chunk generation only for changed files
 - No duplicate processing when returning to previously indexed branches
+
+orchestrator.onChunksReady((chunks, deletedFiles) => {
+  // Server communication with deleted files
+  serverCommunication.sendChunksToServer(chunks, deletedFiles);
+});

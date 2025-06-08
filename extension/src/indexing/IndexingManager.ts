@@ -266,18 +266,18 @@ export class IndexingManager extends EventEmitter {
         // Set up orchestrator callbacks
         if (this.orchestrator) {
             // Set up single callback to handle chunks and send to server
-            this.orchestrator.onChunksReady(async (chunks: CodeChunk[]) => {
-                this.outputChannel.appendLine(`[IndexingManager] Received ${chunks.length} chunks from orchestrator`);
+            this.orchestrator.onChunksReady(async (chunks: CodeChunk[], deletedFiles: string[]) => {
+                this.outputChannel.appendLine(`[IndexingManager] Received ${chunks.length} chunks and ${deletedFiles.length} deleted files from orchestrator`);
 
                 // Update status
                 this.statusInfo.totalChunks = (this.statusInfo.totalChunks || 0) + chunks.length;
                 this.statusInfo.lastIndexTime = Date.now();
 
-                // Send chunks to server
-                if (this.serverCommunication && chunks.length > 0) {
+                // Send chunks and deleted files to server
+                if (this.serverCommunication && (chunks.length > 0 || deletedFiles.length > 0)) {
                     try {
-                        this.outputChannel.appendLine(`[IndexingManager] Sending ${chunks.length} chunks to server...`);
-                        const response = await this.serverCommunication.sendChunksToServer(chunks);
+                        this.outputChannel.appendLine(`[IndexingManager] Sending ${chunks.length} chunks and ${deletedFiles.length} deleted files to server...`);
+                        const response = await this.serverCommunication.sendChunksToServer(chunks, deletedFiles, this.currentGitBranch);
                         this.outputChannel.appendLine(`[IndexingManager] Server response: processed=${response.processedChunks}, skipped=${response.skippedChunks}`);
                     } catch (error) {
                         this.outputChannel.appendLine(`[IndexingManager] Failed to send chunks to server: ${error}`);

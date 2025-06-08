@@ -111,8 +111,6 @@ export class TreeSitterChunker {
             const startLine = this.getLineFromIndex(originalContent, startIndex);
             const endLine = this.getEndLineFromIndex(originalContent, endIndex);
 
-            console.log(`[TreeSitterChunker] Chunk ${i + 1}: startIndex=${startIndex}, endIndex=${endIndex}, start_line=${startLine}, end_line=${endLine}`);
-            console.log(`[TreeSitterChunker] Chunk ${i + 1} content preview: "${chonkieChunk.text.substring(0, 50)}..."`);
 
             const chunkTypes = this.extractSemanticTypes(chonkieChunk.nodes);
 

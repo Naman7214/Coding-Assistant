@@ -26,7 +26,9 @@ class ChunkRepository:
     ) -> AsyncIOMotorCollection:
         """Get or create MongoDB collection for workspace chunks"""
         try:
-            collection_name = self._get_collection_name(workspace_hash)
+            # collection_name = self._get_collection_name(workspace_hash)
+            # for more reusability of the embeddings across the workspaces we will insert all chunks in the single collection.
+            collection_name = "chunks_e16192bc5127ecb1af9b0afdd14662f4bf2531c6"
             collection = self.mongodb_client[self.db_name][collection_name]
 
             # Check if collection exists and create indexes if needed
@@ -217,4 +219,97 @@ class ChunkRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Error deleting workspace chunks: {str(e)}",
+            )
+
+    async def get_chunks_by_obfuscated_paths(
+        self, workspace_hash: str, obfuscated_paths: List[str]
+    ) -> List[Chunk]:
+        """Get chunks by their obfuscated paths"""
+        try:
+            collection = await self._get_or_create_collection(workspace_hash)
+
+            cursor = collection.find(
+                {"obfuscated_path": {"$in": obfuscated_paths}}
+            )
+            chunks = []
+
+            async for doc in cursor:
+                # Remove MongoDB's _id field before converting
+                if "_id" in doc:
+                    del doc["_id"]
+                chunks.append(Chunk.from_dict(doc))
+
+            loggers["main"].info(
+                f"Retrieved {len(chunks)} chunks for {len(obfuscated_paths)} obfuscated paths from workspace {workspace_hash}"
+            )
+            return chunks
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error retrieving chunks by obfuscated paths for workspace {workspace_hash}: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving chunks by obfuscated paths: {str(e)}",
+            )
+
+    async def delete_chunks_by_hashes(
+        self, workspace_hash: str, chunk_hashes: List[str]
+    ) -> int:
+        """Delete chunks by their hashes"""
+        try:
+            collection = await self._get_or_create_collection(workspace_hash)
+
+            result = await collection.delete_many(
+                {"chunk_hash": {"$in": chunk_hashes}}
+            )
+            deleted_count = result.deleted_count
+
+            loggers["main"].info(
+                f"Deleted {deleted_count} chunks by hashes from workspace {workspace_hash}"
+            )
+            return deleted_count
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error deleting chunks by hashes for workspace {workspace_hash}: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error deleting chunks by hashes: {str(e)}",
+            )
+
+    async def get_chunks_by_obfuscated_paths_and_branch(
+        self, workspace_hash: str, obfuscated_paths: List[str], git_branch: str
+    ) -> List[Chunk]:
+        """Get chunks by their obfuscated paths AND git branch"""
+        try:
+            collection = await self._get_or_create_collection(workspace_hash)
+
+            cursor = collection.find(
+                {
+                    "obfuscated_path": {"$in": obfuscated_paths},
+                    "git_branch": git_branch,
+                }
+            )
+            chunks = []
+
+            async for doc in cursor:
+                # Remove MongoDB's _id field before converting
+                if "_id" in doc:
+                    del doc["_id"]
+                chunks.append(Chunk.from_dict(doc))
+
+            loggers["main"].info(
+                f"Retrieved {len(chunks)} chunks for {len(obfuscated_paths)} obfuscated paths on branch {git_branch} from workspace {workspace_hash}"
+            )
+            return chunks
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error retrieving chunks by obfuscated paths and branch for workspace {workspace_hash}: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving chunks by obfuscated paths and branch: {str(e)}",
             )

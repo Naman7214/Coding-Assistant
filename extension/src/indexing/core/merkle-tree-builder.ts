@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { MerkleTreeNode } from '../types/chunk';
+import { MerkleTreeNode, TreeComparisonResult } from '../types/chunk';
 import { combineHashes, hashFile } from '../utils/hash';
 
 export class MerkleTreeBuilder {
@@ -103,22 +103,23 @@ export class MerkleTreeBuilder {
     }
 
     /**
-     * Compare two merkle trees and find changed files
+     * Compare two merkle trees and find changed and deleted files
      */
-    compareTree(oldTree: MerkleTreeNode | null, newTree: MerkleTreeNode): string[] {
+    compareTree(oldTree: MerkleTreeNode | null, newTree: MerkleTreeNode): TreeComparisonResult {
         const changedFiles: string[] = [];
+        const deletedFiles: string[] = [];
 
         if (!oldTree) {
             // If no old tree, all files are new
             this.collectAllFiles(newTree, changedFiles);
-            return changedFiles;
+            return { changedFiles, deletedFiles };
         }
 
-        this.compareNodes(oldTree, newTree, changedFiles);
-        return changedFiles;
+        this.compareNodes(oldTree, newTree, changedFiles, deletedFiles);
+        return { changedFiles, deletedFiles };
     }
 
-    private compareNodes(oldNode: MerkleTreeNode, newNode: MerkleTreeNode, changedFiles: string[]): void {
+    private compareNodes(oldNode: MerkleTreeNode, newNode: MerkleTreeNode, changedFiles: string[], deletedFiles: string[]): void {
         // If hashes are different, investigate further
         if (oldNode.hash !== newNode.hash) {
             // If it's a file, add to changed files
@@ -139,7 +140,7 @@ export class MerkleTreeBuilder {
             for (const [filePath, newChild] of newChildMap) {
                 const oldChild = oldChildMap.get(filePath);
                 if (oldChild) {
-                    this.compareNodes(oldChild, newChild, changedFiles);
+                    this.compareNodes(oldChild, newChild, changedFiles, deletedFiles);
                 } else {
                     // New file/directory
                     this.collectAllFiles(newChild, changedFiles);
@@ -147,10 +148,10 @@ export class MerkleTreeBuilder {
             }
 
             // Check for deleted files (exist in old but not in new)
-            for (const [filePath] of oldChildMap) {
+            for (const [filePath, oldChild] of oldChildMap) {
                 if (!newChildMap.has(filePath)) {
-                    // File was deleted - we might want to handle this differently
-                    // For now, we don't add deleted files to the changed list
+                    // File was deleted - collect all files in the deleted subtree
+                    this.collectAllFiles(oldChild, deletedFiles);
                 }
             }
         }

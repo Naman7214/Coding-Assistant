@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as vscode from 'vscode';
 import * as zlib from 'zlib';
 import { CodeChunk } from '../types/chunk';
+import { obfuscatePath } from '../utils/hash';
 
 export interface ServerConfig {
     baseUrl: string;
@@ -33,13 +34,23 @@ export class ServerCommunication {
     /**
      * Send compressed chunks to server
      */
-    async sendChunksToServer(chunks: CodeChunk[]): Promise<ChunkUploadResponse> {
+    async sendChunksToServer(chunks: CodeChunk[], deletedFilesPaths: string[] = [], currentGitBranch: string = 'default'): Promise<ChunkUploadResponse> {
         try {
             console.log(`Sending ${chunks.length} chunks to server...`);
+            if (deletedFilesPaths.length > 0) {
+                console.log(`Including ${deletedFilesPaths.length} deleted files in payload for branch: ${currentGitBranch}`);
+            }
+
+            // Convert deleted file paths to obfuscated paths
+            const deletedObfuscatedPaths = deletedFilesPaths.map(filePath => {
+                return obfuscatePath(filePath, this.workspaceHash);
+            });
 
             const payload = {
                 workspace_hash: this.workspaceHash,
                 chunks: chunks,
+                deleted_files_obfuscated_paths: deletedObfuscatedPaths,
+                current_git_branch: currentGitBranch,
                 timestamp: Date.now()
             };
             console.log(`Payload being sent to server:`, payload);

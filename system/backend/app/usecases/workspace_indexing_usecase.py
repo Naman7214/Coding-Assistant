@@ -54,6 +54,12 @@ class WorkspaceIndexingUseCase:
             # Parse request data
             workspace_hash = payload_data.get("workspace_hash")
             chunks_data = payload_data.get("chunks", [])
+            deleted_files_obfuscated_paths = payload_data.get(
+                "deleted_files_obfuscated_paths", []
+            )
+            current_git_branch = payload_data.get(
+                "current_git_branch", "default"
+            )
             timestamp = payload_data.get("timestamp")
 
             if not workspace_hash:
@@ -62,36 +68,43 @@ class WorkspaceIndexingUseCase:
                     detail="workspace_hash is required",
                 )
 
-            if not chunks_data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="chunks array is required",
-                )
+            loggers["main"].info(
+                f"Processing {len(chunks_data)} chunks and {len(deleted_files_obfuscated_paths)} deleted files for workspace {workspace_hash} on branch {current_git_branch}"
+            )
 
             # Convert to ChunkData objects
             chunk_objects = []
-            for chunk_dict in chunks_data:
-                try:
-                    chunk_obj = ChunkData(**chunk_dict)
-                    chunk_objects.append(chunk_obj)
-                except Exception as e:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid chunk data: {str(e)}",
+            if chunks_data:
+                for chunk_dict in chunks_data:
+                    try:
+                        chunk_obj = ChunkData(**chunk_dict)
+                        chunk_objects.append(chunk_obj)
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid chunk data: {str(e)}",
+                        )
+
+            # Step 2: Handle deleted files first with branch-specific deletion
+            deleted_chunks_count = 0
+            pinecone_deleted_count = 0
+            if deleted_files_obfuscated_paths:
+                deleted_chunks_count, pinecone_deleted_count = (
+                    await self.workspace_indexing_service.handle_deleted_files(
+                        workspace_hash,
+                        deleted_files_obfuscated_paths,
+                        current_git_branch,
                     )
+                )
 
-            loggers["main"].info(
-                f"Processing {len(chunk_objects)} chunks for workspace {workspace_hash}"
-            )
-
-            # Step 2: Identify new vs existing chunks
+            # Step 3: Identify new vs existing chunks
             new_chunks, existing_chunks, existing_hashes = (
                 await self.workspace_indexing_service.identify_new_chunks(
                     workspace_hash, chunk_objects
                 )
             )
 
-            # Step 3: Generate embeddings only for new chunks
+            # Step 4: Generate embeddings only for new chunks
             new_chunks_with_embeddings = []
             embeddings_generated = 0
             if new_chunks:
@@ -100,14 +113,14 @@ class WorkspaceIndexingUseCase:
                 )
                 embeddings_generated = len(new_chunks_with_embeddings)
 
-            # Step 4: Store new chunks in MongoDB
+            # Step 5: Store new chunks in MongoDB
             mongodb_result = {"inserted": 0, "updated": 0}
             if new_chunks_with_embeddings:
                 mongodb_result = await self.workspace_indexing_service.store_chunks_in_mongodb(
                     workspace_hash, new_chunks_with_embeddings
                 )
 
-            # Step 5: Prepare all chunks for Pinecone upsert (new + existing)
+            # Step 6: Prepare all chunks for Pinecone upsert (new + existing)
             all_chunks_for_pinecone = (
                 new_chunks_with_embeddings + existing_chunks
             )
@@ -117,7 +130,7 @@ class WorkspaceIndexingUseCase:
             if chunk_objects:
                 git_branch = chunk_objects[0].git_branch or "default"
 
-            # Step 6: Upsert all chunks to Pinecone
+            # Step 7: Upsert all chunks to Pinecone
             pinecone_result = {"upserted_count": 0, "batches_processed": 0}
             if all_chunks_for_pinecone:
                 pinecone_result = await self.workspace_indexing_service.upsert_chunks_to_pinecone(
@@ -132,8 +145,10 @@ class WorkspaceIndexingUseCase:
                 total_chunks=len(chunk_objects),
                 existing_chunks=len(existing_chunks),
                 new_chunks=len(new_chunks),
+                deleted_chunks=deleted_chunks_count,
                 embeddings_generated=embeddings_generated,
                 pinecone_upserted=pinecone_result["upserted_count"],
+                pinecone_deleted=pinecone_deleted_count,
             )
 
             # Create response

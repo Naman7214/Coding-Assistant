@@ -33,7 +33,7 @@ export class IndexingOrchestrator {
     // Callbacks
     private onIndexingStartCallback?: () => void;
     private onIndexingCompleteCallback?: (stats: IndexingStats) => void;
-    private onChunksReadyCallback?: (chunks: CodeChunk[]) => void;
+    private onChunksReadyCallback?: (chunks: CodeChunk[], deletedFiles: string[]) => void;
     private onBranchChangeCallback?: (newBranch: string, oldBranch: string) => void;
 
     constructor(context: vscode.ExtensionContext, workspacePath: string, outputChannel: vscode.OutputChannel) {
@@ -97,7 +97,7 @@ export class IndexingOrchestrator {
     /**
      * Set callback for when chunks are ready for server transmission
      */
-    onChunksReady(callback: (chunks: CodeChunk[]) => void): void {
+    onChunksReady(callback: (chunks: CodeChunk[], deletedFiles: string[]) => void): void {
         this.onChunksReadyCallback = callback;
     }
 
@@ -212,28 +212,33 @@ export class IndexingOrchestrator {
             const oldMerkleTree = await this.storageManager.loadMerkleTree(this.currentGitBranch);
             this.outputChannel.appendLine(`Loaded old merkle tree for branch ${this.currentGitBranch}: ${oldMerkleTree ? 'Found' : 'Not found'}`);
 
-            // Compare trees to find changed files
-            const changedFiles = this.merkleTreeBuilder.compareTree(oldMerkleTree, newMerkleTree);
+            // Compare trees to find changed and deleted files
+            const comparisonResult = this.merkleTreeBuilder.compareTree(oldMerkleTree, newMerkleTree);
+            const { changedFiles, deletedFiles } = comparisonResult;
 
-            this.outputChannel.appendLine(`Found ${changedFiles.length} changed files for branch ${this.currentGitBranch}`);
+            this.outputChannel.appendLine(`Found ${changedFiles.length} changed files and ${deletedFiles.length} deleted files for branch ${this.currentGitBranch}`);
             if (changedFiles.length > 0) {
                 this.outputChannel.appendLine(`Changed files: (${changedFiles.length}) ${JSON.stringify(changedFiles.slice(0, 5))}`); // Log first 5 files
-            } else {
-                this.outputChannel.appendLine('No changed files detected - checking if this is expected');
+            }
+            if (deletedFiles.length > 0) {
+                this.outputChannel.appendLine(`Deleted files: (${deletedFiles.length}) ${JSON.stringify(deletedFiles.slice(0, 5))}`); // Log first 5 files
+            }
+            if (changedFiles.length === 0 && deletedFiles.length === 0) {
+                this.outputChannel.appendLine('No changed or deleted files detected - checking if this is expected');
                 this.outputChannel.appendLine(`Workspace path: ${this.workspacePath}`);
                 this.outputChannel.appendLine(`New tree children count: ${newMerkleTree.children?.length || 0}`);
             }
 
-            if (changedFiles.length > 0) {
+            if (changedFiles.length > 0 || deletedFiles.length > 0) {
                 // Process changed files to extract chunks
-                const chunks = await this.processChangedFiles(changedFiles);
+                const chunks = changedFiles.length > 0 ? await this.processChangedFiles(changedFiles) : [];
 
-                if (chunks.length > 0) {
-                    this.outputChannel.appendLine(`Extracted ${chunks.length} chunks from ${changedFiles.length} changed files`);
+                if (chunks.length > 0 || deletedFiles.length > 0) {
+                    this.outputChannel.appendLine(`Extracted ${chunks.length} chunks from ${changedFiles.length} changed files, ${deletedFiles.length} deleted files`);
 
-                    // Send chunks directly to server (no local storage)
+                    // Send chunks and deleted files to server
                     if (this.onChunksReadyCallback) {
-                        this.onChunksReadyCallback(chunks);
+                        this.onChunksReadyCallback(chunks, deletedFiles);
                     }
                 }
             }
@@ -252,7 +257,7 @@ export class IndexingOrchestrator {
             const processingTime = Date.now() - startTime;
             const stats: IndexingStats = {
                 totalChunks: 0, // Would be calculated from chunks
-                totalFiles: changedFiles.length,
+                totalFiles: changedFiles.length + deletedFiles.length,
                 lastIndexTime: Date.now(),
                 processingTime,
                 changedFiles: changedFiles.length

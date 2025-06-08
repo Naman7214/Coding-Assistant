@@ -458,3 +458,123 @@ class WorkspaceIndexingService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error upserting chunks to Pinecone: {str(e)}",
             )
+
+    async def handle_deleted_files(
+        self,
+        workspace_hash: str,
+        deleted_files_obfuscated_paths: List[str],
+        current_git_branch: str = "default",
+    ) -> Tuple[int, int]:
+        """Handle deletion of chunks for deleted files in specific git branch"""
+        try:
+            if not deleted_files_obfuscated_paths:
+                return 0, 0
+
+            loggers["main"].info(
+                f"Handling branch-specific deletion for {len(deleted_files_obfuscated_paths)} files in workspace {workspace_hash} on branch {current_git_branch}"
+            )
+
+            # Step 1: Find chunks with matching obfuscated paths AND git branch
+            chunks_to_delete = await self.chunk_repository.get_chunks_by_obfuscated_paths_and_branch(
+                workspace_hash,
+                deleted_files_obfuscated_paths,
+                current_git_branch,
+            )
+
+            if not chunks_to_delete:
+                loggers["main"].info(
+                    "No chunks found for deleted files in the specified branch"
+                )
+                return 0, 0
+
+            chunk_hashes_to_delete = [
+                chunk.chunk_hash for chunk in chunks_to_delete
+            ]
+
+            loggers["main"].info(
+                f"Found {len(chunks_to_delete)} chunks to delete for {len(deleted_files_obfuscated_paths)} deleted files on branch {current_git_branch}"
+            )
+
+            # Step 2: Delete from Pinecone only
+            pinecone_deleted_count = 0
+            if chunk_hashes_to_delete:
+                pinecone_deleted_count = (
+                    await self._delete_chunks_from_pinecone(
+                        workspace_hash,
+                        chunk_hashes_to_delete,
+                        current_git_branch,
+                    )
+                )
+
+            loggers["main"].info(
+                f"Successfully deleted {pinecone_deleted_count} vectors from Pinecone on branch {current_git_branch}"
+            )
+
+            return len(chunks_to_delete), pinecone_deleted_count
+
+        except Exception as e:
+            await self.error_repository.insert_error(
+                Error(
+                    tool_name="workspace_indexing",
+                    error_message=f"Error handling deleted files: {str(e)}",
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error handling deleted files: {str(e)}",
+            )
+
+    async def _delete_chunks_from_pinecone(
+        self, workspace_hash: str, chunk_hashes: List[str], git_branch: str
+    ) -> int:
+        """Delete specific chunks from Pinecone by hash"""
+        try:
+            if not chunk_hashes:
+                return 0
+
+            # Get or create index
+            index_host = await self._get_or_create_pinecone_index(
+                workspace_hash
+            )
+
+            # Use git_branch as namespace
+            namespace = git_branch if git_branch else "default"
+
+            # Delete vectors in batches (Pinecone has limits)
+            batch_size = 100  # Conservative batch size for deletions
+            total_deleted = 0
+
+            for i in range(0, len(chunk_hashes), batch_size):
+                batch_hashes = chunk_hashes[i : i + batch_size]
+
+                try:
+                    result = await self.pinecone_service.delete_vectors(
+                        index_host, batch_hashes, namespace
+                    )
+
+                    # Handle different response formats
+                    if isinstance(result, dict) and "deleted" in result:
+                        total_deleted += result["deleted"]
+                    else:
+                        # Assume success if no error
+                        total_deleted += len(batch_hashes)
+
+                except Exception as e:
+                    loggers["main"].warning(
+                        f"Failed to delete batch {i//batch_size + 1} from Pinecone: {str(e)}"
+                    )
+                    # Continue with other batches even if one fails
+
+            loggers["main"].info(
+                f"Deleted {total_deleted} vectors from Pinecone namespace '{namespace}'"
+            )
+
+            return total_deleted
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error deleting chunks from Pinecone: {str(e)}"
+            )
+            # Don't raise exception for Pinecone deletion failures, just log
+            return 0

@@ -41,6 +41,11 @@ export interface FileChangeInfo {
     newHash?: string;
 }
 
+export interface TreeComparisonResult {
+    changedFiles: string[];
+    deletedFiles: string[];
+}
+
 export interface IndexingStats {
     totalChunks: number;
     totalFiles: number;
