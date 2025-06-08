@@ -1,6 +1,6 @@
 import axios from 'axios';
-import * as fs from 'fs';
 import * as vscode from 'vscode';
+import * as zlib from 'zlib';
 import { CodeChunk } from '../types/chunk';
 
 export interface ServerConfig {
@@ -43,22 +43,23 @@ export class ServerCommunication {
                 timestamp: Date.now()
             };
             console.log(`Payload being sent to server:`, payload);
+
+            // Convert payload to JSON string
+            const jsonPayload = JSON.stringify(payload);
+
+            // Compress the JSON payload with gzip
+            const compressedPayload = await this.compressWithGzip(jsonPayload);
+
             const response = await axios.post(
-                `${this.config.baseUrl}/api/indexing/upload-chunks`,
-                payload,
+                `${this.config.baseUrl}/api/v1/index-workspace-chunks`,
+                compressedPayload,
                 {
                     headers: {
                         'Content-Type': 'application/json',
                         'Content-Encoding': 'gzip',
                         ...(this.config.apiKey && { 'Authorization': `Bearer ${this.config.apiKey}` })
                     },
-                    timeout: this.config.timeout,
-                    // Automatically compress with gzip
-                    transformRequest: [
-                        (data) => {
-                            return JSON.stringify(data);
-                        }
-                    ]
+                    timeout: 30 * 60 * 1000 // 30 minutes
                 }
             );
 
@@ -80,6 +81,20 @@ export class ServerCommunication {
         }
     }
 
+    /**
+     * Compress data using gzip
+     */
+    private async compressWithGzip(data: string): Promise<Buffer> {
+        return new Promise((resolve, reject) => {
+            zlib.gzip(Buffer.from(data, 'utf-8'), (error, compressed) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(compressed);
+                }
+            });
+        });
+    }
 
     /**
      * Check server health and connectivity

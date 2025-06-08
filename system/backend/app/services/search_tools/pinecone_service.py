@@ -154,13 +154,15 @@ class PineconeService:
     ):
         results = []
         for i in range(len(chunks)):
+            # Only include specific metadata fields as per requirements
             metadata = {
-                key: value for key, value in chunks[i].items() if key != "_id"
+                "obfuscated_path": chunks[i].get("obfuscated_path"),
+                "start_line": chunks[i].get("start_line"),
+                "end_line": chunks[i].get("end_line"),
+                "language": chunks[i].get("language"),
+                "chunk_type": chunks[i].get("chunk_type"),
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
-
-            metadata["created_at"] = datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
             # Generate a unique ID if _id doesn't exist
             if "_id" in chunks[i]:
                 vector_id = chunks[i]["_id"]

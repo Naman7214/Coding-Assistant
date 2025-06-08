@@ -27,7 +27,7 @@ export async function hashFile(filePath: string): Promise<string> {
  * Generate hash for workspace path (used as unique identifier)
  */
 export function hashWorkspacePath(workspacePath: string): string {
-    return hashString(path.resolve(workspacePath));
+    return hashString(path.resolve(workspacePath)).substring(0, 40);
 }
 
 /**

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 import click
 from dotenv import load_dotenv
@@ -8,21 +8,9 @@ from fastmcp import FastMCP
 
 load_dotenv()
 from system.mcp_server.tools.enviornment_tools import run_terminal_command_tool
-from system.mcp_server.tools.external_tools import web_search_tool
 from system.mcp_server.tools.file_access_tools import (
-    delete_file_tool,
     list_directory_tool,
     read_file_tool,
-    search_files_tool,
-)
-from system.mcp_server.tools.modification_tools import (
-    edit_file_tool,
-    reapply_tool,
-    search_and_replace_tool,
-)
-from system.mcp_server.tools.search_tools import (
-    codebase_search_tool,
-    execute_grep_search_tool,
 )
 
 logging.basicConfig(

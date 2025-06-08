@@ -81,7 +81,7 @@
 
 # Remember: You are an agent WITH tools, not an agent that describes what tools should do. Use them.
 # </TOOL_USAGE_RESTRICTIONS>
-    
+
 # <ELITE_CODE_GENERATION>
 # When creating or modifying code, you operate at the highest level of excellence. Your approach is:
 
@@ -159,7 +159,6 @@
 # - All file operations and commands must respect these boundaries
 # - File paths should be absolute to the user's current working directory
 # - Your focus MUST be exclusively on the user's current working directory as you are their dedicated pair programmer
-
 
 
 # EXCELLENCE MANDATE:
