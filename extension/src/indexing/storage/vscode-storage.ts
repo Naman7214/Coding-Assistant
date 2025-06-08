@@ -1,7 +1,4 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
-import * as zlib from 'zlib';
 import { IndexingConfig, MerkleTreeNode } from '../types/chunk';
 
 export class VSCodeStorageManager {
@@ -14,229 +11,152 @@ export class VSCodeStorageManager {
     }
 
     /**
-     * Save merkle tree to VSCode storage
+     * Save merkle tree for a specific branch to VSCode storage
      */
-    async saveMerkleTree(merkleTree: MerkleTreeNode): Promise<void> {
+    async saveMerkleTree(merkleTree: MerkleTreeNode, gitBranch: string): Promise<void> {
         try {
-            const key = `merkle_tree_${this.workspaceHash}`;
-            const serialized = JSON.stringify(merkleTree);
-
-            // For large trees, save to file system storage
-            if (serialized.length > 1024 * 1024) { // 1MB threshold
-                await this.saveToFileStorage(key, serialized);
-            } else {
-                // For smaller trees, use VSCode's built-in storage
-                await this.context.globalState.update(key, merkleTree);
-            }
+            const key = `merkle_tree_${this.workspaceHash}_${gitBranch}`;
+            await this.context.globalState.update(key, merkleTree);
         } catch (error) {
-            console.error('Error saving merkle tree:', error);
+            console.error('Error saving branch-specific merkle tree:', error);
             throw error;
         }
     }
 
     /**
-     * Load merkle tree from VSCode storage
+     * Load merkle tree for a specific branch from VSCode storage
      */
-    async loadMerkleTree(): Promise<MerkleTreeNode | null> {
+    async loadMerkleTree(gitBranch: string): Promise<MerkleTreeNode | null> {
         try {
-            const key = `merkle_tree_${this.workspaceHash}`;
-
-            // Try to load from file storage first
-            const fromFile = await this.loadFromFileStorage(key);
-            if (fromFile) {
-                return JSON.parse(fromFile as string);
-            }
-
-            // Fallback to VSCode storage
-            const fromVSCode = this.context.globalState.get<MerkleTreeNode>(key);
-            return fromVSCode || null;
+            const key = `merkle_tree_${this.workspaceHash}_${gitBranch}`;
+            const merkleTree = this.context.globalState.get<MerkleTreeNode>(key);
+            return merkleTree || null;
         } catch (error) {
-            console.error('Error loading merkle tree:', error);
+            console.error('Error loading branch-specific merkle tree:', error);
             return null;
         }
     }
 
     /**
-     * Save indexing configuration
+     * Delete merkle tree for a specific branch
+     */
+    async deleteMerkleTree(gitBranch: string): Promise<void> {
+        try {
+            const key = `merkle_tree_${this.workspaceHash}_${gitBranch}`;
+            await this.context.globalState.update(key, undefined);
+        } catch (error) {
+            console.error('Error deleting branch-specific merkle tree:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all stored branches for this workspace
+     */
+    async getStoredBranches(): Promise<string[]> {
+        try {
+            const keys = this.context.globalState.keys();
+            const prefix = `merkle_tree_${this.workspaceHash}_`;
+
+            return keys
+                .filter(key => key.startsWith(prefix))
+                .map(key => key.replace(prefix, ''));
+        } catch (error) {
+            console.error('Error getting stored branches:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Save indexing configuration for a specific branch
      */
     async saveConfig(config: IndexingConfig): Promise<void> {
         try {
-            const key = `indexing_config_${this.workspaceHash}`;
+            const key = `indexing_config_${this.workspaceHash}_${config.gitBranch}`;
             await this.context.globalState.update(key, config);
         } catch (error) {
-            console.error('Error saving indexing config:', error);
+            console.error('Error saving branch-specific indexing config:', error);
             throw error;
         }
     }
 
     /**
-     * Load indexing configuration
+     * Load indexing configuration for a specific branch
      */
-    async loadConfig(): Promise<IndexingConfig | null> {
+    async loadConfig(gitBranch: string): Promise<IndexingConfig | null> {
         try {
-            const key = `indexing_config_${this.workspaceHash}`;
+            const key = `indexing_config_${this.workspaceHash}_${gitBranch}`;
             return this.context.globalState.get<IndexingConfig>(key) || null;
         } catch (error) {
-            console.error('Error loading indexing config:', error);
+            console.error('Error loading branch-specific indexing config:', error);
             return null;
         }
     }
 
-    // Removed chunk storage methods - chunks are sent directly to server
-
     /**
-     * Get storage statistics
+     * Get storage statistics for all branches
      */
     async getStorageStats(): Promise<{
-        merkleTreeSize: number;
-        configSize: number;
-        totalStorageSize: number;
+        totalBranches: number;
+        merkleTreesSize: number;
+        configsSize: number;
+        branches: string[];
     }> {
         try {
-            const storageDir = this.getStorageDirectory();
-            let totalSize = 0;
+            const branches = await this.getStoredBranches();
+            let merkleTreesSize = 0;
+            let configsSize = 0;
 
-            if (await this.directoryExists(storageDir)) {
-                const files = await fs.promises.readdir(storageDir);
+            for (const branch of branches) {
+                const merkleTree = await this.loadMerkleTree(branch);
+                const config = await this.loadConfig(branch);
 
-                for (const file of files) {
-                    const filePath = path.join(storageDir, file);
-                    const stats = await fs.promises.stat(filePath);
-                    totalSize += stats.size;
+                if (merkleTree) {
+                    merkleTreesSize += JSON.stringify(merkleTree).length;
+                }
+                if (config) {
+                    configsSize += JSON.stringify(config).length;
                 }
             }
 
-            // Estimate sizes from VSCode storage
-            const merkleTree = await this.loadMerkleTree();
-            const config = await this.loadConfig();
-
-            const merkleTreeSize = merkleTree ? JSON.stringify(merkleTree).length : 0;
-            const configSize = config ? JSON.stringify(config).length : 0;
-
             return {
-                merkleTreeSize,
-                configSize,
-                totalStorageSize: totalSize
+                totalBranches: branches.length,
+                merkleTreesSize,
+                configsSize,
+                branches
             };
         } catch (error) {
             console.error('Error getting storage stats:', error);
             return {
-                merkleTreeSize: 0,
-                configSize: 0,
-                totalStorageSize: 0
+                totalBranches: 0,
+                merkleTreesSize: 0,
+                configsSize: 0,
+                branches: []
             };
         }
     }
 
     /**
-     * Save data to file system storage
+     * Clean up old branch data (for branches that no longer exist)
      */
-    private async saveToFileStorage(key: string, data: string | Buffer, isBinary: boolean = false): Promise<string> {
-        const storageDir = this.getStorageDirectory();
-        await this.ensureDirectoryExists(storageDir);
-
-        const filePath = path.join(storageDir, key);
-
-        if (isBinary) {
-            await fs.promises.writeFile(filePath, data as Buffer);
-        } else {
-            await fs.promises.writeFile(filePath, data as string, 'utf-8');
-        }
-
-        return filePath;
-    }
-
-    /**
-     * Load data from file system storage
-     */
-    private async loadFromFileStorage(key: string, isBinary: boolean = false): Promise<string | Buffer | null> {
+    async cleanupOldBranches(activeBranches: string[]): Promise<void> {
         try {
-            const storageDir = this.getStorageDirectory();
-            const filePath = path.join(storageDir, key);
+            const storedBranches = await this.getStoredBranches();
+            const branchesToDelete = storedBranches.filter(branch => !activeBranches.includes(branch));
 
-            if (!await this.fileExists(filePath)) {
-                return null;
+            for (const branch of branchesToDelete) {
+                await this.deleteMerkleTree(branch);
+
+                // Also delete config for that branch
+                const configKey = `indexing_config_${this.workspaceHash}_${branch}`;
+                await this.context.globalState.update(configKey, undefined);
             }
 
-            if (isBinary) {
-                return await fs.promises.readFile(filePath);
-            } else {
-                return await fs.promises.readFile(filePath, 'utf-8');
+            if (branchesToDelete.length > 0) {
+                console.log(`Cleaned up data for ${branchesToDelete.length} old branches: ${branchesToDelete.join(', ')}`);
             }
         } catch (error) {
-            return null;
-        }
-    }
-
-    /**
-     * Get storage directory path
-     */
-    private getStorageDirectory(): string {
-        return path.join(this.context.globalStorageUri.fsPath, 'indexing');
-    }
-
-    /**
-     * Compress data using gzip
-     */
-    private async compressData(data: string): Promise<Buffer> {
-        return new Promise((resolve, reject) => {
-            zlib.gzip(Buffer.from(data, 'utf-8'), (error, compressed) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve(compressed);
-                }
-            });
-        });
-    }
-
-    /**
-     * Decompress gzipped data
-     */
-    private async decompressData(compressed: Buffer): Promise<string> {
-        return new Promise((resolve, reject) => {
-            zlib.gunzip(compressed, (error, decompressed) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve(decompressed.toString('utf-8'));
-                }
-            });
-        });
-    }
-
-    /**
-     * Ensure directory exists
-     */
-    private async ensureDirectoryExists(dirPath: string): Promise<void> {
-        try {
-            await fs.promises.access(dirPath);
-        } catch {
-            await fs.promises.mkdir(dirPath, { recursive: true });
-        }
-    }
-
-    /**
-     * Check if directory exists
-     */
-    private async directoryExists(dirPath: string): Promise<boolean> {
-        try {
-            const stats = await fs.promises.stat(dirPath);
-            return stats.isDirectory();
-        } catch {
-            return false;
-        }
-    }
-
-    /**
-     * Check if file exists
-     */
-    private async fileExists(filePath: string): Promise<boolean> {
-        try {
-            const stats = await fs.promises.stat(filePath);
-            return stats.isFile();
-        } catch {
-            return false;
+            console.error('Error cleaning up old branches:', error);
         }
     }
 } 

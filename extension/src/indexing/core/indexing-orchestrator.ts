@@ -19,19 +19,22 @@ export class IndexingOrchestrator {
     private gitMonitor: GitMonitor;
     private storageManager: VSCodeStorageManager;
     private outputChannel: vscode.OutputChannel;
+    private currentGitBranch: string = 'default';
 
     private indexingTimer: NodeJS.Timeout | null = null;
     private isIndexing: boolean = false;
     private disposables: vscode.Disposable[] = [];
 
     // Configuration
-    private readonly INDEXING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    // private readonly INDEXING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    private readonly INDEXING_INTERVAL = 60 * 3000; // 10 minutes
     private readonly MAX_CONCURRENT_FILES = 10;
 
     // Callbacks
     private onIndexingStartCallback?: () => void;
     private onIndexingCompleteCallback?: (stats: IndexingStats) => void;
     private onChunksReadyCallback?: (chunks: CodeChunk[]) => void;
+    private onBranchChangeCallback?: (newBranch: string, oldBranch: string) => void;
 
     constructor(context: vscode.ExtensionContext, workspacePath: string, outputChannel: vscode.OutputChannel) {
         this.context = context;
@@ -55,14 +58,15 @@ export class IndexingOrchestrator {
 
             // Initialize Git monitoring
             await this.gitMonitor.initialize();
+            this.currentGitBranch = await this.gitMonitor.getCurrentBranch();
 
             // Set up Git branch change listener
             this.gitMonitor.onBranchChange(async (newBranch, oldBranch) => {
-                this.outputChannel.appendLine(`[IndexingOrchestrator] Branch changed from ${oldBranch} to ${newBranch}, triggering full reindex`);
-                await this.handleBranchChange(newBranch);
+                this.outputChannel.appendLine(`[IndexingOrchestrator] Branch changed from ${oldBranch} to ${newBranch}`);
+                await this.handleBranchChange(newBranch, oldBranch);
             });
 
-            // Load or create initial configuration
+            // Load or create initial configuration for current branch
             await this.loadOrCreateConfig();
 
             // Start the indexing timer (but don't perform initial indexing here)
@@ -98,6 +102,13 @@ export class IndexingOrchestrator {
     }
 
     /**
+     * Set callback for branch changes
+     */
+    onBranchChange(callback: (newBranch: string, oldBranch: string) => void): void {
+        this.onBranchChangeCallback = callback;
+    }
+
+    /**
      * Manually trigger indexing
      */
     async triggerIndexing(): Promise<void> {
@@ -113,7 +124,7 @@ export class IndexingOrchestrator {
      * Get current indexing statistics
      */
     async getIndexingStats(): Promise<IndexingStats> {
-        const config = await this.storageManager.loadConfig();
+        const config = await this.storageManager.loadConfig(this.currentGitBranch);
         const storageStats = await this.storageManager.getStorageStats();
 
         return {
@@ -126,28 +137,29 @@ export class IndexingOrchestrator {
     }
 
     /**
-     * Load or create initial configuration
+     * Load or create initial configuration for current branch
      */
     private async loadOrCreateConfig(): Promise<void> {
-        let config = await this.storageManager.loadConfig();
+        let config = await this.storageManager.loadConfig(this.currentGitBranch);
 
         if (!config) {
-            const currentBranch = await this.gitMonitor.getCurrentBranch();
-
             config = {
                 workspaceHash: this.workspaceHash,
                 lastIndexTime: 0,
                 merkleTreeRoot: '',
-                gitBranch: currentBranch,
+                gitBranch: this.currentGitBranch,
                 excludePatterns: [],
                 includePatterns: []
             };
 
             await this.storageManager.saveConfig(config);
+            this.outputChannel.appendLine(`[IndexingOrchestrator] Created new config for branch: ${this.currentGitBranch}`);
+        } else {
+            this.outputChannel.appendLine(`[IndexingOrchestrator] Loaded existing config for branch: ${this.currentGitBranch}`);
         }
 
         // Update chunker with current branch
-        this.treeSitterChunker = new TreeSitterChunker(this.workspaceHash, config.gitBranch);
+        this.treeSitterChunker = new TreeSitterChunker(this.workspaceHash, this.currentGitBranch);
     }
 
     /**
@@ -184,7 +196,7 @@ export class IndexingOrchestrator {
                 this.onIndexingStartCallback();
             }
 
-            this.outputChannel.appendLine(`[IndexingOrchestrator] Starting code base indexing for workspace: ${this.workspacePath}`);
+            this.outputChannel.appendLine(`[IndexingOrchestrator] Starting code base indexing for workspace: ${this.workspacePath}, branch: ${this.currentGitBranch}`);
 
             // Validate workspace path exists
             const workspaceExists = await fs.promises.access(this.workspacePath).then(() => true).catch(() => false);
@@ -196,14 +208,14 @@ export class IndexingOrchestrator {
             const newMerkleTree = await this.merkleTreeBuilder.buildTree(this.workspacePath);
             this.outputChannel.appendLine(`[IndexingOrchestrator] Built new merkle tree with hash: ${newMerkleTree.hash}`);
 
-            // Load previous merkle tree
-            const oldMerkleTree = await this.storageManager.loadMerkleTree();
-            this.outputChannel.appendLine(`Loaded old merkle tree: ${oldMerkleTree ? 'Found' : 'Not found'}`);
+            // Load previous merkle tree for current branch
+            const oldMerkleTree = await this.storageManager.loadMerkleTree(this.currentGitBranch);
+            this.outputChannel.appendLine(`Loaded old merkle tree for branch ${this.currentGitBranch}: ${oldMerkleTree ? 'Found' : 'Not found'}`);
 
             // Compare trees to find changed files
             const changedFiles = this.merkleTreeBuilder.compareTree(oldMerkleTree, newMerkleTree);
 
-            this.outputChannel.appendLine(`Found ${changedFiles.length} changed files`);
+            this.outputChannel.appendLine(`Found ${changedFiles.length} changed files for branch ${this.currentGitBranch}`);
             if (changedFiles.length > 0) {
                 this.outputChannel.appendLine(`Changed files: (${changedFiles.length}) ${JSON.stringify(changedFiles.slice(0, 5))}`); // Log first 5 files
             } else {
@@ -226,18 +238,16 @@ export class IndexingOrchestrator {
                 }
             }
 
-            // Save new merkle tree
-            await this.storageManager.saveMerkleTree(newMerkleTree);
+            // Save new merkle tree for current branch
+            await this.storageManager.saveMerkleTree(newMerkleTree, this.currentGitBranch);
 
-            // Update configuration
-            const config = await this.storageManager.loadConfig();
+            // Update configuration for current branch
+            const config = await this.storageManager.loadConfig(this.currentGitBranch);
             if (config) {
                 config.lastIndexTime = Date.now();
                 config.merkleTreeRoot = newMerkleTree.hash;
                 await this.storageManager.saveConfig(config);
             }
-
-            // No local chunk cleanup needed - chunks are sent directly to server
 
             const processingTime = Date.now() - startTime;
             const stats: IndexingStats = {
@@ -248,7 +258,7 @@ export class IndexingOrchestrator {
                 changedFiles: changedFiles.length
             };
 
-            this.outputChannel.appendLine(`Indexing completed in ${processingTime}ms`);
+            this.outputChannel.appendLine(`Indexing completed in ${processingTime}ms for branch ${this.currentGitBranch}`);
 
             if (this.onIndexingCompleteCallback) {
                 this.onIndexingCompleteCallback(stats);
@@ -300,38 +310,53 @@ export class IndexingOrchestrator {
     }
 
     /**
-     * Handle Git branch changes
+     * Handle Git branch changes - load branch-specific merkle tree instead of deleting
      */
-    private async handleBranchChange(newBranch: string): Promise<void> {
+    private async handleBranchChange(newBranch: string, oldBranch: string): Promise<void> {
         try {
-            this.outputChannel.appendLine(`Handling branch change to: ${newBranch}`);
+            this.outputChannel.appendLine(`Handling branch change from ${oldBranch} to: ${newBranch}`);
+
+            // Update current branch
+            this.currentGitBranch = newBranch;
+
+            // Notify IndexingManager about branch change
+            if (this.onBranchChangeCallback) {
+                this.onBranchChangeCallback(newBranch, oldBranch);
+            }
 
             // Update chunker with new branch
             this.treeSitterChunker = new TreeSitterChunker(this.workspaceHash, newBranch);
 
-            // Update configuration
-            const config = await this.storageManager.loadConfig();
-            if (config) {
-                config.gitBranch = newBranch;
-                await this.storageManager.saveConfig(config);
+            // Load or create configuration for new branch
+            await this.loadOrCreateConfig();
+
+            // Check if we have merkle tree for this branch
+            const existingMerkleTree = await this.storageManager.loadMerkleTree(newBranch);
+
+            if (existingMerkleTree) {
+                this.outputChannel.appendLine(`Found existing merkle tree for branch ${newBranch}, will compare changes`);
+            } else {
+                this.outputChannel.appendLine(`No existing merkle tree found for branch ${newBranch}, will perform full indexing`);
             }
 
-            // Clear old merkle tree to force full reindex
-            await this.storageManager.saveMerkleTree({
-                hash: '',
-                filePath: this.workspacePath,
-                lastModified: 0,
-                fileSize: 0,
-                children: []
-            });
-
-            // Trigger immediate indexing
+            // Trigger immediate indexing (will compare with branch-specific merkle tree)
             await this.performIndexing();
+
+            // Optional: Clean up merkle trees for branches that no longer exist
+            // You could implement this by getting all git branches and calling cleanupOldBranches
+            // For now, we'll keep all branch data for safety
 
         } catch (error) {
             this.outputChannel.appendLine('Error handling branch change:');
             this.outputChannel.appendLine(error.message);
         }
+    }
+
+    /**
+     * Get current git branch
+     */
+    getCurrentBranch(): string {
+        return this.currentGitBranch;
     }
 
     /**

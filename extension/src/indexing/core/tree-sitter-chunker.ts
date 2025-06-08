@@ -80,12 +80,6 @@ export class TreeSitterChunker {
             console.log(`[TreeSitterChunker] Using Chonkie chunker for ${language}: ${filePath}`);
             const chonkieChunks: ChonkieCodeChunk[] = await chunker.chunk(content);
 
-            // Debug: Log the actual structure of the first chunk
-            if (chonkieChunks.length > 0) {
-                console.log(`[TreeSitterChunker] DEBUG - First chunk structure:`, JSON.stringify(chonkieChunks[0], null, 2));
-                console.log(`[TreeSitterChunker] DEBUG - Available properties:`, Object.keys(chonkieChunks[0]));
-            }
-
             const convertedChunks = this.convertChonkieChunks(chonkieChunks, content, filePath, language);
             console.log(`[TreeSitterChunker] Generated ${convertedChunks.length} chunks for: ${filePath}`);
             return convertedChunks;

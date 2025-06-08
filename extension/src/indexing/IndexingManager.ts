@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import { GitMonitor } from './core/git-monitor';
 import { IndexingOrchestrator } from './core/indexing-orchestrator';
 import { ServerCommunication, createServerCommunicationFromSettings } from './core/server-communication';
 import { CodeChunk, IndexingStats } from './types/chunk';
@@ -29,7 +28,6 @@ export class IndexingManager extends EventEmitter {
     private outputChannel: vscode.OutputChannel;
     private config: IndexingManagerConfig;
     private orchestrator: IndexingOrchestrator | null = null;
-    private gitMonitor: GitMonitor | null = null;
     private serverCommunication: ServerCommunication | null = null;
     private workspacePath: string = '';
     private workspaceHash: string = '';
@@ -103,10 +101,8 @@ export class IndexingManager extends EventEmitter {
             this.orchestrator = new IndexingOrchestrator(this.context, this.workspacePath, this.outputChannel);
             await this.orchestrator.initialize();
 
-            // Initialize git monitor
-            this.gitMonitor = new GitMonitor(this.workspacePath);
-            await this.gitMonitor.initialize();
-            this.currentGitBranch = await this.gitMonitor.getCurrentBranch();
+            // Get initial git branch from orchestrator
+            this.currentGitBranch = this.orchestrator.getCurrentBranch();
 
             // Initialize server communication
             this.serverCommunication = createServerCommunicationFromSettings(this.workspaceHash);
@@ -253,26 +249,17 @@ export class IndexingManager extends EventEmitter {
      * Set up event listeners for git and file changes
      */
     private setupEventListeners(): void {
-        if (!this.gitMonitor) {
+        if (!this.orchestrator) {
             return;
         }
 
-        // Listen for git branch changes
-        this.gitMonitor.onBranchChange(async (newBranch: string, oldBranch: string) => {
+        // Listen for branch changes from orchestrator
+        this.orchestrator.onBranchChange((newBranch: string, oldBranch: string) => {
             this.outputChannel.appendLine(`[IndexingManager] Git branch changed: ${oldBranch} → ${newBranch}`);
             this.currentGitBranch = newBranch;
             this.statusInfo.gitBranch = newBranch;
 
-            // Trigger full re-indexing for new branch
-            if (!this.isIndexing) {
-                try {
-                    this.outputChannel.appendLine('[IndexingManager] Triggering full re-indexing for branch change');
-                    await this.performFullReindexing();
-                } catch (error) {
-                    this.outputChannel.appendLine(`[IndexingManager] Branch change re-indexing failed: ${error}`);
-                }
-            }
-
+            this.outputChannel.appendLine('[IndexingManager] Branch change handled by orchestrator with branch-specific merkle trees');
             this.emit('statusChanged', this.statusInfo);
         });
 
@@ -281,7 +268,6 @@ export class IndexingManager extends EventEmitter {
             // Set up single callback to handle chunks and send to server
             this.orchestrator.onChunksReady(async (chunks: CodeChunk[]) => {
                 this.outputChannel.appendLine(`[IndexingManager] Received ${chunks.length} chunks from orchestrator`);
-
 
                 // Update status
                 this.statusInfo.totalChunks = (this.statusInfo.totalChunks || 0) + chunks.length;
@@ -308,47 +294,6 @@ export class IndexingManager extends EventEmitter {
 
             // Note: IndexingOrchestrator doesn't have error events, 
             // errors will be handled through try/catch in method calls
-        }
-    }
-
-
-
-    /**
-     * Perform full re-indexing (used for branch changes)
-     */
-    private async performFullReindexing(): Promise<void> {
-        if (!this.orchestrator) {
-            return;
-        }
-
-        try {
-            this.isIndexing = true;
-            this.statusInfo.status = 'indexing';
-            this.emit('statusChanged', this.statusInfo);
-
-            // Force full re-indexing - orchestrator will handle change detection and chunk generation
-            await this.orchestrator.triggerIndexing();
-
-            // Update status - chunks will be handled by the callback in setupEventListeners
-            this.statusInfo.lastIndexTime = Date.now();
-            this.outputChannel.appendLine('[IndexingManager] Full re-indexing triggered successfully');
-
-            this.emit('indexingCompleted', {
-                chunks: 0, // Will be updated by callback when chunks are received
-                timestamp: Date.now(),
-                fullReindex: true
-            });
-
-            this.isIndexing = false;
-            this.statusInfo.status = 'idle';
-            this.emit('statusChanged', this.statusInfo);
-
-        } catch (error) {
-            this.outputChannel.appendLine(`[IndexingManager] Full re-indexing failed: ${error}`);
-            this.isIndexing = false;
-            this.statusInfo.status = 'error';
-            this.emit('statusChanged', this.statusInfo);
-            throw error;
         }
     }
 
@@ -459,12 +404,6 @@ export class IndexingManager extends EventEmitter {
         if (this.orchestrator) {
             this.orchestrator.dispose();
             this.orchestrator = null;
-        }
-
-        // Dispose git monitor
-        if (this.gitMonitor) {
-            this.gitMonitor.dispose();
-            this.gitMonitor = null;
         }
 
         // Clean up server communication
