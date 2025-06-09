@@ -6,6 +6,7 @@ import { GitContextCollector } from './collectors/GitContextCollector';
 import { OpenFilesCollector } from './collectors/OpenFilesCollector';
 import { ProblemsCollector } from './collectors/ProblemsCollector';
 import { ProjectStructureCollector } from './collectors/ProjectStructureCollector';
+import { RecentEditsCollector } from './collectors/RecentEditsCollector';
 import { FileChangeEvent, FileWatcher } from './FileWatcher';
 import { CacheManager } from './storage/CacheManager';
 import { VSCodeStorage } from './storage/VSCodeStorage';
@@ -65,6 +66,7 @@ export class ContextManager extends EventEmitter {
     private outputChannel: vscode.OutputChannel;
     private storage: VSCodeStorage;
     private cacheManager: CacheManager;
+    private context: vscode.ExtensionContext;
     private fileWatcher: FileWatcher | null = null; // Initialize as null since we'll create it when workspace is ready
     private collectors: Map<string, IContextCollector> = new Map();
     private workspaceId: string = '';
@@ -82,6 +84,7 @@ export class ContextManager extends EventEmitter {
     ) {
         super();
 
+        this.context = context;
         this.outputChannel = outputChannel;
 
         // Default configuration
@@ -90,7 +93,7 @@ export class ContextManager extends EventEmitter {
             autoCollectOnChange: true,
             autoCollectInterval: 30000, // 30 seconds
             maxCacheSize: 100 * 1024 * 1024, // 100MB
-            defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector'],
+            defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector', 'RecentEditsCollector'],
             storageConfig: {
                 enableStorage: true,
                 enableCache: true
@@ -652,6 +655,17 @@ export class ContextManager extends EventEmitter {
             }
         }
 
+        // Always collect fresh recent edits context
+        if (this.collectors.has('RecentEditsCollector')) {
+            const collector = this.collectors.get('RecentEditsCollector');
+            if (collector) {
+                const data = await collector.collectSafely();
+                if (data) {
+                    contexts.set(ContextType.RECENT_EDITS, data);
+                }
+            }
+        }
+
         return contexts;
     }
 
@@ -746,6 +760,7 @@ export class ContextManager extends EventEmitter {
         const projectStructureData = results.find(r => r.collector === 'ProjectStructureCollector' && r.success)?.data?.data;
         const gitContextData = results.find(r => r.collector === 'GitContextCollector' && r.success)?.data?.data;
         const problemsData = results.find(r => r.collector === 'ProblemsCollector' && r.success)?.data?.data;
+        const recentEditsData = results.find(r => r.collector === 'RecentEditsCollector' && r.success)?.data?.data;
 
         // Build processed context
         const processedContext: ProcessedContext = {
@@ -862,8 +877,9 @@ export class ContextManager extends EventEmitter {
                 editingPatterns: [],
                 commandUsage: {}
             },
+            recentEdits: recentEditsData || undefined,
             relevanceScores: {},
-            totalTokens: this.estimateTokenCount(activeFileData, openFilesData, projectStructureData, gitContextData, problemsData)
+            totalTokens: this.estimateTokenCount(activeFileData, openFilesData, projectStructureData, gitContextData, problemsData, recentEditsData)
         };
 
         // Add system info
@@ -899,7 +915,8 @@ export class ContextManager extends EventEmitter {
         openFilesData: any,
         projectStructureData: any,
         gitContextData: any,
-        problemsData?: any
+        problemsData?: any,
+        recentEditsData?: any
     ): number {
         let tokens = 0;
 
@@ -950,6 +967,27 @@ export class ContextManager extends EventEmitter {
         if (problemsData?.problems && Array.isArray(problemsData.problems)) {
             // Estimate problems tokens - ~50 tokens per problem (message + metadata)
             tokens += problemsData.problems.length * 50;
+        }
+
+        if (recentEditsData) {
+            // Recent edits tokens - metadata + diff content
+            tokens += 100; // Base metadata tokens
+
+            // Add tokens for modified files diffs
+            if (recentEditsData.modifiedFiles && Array.isArray(recentEditsData.modifiedFiles)) {
+                for (const file of recentEditsData.modifiedFiles) {
+                    if (file.diffs && Array.isArray(file.diffs)) {
+                        for (const diff of file.diffs) {
+                            tokens += Math.ceil((diff.content || '').length / 4);
+                        }
+                    }
+                }
+            }
+
+            // Add tokens for added/deleted files (just metadata)
+            const totalFilesCount = (recentEditsData.addedFiles?.length || 0) +
+                (recentEditsData.deletedFiles?.length || 0);
+            tokens += totalFilesCount * 30; // ~30 tokens per file metadata
         }
 
         return tokens;
@@ -1203,6 +1241,15 @@ export class ContextManager extends EventEmitter {
         );
         this.collectors.set('ProblemsCollector', problemsCollectorInstance);
 
+        // Initialize RecentEditsCollector
+        const recentEditsCollector = new RecentEditsCollector(
+            this.outputChannel,
+            this.cacheManager,
+            this.workspaceId,
+            this.context
+        );
+        this.collectors.set('RecentEditsCollector', recentEditsCollector);
+
         this.outputChannel.appendLine(
             `[ContextManager] Initialized ${this.collectors.size} collectors: ${Array.from(this.collectors.keys()).join(', ')}`
         );
@@ -1298,6 +1345,12 @@ export class ContextManager extends EventEmitter {
             processedContext.openFiles = openFilesData.data.files || [];
         }
 
+        // Add recent edits
+        if (mustSendContexts.has(ContextType.RECENT_EDITS)) {
+            const recentEditsData = mustSendContexts.get(ContextType.RECENT_EDITS);
+            processedContext.recentEdits = recentEditsData.data;
+        }
+
         // Get project structure from cache
         const projectStructureData = await this.cacheManager.getContextData(
             this.workspaceId,
@@ -1315,7 +1368,8 @@ export class ContextManager extends EventEmitter {
             processedContext.openFiles,
             processedContext.projectStructure,
             processedContext.gitContext,
-            processedContext.problemsContext
+            processedContext.problemsContext,
+            processedContext.recentEdits
         );
 
         return processedContext;

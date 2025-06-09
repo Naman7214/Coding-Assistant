@@ -26,8 +26,8 @@ export class IndexingOrchestrator {
     private disposables: vscode.Disposable[] = [];
 
     // Configuration
-    // private readonly INDEXING_INTERVAL = 10 * 60 * 1000; // 10 minutes
-    private readonly INDEXING_INTERVAL = 60 * 3000; // 10 minutes
+    private readonly INDEXING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    // private readonly INDEXING_INTERVAL = 60 * 3000; // 10 minutes
     private readonly MAX_CONCURRENT_FILES = 10;
 
     // Callbacks

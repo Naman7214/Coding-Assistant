@@ -84,24 +84,14 @@ export class OpenFilesCollector extends BaseCollector {
             // Filter out any null results and ensure type safety
             const validFiles = files.filter((file): file is NonNullable<typeof file> => file !== null);
 
-            // Analyze languages and patterns
-            const languages = [...new Set(validFiles.map(file => file.languageId))];
-            const totalSize = validFiles.reduce((sum, file) => sum + file.fileSize, 0);
-
-            const data: OpenFilesCollectorData = {
-                files: validFiles,
-                totalCount: validFiles.length,
-                languages,
-                totalSize
-            };
+            // Create simple array format
+            const data: OpenFilesCollectorData = validFiles as OpenFilesCollectorData;
 
             const contextData = this.createContextData(
                 this.generateId(),
                 data,
                 {
                     fileCount: validFiles.length,
-                    totalSize,
-                    languages: languages.join(', '),
                     timestamp: Date.now()
                 }
             );
@@ -269,17 +259,19 @@ export class OpenFilesCollector extends BaseCollector {
     /**
      * Gather file information using VSCode API only
      */
-    private async gatherFileInfoFromVSCode(filePath: string): Promise<OpenFilesCollectorData['files'][0] | null> {
+    private async gatherFileInfoFromVSCode(filePath: string): Promise<{
+        path: string;
+        languageId: string;
+        lineCount: number;
+        fileSize: number;
+        lastModified: string;
+    } | null> {
         try {
             // Find the document in VSCode's open documents
             const document = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === filePath);
             if (!document) {
                 return null;
             }
-
-            const relativePath = this.getRelativePath(filePath);
-            const tabOrder = this.getTabOrder(document);
-            const isActive = vscode.window.activeTextEditor?.document === document;
 
             // Get file stats for lastModified
             let lastModified: string;
@@ -292,13 +284,10 @@ export class OpenFilesCollector extends BaseCollector {
 
             return {
                 path: filePath,
-                relativePath,
                 languageId: document.languageId,
                 lineCount: document.lineCount,
                 fileSize: Buffer.byteLength(document.getText(), 'utf8'),
-                lastModified,
-                tabIndex: tabOrder,
-                isActive
+                lastModified
             };
 
         } catch (error) {

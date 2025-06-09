@@ -114,6 +114,130 @@ Lines: {active_file_context.get('lineCount', 0)}"""
     return context
 
 
+def format_open_files_context(open_files_context) -> str:
+    """Format open files context for inclusion in system prompt"""
+    if not open_files_context or not isinstance(open_files_context, list):
+        return ""
+
+    try:
+        context = f"""
+=== OPEN FILES CONTEXT ===
+Currently open files: {len(open_files_context)} files"""
+
+        if open_files_context:
+            for i, file_info in enumerate(
+                open_files_context[:10]
+            ):  # Limit to 10 files
+                context += f"\n  {i+1}. {file_info.get('relativePath', 'unknown')} ({file_info.get('languageId', 'unknown')})"
+                if file_info.get("isActive"):
+                    context += " [ACTIVE]"
+
+                # Add file size info
+                file_size = file_info.get("fileSize", 0)
+                if file_size > 1024:
+                    context += f" - {file_size // 1024}KB"
+                else:
+                    context += f" - {file_size}B"
+
+            if len(open_files_context) > 10:
+                context += (
+                    f"\n  ... and {len(open_files_context) - 10} more files"
+                )
+
+        context += "\n=== END OPEN FILES CONTEXT ===\n"
+    except Exception as e:
+        context = f"Error formatting open files context: {str(e)}"
+
+    return context
+
+
+def format_recent_edits_context(recent_edits_context) -> str:
+    """Format recent edits context for inclusion in system prompt"""
+    if not recent_edits_context:
+        return ""
+
+    try:
+        summary = recent_edits_context.get("summary", {})
+
+        context = f"""
+=== RECENT EDITS CONTEXT ===
+Time Window: {summary.get('timeWindow', 'last 3 minutes')}
+Has Changes: {summary.get('hasChanges', False)}"""
+
+        if summary.get("hasChanges", False):
+            total_files = summary.get("totalFiles", 0)
+            context += f"\nTotal Files Changed: {total_files}"
+
+            # Format modified files
+            modified_files = recent_edits_context.get("modifiedFiles", [])
+            if modified_files:
+                context += f"\n\nModified Files ({len(modified_files)}):"
+                for file_info in modified_files[:5]:  # Limit to 5 files
+                    context += (
+                        f"\n  • {file_info.get('relativePath', 'unknown')}"
+                    )
+                    diffs = file_info.get("diffs", [])
+                    if diffs:
+                        added_lines = sum(
+                            1 for diff in diffs if diff.get("type") == "added"
+                        )
+                        removed_lines = sum(
+                            1 for diff in diffs if diff.get("type") == "removed"
+                        )
+                        context += f" (+{added_lines} -{removed_lines} lines)"
+
+                        # Show first few diffs for context
+                        for diff in diffs[:3]:
+                            diff_type = diff.get("type", "unknown")
+                            line_num = diff.get("lineNumber", 0)
+                            content = diff.get("content", "").strip()
+                            prefix = (
+                                "+"
+                                if diff_type == "added"
+                                else "-" if diff_type == "removed" else " "
+                            )
+                            context += f"\n    {prefix}{line_num}: {content[:80]}{'...' if len(content) > 80 else ''}"
+
+                if len(modified_files) > 5:
+                    context += f"\n  ... and {len(modified_files) - 5} more modified files"
+
+            # Format added files
+            added_files = recent_edits_context.get("addedFiles", [])
+            if added_files:
+                context += f"\n\nAdded Files ({len(added_files)}):"
+                for file_info in added_files[:10]:  # Limit to 10 files
+                    context += (
+                        f"\n  + {file_info.get('relativePath', 'unknown')}"
+                    )
+                if len(added_files) > 10:
+                    context += (
+                        f"\n  ... and {len(added_files) - 10} more added files"
+                    )
+
+            # Format deleted files
+            deleted_files = recent_edits_context.get("deletedFiles", [])
+            if deleted_files:
+                context += f"\n\nDeleted Files ({len(deleted_files)}):"
+                for file_info in deleted_files[:10]:  # Limit to 10 files
+                    context += (
+                        f"\n  - {file_info.get('relativePath', 'unknown')}"
+                    )
+                if len(deleted_files) > 10:
+                    context += f"\n  ... and {len(deleted_files) - 10} more deleted files"
+
+            # Add git branch info
+            git_branch = recent_edits_context.get("gitBranch", "default")
+            context += f"\n\nGit Branch: {git_branch}"
+        else:
+            context += "\nNo recent changes detected in the last 3 minutes."
+
+        context += "\n=== END RECENT EDITS CONTEXT ===\n"
+    except Exception as e:
+        context = f"Error formatting recent edits context: {str(e)}"
+
+    return context
+
+
 def format_additional_context(additional_context) -> str:
     """Format additional on-demand context for inclusion in system prompt"""
     if not additional_context:

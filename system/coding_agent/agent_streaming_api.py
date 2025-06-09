@@ -72,6 +72,8 @@ async def stream_agent_response(
     git_branch: str,
     system_info: Optional[SystemInfo] = None,
     active_file_context: Optional[ActiveFileContext] = None,
+    open_files_context: Optional[List[Dict[str, Any]]] = None,
+    recent_edits_context: Optional[Dict[str, Any]] = None,
     context_mentions: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream the agent's response with enhanced context system"""
@@ -87,6 +89,16 @@ async def stream_agent_response(
         print(f"   System: {system_info.platform} {system_info.osVersion}")
     if active_file_context:
         print(f"   Active File: {active_file_context.relativePath}")
+    if open_files_context:
+        print(f"   Open Files: {len(open_files_context)} files")
+    if recent_edits_context:
+        summary = recent_edits_context.get("summary", {})
+        if summary.get("hasChanges", False):
+            print(
+                f"   Recent Edits: {summary.get('totalFiles', 0)} files changed"
+            )
+        else:
+            print(f"   Recent Edits: No recent changes")
 
     # Check if agent is initialized
     if not agent_instance or not agent_instance.client:
@@ -118,6 +130,10 @@ async def stream_agent_response(
         agent_instance.set_active_file_context(
             active_file_context.model_dump() if active_file_context else None
         )
+    if open_files_context:
+        agent_instance.set_open_files_context(open_files_context)
+    if recent_edits_context:
+        agent_instance.set_recent_edits_context(recent_edits_context)
 
     try:
         yield create_stream_event(
@@ -143,6 +159,8 @@ async def stream_agent_response(
                 if active_file_context
                 else None
             ),
+            open_files=open_files_context,
+            recent_edits=recent_edits_context,
         )
 
         # Add the query to agent memory
@@ -180,6 +198,10 @@ async def stream_query(request: QueryRequest):
         print(f"   Context Mentions: {request.context_mentions}")
         print(f"   System Info: {bool(request.system_info)}")
         print(f"   Active File: {bool(request.active_file_context)}")
+        print(
+            f"   Open Files: {len(request.open_files_context) if request.open_files_context else 0} files"
+        )
+        print(f"   Recent Edits: {bool(request.recent_edits_context)}")
 
         return StreamingResponse(
             stream_agent_response(
@@ -189,6 +211,8 @@ async def stream_query(request: QueryRequest):
                 request.git_branch,
                 request.system_info,
                 request.active_file_context,
+                request.open_files_context,
+                request.recent_edits_context,
                 request.context_mentions,
             ),
             media_type="text/event-stream",

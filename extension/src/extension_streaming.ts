@@ -6,7 +6,7 @@ import { ContextManager } from './context/ContextManager';
 import { ProcessedContext } from './context/types/context';
 import { IndexingManager, IndexingStatusInfo, hashWorkspacePath } from './indexing';
 import { EnhancedStreamingClient } from './streaming_client';
-import { getSystemInfo, getWebviewContent } from './utilities';
+import { getWebviewContent } from './utilities';
 
 const execAsync = promisify(exec);
 
@@ -90,7 +90,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         enabled: true,
         autoCollectOnChange: false, // Disable auto-collect initially
         autoCollectInterval: 30000,
-        defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector'],
+        defaultCollectors: ['ActiveFileCollector', 'OpenFilesCollector', 'ProjectStructureCollector', 'GitContextCollector', 'ProblemsCollector', 'RecentEditsCollector'],
         storageConfig: {
           enableStorage: true,
           enableCache: true
@@ -512,31 +512,44 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       const contextMentions = this.parseContextMentions(query);
       this.outputChannel.appendLine(`[Query] Detected context mentions: ${JSON.stringify(contextMentions)}`);
 
-      // Collect always-send context (system info + active file + open files)
-      const alwaysSendContext = await this.collectAlwaysSendContext();
+      // Collect always-send context using ContextManager (includes system info + active file + open files + recent edits)
+      const mustSendContexts = await this.contextManager!.collectMustSendContexts();
+
+      // Extract data from must-send contexts
+      const systemInfoData = mustSendContexts.get('systemInfo');
+      const activeFileData = mustSendContexts.get('activeFile');
+      const openFilesData = mustSendContexts.get('openFiles');
+      const recentEditsData = mustSendContexts.get('recentEdits');
+
+      // Get workspace info
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      const workspacePath = workspaceFolder?.uri.fsPath || '';
 
       // Get additional required data
-      const hashedWorkspacePath = hashWorkspacePath(alwaysSendContext.workspace.path);
-      const currentGitBranch = await this.getCurrentGitBranch(alwaysSendContext.workspace.path);
+      const hashedWorkspacePath = hashWorkspacePath(workspacePath);
+      const currentGitBranch = await this.getCurrentGitBranch(workspacePath);
 
       // Log what context is being sent
       this.outputChannel.appendLine(`[Query] Always-send context summary:`);
-      this.outputChannel.appendLine(`[Query] - System info: OS=${alwaysSendContext.systemInfo.platform}, Shell=${alwaysSendContext.systemInfo.defaultShell}`);
-      this.outputChannel.appendLine(`[Query] - Active file: ${alwaysSendContext.activeFile?.relativePath || 'None'}`);
-      this.outputChannel.appendLine(`[Query] - Open files: ${alwaysSendContext.openFiles?.length || 0} files`);
+      this.outputChannel.appendLine(`[Query] - System info: ${systemInfoData ? 'Available' : 'Not available'}`);
+      this.outputChannel.appendLine(`[Query] - Active file: ${activeFileData?.data?.file?.relativePath || 'None'}`);
+      this.outputChannel.appendLine(`[Query] - Open files: ${openFilesData?.data?.files?.length || 0} files`);
+      this.outputChannel.appendLine(`[Query] - Recent edits: ${recentEditsData ? (recentEditsData.data.summary?.hasChanges ? `${recentEditsData.data.summary.totalFiles} files changed` : 'No recent changes') : 'Not available'}`);
       this.outputChannel.appendLine(`[Query] - Hashed workspace path: ${hashedWorkspacePath}`);
       this.outputChannel.appendLine(`[Query] - Git branch: ${currentGitBranch}`);
+      this.outputChannel.appendLine(`[Query] - Context mentions: ${contextMentions.join(', ')}`);
 
       // Send query with always-send context to backend
       if (this.enhancedStreamingClient) {
         const streamRequest: any = {
           query: query,
-          workspace_path: alwaysSendContext.workspace.path,
+          workspace_path: workspacePath,
           hashed_workspace_path: hashedWorkspacePath,
           git_branch: currentGitBranch,
-          system_info: alwaysSendContext.systemInfo,
-          active_file_context: alwaysSendContext.activeFile,
-          open_files_context: alwaysSendContext.openFiles,
+          system_info: systemInfoData?.data || null,
+          active_file_context: activeFileData?.data || null,
+          open_files_context: openFilesData?.data?.files || [],
+          recent_edits_context: recentEditsData?.data || null,
           context_mentions: contextMentions
         };
 
@@ -549,12 +562,15 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         this.outputChannel.appendLine(`[Query] Workspace: ${streamRequest.workspace_path}`);
         this.outputChannel.appendLine(`[Query] Hashed workspace path: ${streamRequest.hashed_workspace_path}`);
         this.outputChannel.appendLine(`[Query] Git branch: ${streamRequest.git_branch}`);
-        this.outputChannel.appendLine(`[Query] System Info: ${JSON.stringify(streamRequest.system_info)}`);
-        if (streamRequest.active_file_context) {
-          this.outputChannel.appendLine(`[Query] Active File: ${streamRequest.active_file_context.relativePath}`);
+        this.outputChannel.appendLine(`[Query] System Info: ${streamRequest.system_info ? 'Available' : 'Not available'}`);
+        if (streamRequest.active_file_context?.file) {
+          this.outputChannel.appendLine(`[Query] Active File: ${streamRequest.active_file_context.file.relativePath}`);
         }
-        if (streamRequest.open_files_context) {
-          this.outputChannel.appendLine(`[Query] Open Files: ${JSON.stringify(streamRequest.open_files_context)}`);
+        if (streamRequest.open_files_context && Array.isArray(streamRequest.open_files_context)) {
+          this.outputChannel.appendLine(`[Query] Open Files: ${streamRequest.open_files_context.length} files`);
+        }
+        if (streamRequest.recent_edits_context) {
+          this.outputChannel.appendLine(`[Query] Recent Edits: ${streamRequest.recent_edits_context.summary?.hasChanges ? `${streamRequest.recent_edits_context.summary.totalFiles} files changed` : 'No recent changes'}`);
         }
 
         // Stream the query with comprehensive event handling for App
@@ -719,160 +735,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     return mentions;
   }
 
-  /**
-   * Collect always-send context (system info + active file + open files)
-   */
-  private async collectAlwaysSendContext(): Promise<any> {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 
-    // Get system info using the utility function that matches Python model
-    const systemInfo = await getSystemInfo();
-
-    // Initialize context objects
-    let activeFileContext: any = null;
-    let openFilesContext: any[] = [];
-
-    try {
-      // Directly use VS Code API to get active file info
-      const activeEditor = vscode.window.activeTextEditor;
-      if (activeEditor) {
-        const document = activeEditor.document;
-
-        // Only include file-scheme documents (not output, terminal, etc.)
-        if (document.uri.scheme === 'file') {
-          let relativePath = '';
-          if (workspaceFolder) {
-            relativePath = vscode.workspace.asRelativePath(document.uri, false);
-          }
-
-          // Get file stats for lastModified
-          let lastModified: string;
-          try {
-            const stats = await vscode.workspace.fs.stat(document.uri);
-            lastModified = new Date(stats.mtime).toISOString();
-          } catch {
-            lastModified = new Date().toISOString();
-          }
-
-          // Get cursor position and selection
-          const position = activeEditor.selection.active;
-          const selection = activeEditor.selection;
-
-          // Get current line content
-          const currentLine = document.lineAt(position.line);
-          const currentLineContent = currentLine.text;
-
-          // Get surrounding lines
-          let lineAboveContent: string | undefined;
-          if (position.line > 0) {
-            lineAboveContent = document.lineAt(position.line - 1).text;
-          }
-
-          let lineBelowContent: string | undefined;
-          if (position.line < document.lineCount - 1) {
-            lineBelowContent = document.lineAt(position.line + 1).text;
-          }
-
-          // Create active file context
-          activeFileContext = {
-            path: document.uri.fsPath,
-            relativePath: relativePath,
-            languageId: document.languageId,
-            lineCount: document.lineCount,
-            fileSize: Buffer.byteLength(document.getText(), 'utf8'),
-            lastModified: lastModified,
-            content: document.getText(), // Include content for active file
-            cursorPosition: {
-              line: position.line,
-              character: position.character
-            },
-            selection: {
-              start: {
-                line: selection.start.line,
-                character: selection.start.character
-              },
-              end: {
-                line: selection.end.line,
-                character: selection.end.character
-              }
-            },
-            visibleRanges: activeEditor.visibleRanges.map(range => ({
-              start: { line: range.start.line, character: range.start.character },
-              end: { line: range.end.line, character: range.end.character }
-            })),
-            cursorLineContent: {
-              current: currentLineContent,
-              above: lineAboveContent,
-              below: lineBelowContent
-            }
-          };
-
-          this.outputChannel.appendLine(`[AlwaysSendContext] Active file detected: ${relativePath}`);
-        }
-      }
-
-      // Directly use VS Code API to get open files
-      const openDocuments = vscode.workspace.textDocuments.filter(doc => {
-        // Only include file documents, not untitled or others
-        return doc.uri.scheme === 'file';
-      });
-
-      if (openDocuments.length > 0) {
-        for (const doc of openDocuments) {
-          if (workspaceFolder) {
-            const relativePath = vscode.workspace.asRelativePath(doc.uri, false);
-
-            // Skip files not in workspace
-            if (!doc.uri.fsPath.startsWith(workspaceFolder.uri.fsPath)) {
-              continue;
-            }
-
-            // Skip files that should be excluded
-            if (relativePath.includes('node_modules') ||
-              relativePath.includes('.git') ||
-              relativePath.includes('dist') ||
-              relativePath.includes('build')) {
-              continue;
-            }
-
-            // Get file stats
-            let lastModified: string;
-            try {
-              const stats = await vscode.workspace.fs.stat(doc.uri);
-              lastModified = new Date(stats.mtime).toISOString();
-            } catch {
-              lastModified = new Date().toISOString();
-            }
-
-            // Create open file info (without content)
-            openFilesContext.push({
-              path: doc.uri.fsPath,
-              relativePath: relativePath,
-              languageId: doc.languageId,
-              fileSize: Buffer.byteLength(doc.getText(), 'utf8'),
-              lastModified: lastModified,
-              isActive: activeFileContext?.path === doc.uri.fsPath
-            });
-          }
-        }
-
-        this.outputChannel.appendLine(`[AlwaysSendContext] Collected ${openFilesContext.length} open files`);
-      }
-
-    } catch (error) {
-      this.outputChannel.appendLine(`[AlwaysSendContext] Failed to collect context: ${error}`);
-    }
-
-    return {
-      systemInfo,
-      activeFile: activeFileContext,
-      openFiles: openFilesContext,
-      workspace: {
-        path: workspaceFolder?.uri.fsPath || '',
-        name: workspaceFolder?.name || ''
-      }
-    };
-  }
 
   /**
    * Handle on-demand context requests from backend

@@ -14,6 +14,8 @@ from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
 from utils.context_formatter import (
     format_active_file_context,
     format_additional_context,
+    format_open_files_context,
+    format_recent_edits_context,
     format_system_info_context,
 )
 
@@ -32,6 +34,8 @@ class AnthropicStreamingAgent:
         self.workspace_path = None
         self.system_info = None
         self.active_file_context = None  # New: store active file context
+        self.open_files_context = []  # New: store open files context
+        self.recent_edits_context = None  # New: store recent edits context
         self.additional_context = {}  # New: store on-demand context
         self.timeout = httpx.Timeout(
             connect=60.0,
@@ -67,10 +71,34 @@ class AnthropicStreamingAgent:
         else:
             logger.info("Active file context cleared")
 
+    def set_open_files_context(self, open_files_context: Optional[list]):
+        """Set open files context (always-send context)"""
+        self.open_files_context = open_files_context or []
+        logger.info(
+            f"Open files context updated: {len(self.open_files_context)} files"
+        )
+
+    def set_recent_edits_context(self, recent_edits_context: Optional[dict]):
+        """Set recent edits context (always-send context)"""
+        self.recent_edits_context = recent_edits_context
+        if recent_edits_context:
+            summary = recent_edits_context.get("summary", {})
+            if summary.get("hasChanges", False):
+                total_files = summary.get("totalFiles", 0)
+                logger.info(
+                    f"Recent edits context updated: {total_files} files changed in last 3 minutes"
+                )
+            else:
+                logger.info("Recent edits context updated: No recent changes")
+        else:
+            logger.info("Recent edits context cleared")
+
     async def update_context_memory(
         self,
         system_info: Optional[dict] = None,
         active_file: Optional[dict] = None,
+        open_files: Optional[list] = None,
+        recent_edits: Optional[dict] = None,
         additional_context: Optional[dict] = None,
     ):
         """Update agent memory with enhanced context information"""
@@ -80,6 +108,12 @@ class AnthropicStreamingAgent:
                 self.system_info = system_info
             if active_file is not None:  # Explicit None check to allow clearing
                 self.active_file_context = active_file
+            if open_files is not None:  # Explicit None check to allow clearing
+                self.open_files_context = open_files
+            if (
+                recent_edits is not None
+            ):  # Explicit None check to allow clearing
+                self.recent_edits_context = recent_edits
             if additional_context:
                 self.additional_context.update(additional_context)
 
@@ -118,6 +152,18 @@ class AnthropicStreamingAgent:
             if self.active_file_context:
                 enhanced_prompt += format_active_file_context(
                     active_file_context=self.active_file_context
+                )
+
+            # Add open files context if available
+            if self.open_files_context:
+                enhanced_prompt += format_open_files_context(
+                    open_files_context=self.open_files_context
+                )
+
+            # Add recent edits context if available
+            if self.recent_edits_context:
+                enhanced_prompt += format_recent_edits_context(
+                    recent_edits_context=self.recent_edits_context
                 )
 
             # Add on-demand context sections

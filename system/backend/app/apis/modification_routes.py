@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from system.backend.app.controllers.modification_tools.edit_file_controller import (
     EditFileController,
@@ -36,7 +37,17 @@ async def edit_file(
     request: EditFileRequest,
     edit_file_controller: EditFileController = Depends(EditFileController),
 ):
-    return await edit_file_controller.execute(request)
+    return StreamingResponse(
+        edit_file_controller.execute_stream(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "*",
+        },
+    )
 
 
 @router.post("/reapply")
@@ -45,4 +56,14 @@ async def reapply(
     request: ReapplyRequest,
     reapply_controller: ReapplyController = Depends(ReapplyController),
 ):
-    return await reapply_controller.execute(request)
+    return StreamingResponse(
+        reapply_controller.execute_stream(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "*",
+        },
+    )

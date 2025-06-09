@@ -37,8 +37,8 @@ class SearchReplaceRequest(BaseModel):
 
 
 class EditFileRequest(BaseModel):
-    target_file_path: str = Field(
-        ..., description="The path to the file to edit"
+    target_file_content: str = Field(
+        ..., description="The content of the file to edit"
     )
     code_snippet: str = Field(..., description="The code snippet to edit")
     explanation: str = Field(
@@ -50,8 +50,8 @@ class EditFileRequest(BaseModel):
 
 
 class ReapplyRequest(BaseModel):
-    target_file_path: str = Field(
-        ..., description="The path to the file to reapply"
+    target_file_content: str = Field(
+        ..., description="The content of the file to reapply"
     )
     code_snippet: str = Field(..., description="The code snippet to reapply")
     explanation: str = Field(

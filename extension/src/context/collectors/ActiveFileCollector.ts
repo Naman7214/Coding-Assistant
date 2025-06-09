@@ -60,23 +60,19 @@ export class ActiveFileCollector extends BaseCollector {
                 return null;
             }
 
-            // Gather file information (without content)
-            const fileInfo = await this.gatherFileInfo(activeEditor, document);
+            // Gather simplified file information
+            const fileInfo = await this.gatherSimpleFileInfo(activeEditor, document);
 
-            // Gather cursor and selection context (fix cursor position)
-            const cursorContext = await this.gatherCursorContext(activeEditor, document);
+            // Gather simplified cursor context
+            const cursorContext = await this.gatherSimpleCursorContext(activeEditor, document);
 
-            // Gather viewport context
-            const viewportContext = await this.gatherViewportContext(activeEditor, document);
-
-            // Analyze surrounding context
-            const semanticContext = await this.gatherSemanticContext(activeEditor, document);
+            // Gather simplified viewport context
+            const viewportContext = await this.gatherSimpleViewportContext(activeEditor, document);
 
             const data: ActiveFileCollectorData = {
                 file: fileInfo,
                 cursor: cursorContext,
-                viewport: viewportContext,
-                context: semanticContext
+                viewport: viewportContext
             };
 
             const contextData = this.createContextData(
@@ -110,15 +106,12 @@ export class ActiveFileCollector extends BaseCollector {
     }
 
     /**
-     * Gather basic file information (without content)
+     * Gather simplified file information
      */
-    private async gatherFileInfo(
+    private async gatherSimpleFileInfo(
         editor: vscode.TextEditor,
         document: vscode.TextDocument
     ): Promise<ActiveFileCollectorData['file']> {
-        const workspacePath = this.getWorkspacePath();
-        const relativePath = this.getRelativePath(document.uri.fsPath);
-
         // Get file stats for lastModified
         let lastModified: string;
         try {
@@ -130,7 +123,6 @@ export class ActiveFileCollector extends BaseCollector {
 
         return {
             path: document.uri.fsPath,
-            relativePath,
             languageId: document.languageId,
             lineCount: document.lineCount,
             fileSize: Buffer.byteLength(document.getText(), 'utf8'),
@@ -139,9 +131,9 @@ export class ActiveFileCollector extends BaseCollector {
     }
 
     /**
-     * Gather cursor and selection context (fix cursor position - VSCode is 0-indexed, display is 1-indexed)
+     * Gather simplified cursor context
      */
-    private async gatherCursorContext(
+    private async gatherSimpleCursorContext(
         editor: vscode.TextEditor,
         document: vscode.TextDocument
     ): Promise<ActiveFileCollectorData['cursor']> {
@@ -169,7 +161,16 @@ export class ActiveFileCollector extends BaseCollector {
         return {
             line: position.line + 1, // VSCode uses 0-indexed, display uses 1-indexed
             character: position.character + 1, // VSCode uses 0-indexed, display uses 1-indexed
-            selection: new vscode.Range(selection.start, selection.end),
+            selection: [
+                {
+                    line: selection.start.line,
+                    character: selection.start.character
+                },
+                {
+                    line: selection.end.line,
+                    character: selection.end.character
+                }
+            ],
             lineContent: {
                 current: currentLineContent,
                 above: lineAboveContent,
@@ -179,9 +180,9 @@ export class ActiveFileCollector extends BaseCollector {
     }
 
     /**
-     * Gather viewport context (visible ranges, scroll position)
+     * Gather simplified viewport context
      */
-    private async gatherViewportContext(
+    private async gatherSimpleViewportContext(
         editor: vscode.TextEditor,
         document: vscode.TextDocument
     ): Promise<ActiveFileCollectorData['viewport']> {
@@ -189,186 +190,23 @@ export class ActiveFileCollector extends BaseCollector {
         const startLine = visibleRanges.length > 0 ? visibleRanges[0].start.line : 0;
         const endLine = visibleRanges.length > 0 ? visibleRanges[visibleRanges.length - 1].end.line : document.lineCount - 1;
 
+        // Convert VSCode ranges to simple array format
+        const simpleRanges = visibleRanges.map(range => [
+            {
+                line: range.start.line,
+                character: range.start.character
+            },
+            {
+                line: range.end.line,
+                character: range.end.character
+            }
+        ]);
+
         return {
-            visibleRanges,
+            visibleRanges: simpleRanges,
             startLine,
             endLine
         };
-    }
-
-    /**
-     * Gather semantic context around cursor
-     */
-    private async gatherSemanticContext(
-        editor: vscode.TextEditor,
-        document: vscode.TextDocument
-    ): Promise<ActiveFileCollectorData['context']> {
-        const position = editor.selection.active;
-        const surroundingLinesCount = this.config.options.includeSurroundingLines || 20;
-
-        // Get surrounding lines
-        const surroundingLines = this.getSurroundingLines(document, position, surroundingLinesCount);
-
-        // Analyze indentation level
-        const indentationLevel = this.getIndentationLevel(document, position);
-
-        // Check if cursor is in function or class
-        const codeStructure = await this.analyzeCodeStructure(document, position);
-
-        // Get nearby symbols
-        const nearbySymbols = await this.getNearbySymbols(document, position);
-
-        return {
-            surroundingLines,
-            indentationLevel,
-            isInFunction: codeStructure.isInFunction,
-            isInClass: codeStructure.isInClass,
-            nearbySymbols
-        };
-    }
-
-    /**
-     * Get surrounding lines around cursor position
-     */
-    private getSurroundingLines(
-        document: vscode.TextDocument,
-        position: vscode.Position,
-        count: number
-    ): string[] {
-        const startLine = Math.max(0, position.line - Math.floor(count / 2));
-        const endLine = Math.min(document.lineCount - 1, position.line + Math.floor(count / 2));
-
-        const lines: string[] = [];
-        for (let i = startLine; i <= endLine; i++) {
-            const lineText = document.lineAt(i).text;
-            const prefix = i === position.line ? '>>> ' : '    ';
-            lines.push(`${prefix}${lineText}`);
-        }
-
-        return lines;
-    }
-
-    /**
-     * Get indentation level at cursor position
-     */
-    private getIndentationLevel(document: vscode.TextDocument, position: vscode.Position): number {
-        const line = document.lineAt(position.line);
-        const text = line.text;
-        let indentLevel = 0;
-
-        for (let i = 0; i < text.length; i++) {
-            if (text[i] === ' ') {
-                indentLevel++;
-            } else if (text[i] === '\t') {
-                indentLevel += 4; // Assuming tab = 4 spaces
-            } else {
-                break;
-            }
-        }
-
-        return indentLevel;
-    }
-
-    /**
-     * Analyze code structure around cursor
-     */
-    private async analyzeCodeStructure(
-        document: vscode.TextDocument,
-        position: vscode.Position
-    ): Promise<{ isInFunction: boolean; isInClass: boolean }> {
-        try {
-            // Get document symbols to analyze structure
-            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider',
-                document.uri
-            );
-
-            if (!symbols) {
-                return { isInFunction: false, isInClass: false };
-            }
-
-            return this.checkPositionInSymbols(symbols, position);
-        } catch (error) {
-            this.debug('Failed to analyze code structure', error);
-            return { isInFunction: false, isInClass: false };
-        }
-    }
-
-    /**
-     * Check if position is within function or class symbols
-     */
-    private checkPositionInSymbols(
-        symbols: vscode.DocumentSymbol[],
-        position: vscode.Position
-    ): { isInFunction: boolean; isInClass: boolean } {
-        let isInFunction = false;
-        let isInClass = false;
-
-        const checkSymbol = (symbol: vscode.DocumentSymbol) => {
-            if (symbol.range.contains(position)) {
-                if (symbol.kind === vscode.SymbolKind.Function ||
-                    symbol.kind === vscode.SymbolKind.Method ||
-                    symbol.kind === vscode.SymbolKind.Constructor) {
-                    isInFunction = true;
-                }
-
-                if (symbol.kind === vscode.SymbolKind.Class ||
-                    symbol.kind === vscode.SymbolKind.Interface ||
-                    symbol.kind === vscode.SymbolKind.Module) {
-                    isInClass = true;
-                }
-
-                // Check children recursively
-                if (symbol.children) {
-                    symbol.children.forEach(checkSymbol);
-                }
-            }
-        };
-
-        symbols.forEach(checkSymbol);
-        return { isInFunction, isInClass };
-    }
-
-    /**
-     * Get symbols near cursor position
-     */
-    private async getNearbySymbols(
-        document: vscode.TextDocument,
-        position: vscode.Position
-    ): Promise<string[]> {
-        try {
-            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider',
-                document.uri
-            );
-
-            if (!symbols) {
-                return [];
-            }
-
-            const nearbySymbols: string[] = [];
-            const searchRange = new vscode.Range(
-                new vscode.Position(Math.max(0, position.line - 50), 0),
-                new vscode.Position(Math.min(document.lineCount - 1, position.line + 50), 0)
-            );
-
-            const collectNearbySymbols = (symbol: vscode.DocumentSymbol) => {
-                if (searchRange.intersection(symbol.range)) {
-                    nearbySymbols.push(`${vscode.SymbolKind[symbol.kind]}: ${symbol.name}`);
-                }
-
-                if (symbol.children) {
-                    symbol.children.forEach(collectNearbySymbols);
-                }
-            };
-
-            symbols.forEach(collectNearbySymbols);
-            return nearbySymbols.slice(0, 20); // Limit to 20 nearby symbols
-
-        } catch (error) {
-            this.debug('Failed to get nearby symbols', error);
-            return [];
-        }
     }
 
     /**

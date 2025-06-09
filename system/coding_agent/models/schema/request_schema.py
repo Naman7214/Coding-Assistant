@@ -11,6 +11,8 @@ class QueryRequest(BaseModel):
     git_branch: str
     system_info: Optional[SystemInfo] = None
     active_file_context: Optional[ActiveFileContext] = None
+    open_files_context: Optional[List[Dict[str, Any]]] = None
+    recent_edits_context: Optional[Dict[str, Any]] = None
     context_mentions: Optional[List[str]] = None
 
 

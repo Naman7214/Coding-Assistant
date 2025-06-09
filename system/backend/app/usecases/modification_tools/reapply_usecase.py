@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, AsyncGenerator, Dict
 
 from fastapi import Depends
 
@@ -13,12 +13,25 @@ class ReapplyUsecase:
 
     async def execute(
         self,
-        target_file_path: str,
+        target_file_content: str,
         code_snippet: str,
         explanation: str,
         workspace_path: str = None,
     ) -> Dict[str, Any]:
 
         return await self.reapply_service.reapply(
-            target_file_path, code_snippet, explanation, workspace_path
+            target_file_content, code_snippet, explanation, workspace_path
         )
+
+    async def execute_stream(
+        self,
+        target_file_content: str,
+        code_snippet: str,
+        explanation: str,
+        workspace_path: str = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream the reapply process as server-sent events"""
+        async for event in self.reapply_service.reapply_stream(
+            target_file_content, code_snippet, explanation, workspace_path
+        ):
+            yield event

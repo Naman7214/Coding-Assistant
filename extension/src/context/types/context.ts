@@ -196,6 +196,7 @@ export interface ProcessedContext {
     problemsContext: ProblemsContext;
     terminalContext: TerminalContext;
     userBehavior: UserBehaviorData;
+    recentEdits?: import('./collectors').RecentEditsCollectorData;
     relevanceScores: Record<string, number>;
     totalTokens: number;
 }

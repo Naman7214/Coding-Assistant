@@ -54,7 +54,6 @@ export interface CollectorError {
 export interface ActiveFileCollectorData {
     file: {
         path: string;
-        relativePath: string;
         languageId: string;
         lineCount: number;
         fileSize: number;
@@ -63,7 +62,10 @@ export interface ActiveFileCollectorData {
     cursor: {
         line: number;
         character: number;
-        selection: vscode.Range;
+        selection: Array<{
+            line: number;
+            character: number;
+        }>;
         lineContent: {
             current: string;
             above?: string;
@@ -71,34 +73,22 @@ export interface ActiveFileCollectorData {
         };
     };
     viewport: {
-        visibleRanges: vscode.Range[];
+        visibleRanges: Array<Array<{
+            line: number;
+            character: number;
+        }>>;
         startLine: number;
         endLine: number;
     };
-    context: {
-        surroundingLines: string[];
-        indentationLevel: number;
-        isInFunction: boolean;
-        isInClass: boolean;
-        nearbySymbols: string[];
-    };
 }
 
-export interface OpenFilesCollectorData {
-    files: Array<{
-        path: string;
-        relativePath: string;
-        languageId: string;
-        lineCount: number;
-        fileSize: number;
-        lastModified: string;
-        tabIndex: number;
-        isActive: boolean;
-    }>;
-    totalCount: number;
-    languages: string[];
-    totalSize: number;
-}
+export interface OpenFilesCollectorData extends Array<{
+    path: string;
+    languageId: string;
+    lineCount: number;
+    fileSize: number;
+    lastModified: string;
+}> { }
 
 export interface ProjectStructureCollectorData {
     root: string;
@@ -195,6 +185,58 @@ export interface ProblemsCollectorData {
     timestamp: number;
     workspacePath: string;
     requestedFilePath?: string;
+}
+
+export interface DiffChange {
+    type: 'addition' | 'removal';
+    startLine: number;
+    endLine: number;
+    content: string[];
+}
+
+export interface RecentEditsCollectorData {
+    summary: {
+        hasChanges: boolean;
+        timeWindow: string; // "last 3 minutes"
+        totalFiles: number;
+        checkInterval: number; // 3 minutes in milliseconds
+    };
+    modifiedFiles: Array<{
+        filePath: string; // absolute path
+        relativePath: string;
+        changes: DiffChange[];
+        changeType: 'modified';
+        lastModified: string;
+    }>;
+    addedFiles: Array<{
+        filePath: string; // absolute path
+        relativePath: string;
+        changeType: 'added';
+        lastModified: string;
+    }>;
+    deletedFiles: Array<{
+        filePath: string; // absolute path
+        relativePath: string;
+        changeType: 'deleted';
+        lastModified: string;
+    }>;
+    timestamp: number;
+    gitBranch: string;
+    workspaceHash: string;
+}
+
+export interface SnapshotInfo {
+    filePath: string; // absolute path
+    hash: string;
+    content: string;
+    lastModified: number;
+    gitBranch: string;
+}
+
+export interface FileDiff {
+    type: 'added' | 'removed' | 'common';
+    lineNumber: number;
+    content: string;
 }
 
 // Collection orchestration
