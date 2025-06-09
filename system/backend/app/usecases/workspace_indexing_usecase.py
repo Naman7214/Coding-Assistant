@@ -60,7 +60,6 @@ class WorkspaceIndexingUseCase:
             current_git_branch = payload_data.get(
                 "current_git_branch", "default"
             )
-            timestamp = payload_data.get("timestamp")
 
             if not workspace_hash:
                 raise HTTPException(
@@ -86,10 +85,10 @@ class WorkspaceIndexingUseCase:
                         )
 
             # Step 2: Handle deleted files first with branch-specific deletion
-            deleted_chunks_count = 0
-            pinecone_deleted_count = 0
+            deleted_files_count = 0
+            pinecone_deleted_files_count = 0
             if deleted_files_obfuscated_paths:
-                deleted_chunks_count, pinecone_deleted_count = (
+                deleted_files_count, pinecone_deleted_files_count = (
                     await self.workspace_indexing_service.handle_deleted_files(
                         workspace_hash,
                         deleted_files_obfuscated_paths,
@@ -97,33 +96,36 @@ class WorkspaceIndexingUseCase:
                     )
                 )
 
-            # Step 3: Identify new vs existing chunks
-            new_chunks, existing_chunks, existing_hashes = (
-                await self.workspace_indexing_service.identify_new_chunks(
-                    workspace_hash, chunk_objects
+            # Step 3: Handle chunk-level deletion (for individual chunks that are no longer present)
+            deleted_chunks_count = 0
+            pinecone_deleted_chunks_count = 0
+            if (
+                chunk_objects
+            ):  # Only check for chunk deletion if we have incoming chunks
+                deleted_chunks_count, pinecone_deleted_chunks_count = (
+                    await self.workspace_indexing_service.handle_chunk_level_deletion(
+                        workspace_hash, chunk_objects
+                    )
                 )
+
+            # Step 4: Identify chunks and prepare with embeddings (reuse or generate)
+            (
+                all_chunks_with_embeddings,
+                chunks_needing_new_embeddings,
+                embeddings_generated,
+            ) = await self.workspace_indexing_service.identify_and_prepare_chunks_with_embeddings(
+                workspace_hash, chunk_objects
             )
 
-            # Step 4: Generate embeddings only for new chunks
-            new_chunks_with_embeddings = []
-            embeddings_generated = 0
-            if new_chunks:
-                new_chunks_with_embeddings = await self.workspace_indexing_service.generate_embeddings_for_chunks(
-                    new_chunks
-                )
-                embeddings_generated = len(new_chunks_with_embeddings)
-
-            # Step 5: Store new chunks in MongoDB
+            # Step 5: Store all chunks in workspace MongoDB collection (without embeddings)
             mongodb_result = {"inserted": 0, "updated": 0}
-            if new_chunks_with_embeddings:
+            if all_chunks_with_embeddings:
                 mongodb_result = await self.workspace_indexing_service.store_chunks_in_mongodb(
-                    workspace_hash, new_chunks_with_embeddings
+                    workspace_hash, all_chunks_with_embeddings
                 )
 
-            # Step 6: Prepare all chunks for Pinecone upsert (new + existing)
-            all_chunks_for_pinecone = (
-                new_chunks_with_embeddings + existing_chunks
-            )
+            # Step 6: Prepare all chunks for Pinecone upsert
+            all_chunks_for_pinecone = all_chunks_with_embeddings
 
             # Determine git branch for namespace (use first chunk's git_branch)
             git_branch = "default"
@@ -140,15 +142,22 @@ class WorkspaceIndexingUseCase:
             # Calculate processing time
             processing_time = time.time() - start_time
 
+            # Calculate total deletion count
+            total_deleted_chunks = deleted_files_count + deleted_chunks_count
+            total_pinecone_deleted = (
+                pinecone_deleted_files_count + pinecone_deleted_chunks_count
+            )
+
             # Create statistics
             stats = ChunkProcessingStats(
                 total_chunks=len(chunk_objects),
-                existing_chunks=len(existing_chunks),
-                new_chunks=len(new_chunks),
-                deleted_chunks=deleted_chunks_count,
+                existing_chunks=len(chunk_objects)
+                - len(chunks_needing_new_embeddings),
+                new_chunks=len(chunks_needing_new_embeddings),
+                deleted_chunks=total_deleted_chunks,
                 embeddings_generated=embeddings_generated,
                 pinecone_upserted=pinecone_result["upserted_count"],
-                pinecone_deleted=pinecone_deleted_count,
+                pinecone_deleted=total_pinecone_deleted,
             )
 
             # Create response
@@ -163,8 +172,9 @@ class WorkspaceIndexingUseCase:
 
             loggers["main"].info(
                 f"Workspace indexing completed successfully for {workspace_hash}. "
-                f"Time: {processing_time:.2f}s, New: {len(new_chunks)}, "
-                f"Existing: {len(existing_chunks)}, Pinecone: {pinecone_result['upserted_count']}"
+                f"Time: {processing_time:.2f}s, New embeddings: {len(chunks_needing_new_embeddings)}, "
+                f"Reused embeddings: {len(chunk_objects) - len(chunks_needing_new_embeddings)}, "
+                f"Deleted: {total_deleted_chunks}, Pinecone: {pinecone_result['upserted_count']}"
             )
 
             return response
@@ -250,4 +260,34 @@ class WorkspaceIndexingUseCase:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error getting workspace stats: {str(e)}",
+            )
+
+    async def get_embedding_stats(self) -> Dict:
+        """Get statistics about the global embedding collection"""
+        try:
+            loggers["main"].info("Getting global embedding stats")
+
+            # Get embedding statistics
+            stats = (
+                await self.workspace_indexing_service.embedding_repository.get_embedding_stats()
+            )
+
+            loggers["main"].info(
+                f"Retrieved global embedding stats: {stats['total_embeddings']} embeddings"
+            )
+
+            return stats
+
+        except Exception as e:
+            await self.error_repository.insert_error(
+                Error(
+                    tool_name="workspace_indexing_usecase",
+                    error_message=f"Error getting embedding stats: {str(e)}",
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error getting embedding stats: {str(e)}",
             )

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 class Chunk:
@@ -11,7 +11,7 @@ class Chunk:
         start_line: int,
         end_line: int,
         language: str,
-        chunk_type: str,
+        chunk_type: Union[str, List[str]],
         git_branch: str,
         token_count: int,
         embedding: Optional[List[float]] = None,

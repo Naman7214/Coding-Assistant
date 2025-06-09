@@ -26,9 +26,7 @@ class ChunkRepository:
     ) -> AsyncIOMotorCollection:
         """Get or create MongoDB collection for workspace chunks"""
         try:
-            # collection_name = self._get_collection_name(workspace_hash)
-            # for more reusability of the embeddings across the workspaces we will insert all chunks in the single collection.
-            collection_name = "chunks_e16192bc5127ecb1af9b0afdd14662f4bf2531c6"
+            collection_name = self._get_collection_name(workspace_hash)
             collection = self.mongodb_client[self.db_name][collection_name]
 
             # Check if collection exists and create indexes if needed
@@ -116,7 +114,7 @@ class ChunkRepository:
     async def upsert_chunks_batch(
         self, workspace_hash: str, chunks: List[Chunk]
     ) -> Dict[str, int]:
-        """Upsert multiple chunks in a single batch operation"""
+        """Upsert multiple chunks in a single batch operation (without embeddings)"""
         try:
             if not chunks:
                 return {"inserted": 0, "updated": 0}
@@ -130,6 +128,9 @@ class ChunkRepository:
 
             for chunk in chunks:
                 chunk_dict = chunk.to_dict()
+                # Remove embedding from workspace collection (stored separately)
+                if "embedding" in chunk_dict:
+                    del chunk_dict["embedding"]
                 # Remove None values
                 chunk_dict = {
                     k: v for k, v in chunk_dict.items() if v is not None
@@ -256,7 +257,7 @@ class ChunkRepository:
     async def delete_chunks_by_hashes(
         self, workspace_hash: str, chunk_hashes: List[str]
     ) -> int:
-        """Delete chunks by their hashes"""
+        """Delete chunks by their hashes (across all branches)"""
         try:
             collection = await self._get_or_create_collection(workspace_hash)
 
@@ -277,6 +278,32 @@ class ChunkRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Error deleting chunks by hashes: {str(e)}",
+            )
+
+    async def delete_chunks_by_hashes_and_branch(
+        self, workspace_hash: str, chunk_hashes: List[str], git_branch: str
+    ) -> int:
+        """Delete chunks by their hashes AND git branch (branch-specific deletion)"""
+        try:
+            collection = await self._get_or_create_collection(workspace_hash)
+
+            result = await collection.delete_many(
+                {"chunk_hash": {"$in": chunk_hashes}, "git_branch": git_branch}
+            )
+            deleted_count = result.deleted_count
+
+            loggers["main"].info(
+                f"Deleted {deleted_count} chunks by hashes and branch '{git_branch}' from workspace {workspace_hash}"
+            )
+            return deleted_count
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error deleting chunks by hashes and branch for workspace {workspace_hash}: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error deleting chunks by hashes and branch: {str(e)}",
             )
 
     async def get_chunks_by_obfuscated_paths_and_branch(
@@ -312,4 +339,81 @@ class ChunkRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Error retrieving chunks by obfuscated paths and branch: {str(e)}",
+            )
+
+    async def get_chunk_hashes_by_path_and_branch(
+        self, workspace_hash: str, obfuscated_path: str, git_branch: str
+    ) -> Set[str]:
+        """Get all chunk hashes for a specific path and branch"""
+        try:
+            collection = await self._get_or_create_collection(workspace_hash)
+
+            cursor = collection.find(
+                {
+                    "obfuscated_path": obfuscated_path,
+                    "git_branch": git_branch,
+                },
+                {"chunk_hash": 1, "_id": 0},
+            )
+
+            chunk_hashes = set()
+            async for doc in cursor:
+                chunk_hashes.add(doc["chunk_hash"])
+
+            loggers["main"].info(
+                f"Retrieved {len(chunk_hashes)} chunk hashes for path {obfuscated_path} on branch {git_branch} from workspace {workspace_hash}"
+            )
+            return chunk_hashes
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error retrieving chunk hashes by path and branch for workspace {workspace_hash}: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving chunk hashes by path and branch: {str(e)}",
+            )
+
+    async def get_chunks_grouped_by_path_and_branch(
+        self, workspace_hash: str
+    ) -> Dict[str, Dict[str, Set[str]]]:
+        """Get all chunks grouped by obfuscated_path and git_branch, returning chunk_hashes"""
+        try:
+            collection = await self._get_or_create_collection(workspace_hash)
+
+            cursor = collection.find(
+                {},
+                {
+                    "chunk_hash": 1,
+                    "obfuscated_path": 1,
+                    "git_branch": 1,
+                    "_id": 0,
+                },
+            )
+
+            grouped_chunks = {}
+            async for doc in cursor:
+                path = doc["obfuscated_path"]
+                branch = doc["git_branch"]
+                chunk_hash = doc["chunk_hash"]
+
+                if path not in grouped_chunks:
+                    grouped_chunks[path] = {}
+                if branch not in grouped_chunks[path]:
+                    grouped_chunks[path][branch] = set()
+
+                grouped_chunks[path][branch].add(chunk_hash)
+
+            loggers["main"].info(
+                f"Retrieved chunks grouped by path and branch from workspace {workspace_hash}"
+            )
+            return grouped_chunks
+
+        except Exception as e:
+            loggers["main"].error(
+                f"Error retrieving grouped chunks for workspace {workspace_hash}: {str(e)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error retrieving grouped chunks: {str(e)}",
             )

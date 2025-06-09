@@ -3,7 +3,7 @@ import gzip
 import json
 import time
 from datetime import datetime
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 from fastapi import Depends, HTTPException, status
 
@@ -12,6 +12,9 @@ from system.backend.app.models.domain.chunk import Chunk
 from system.backend.app.models.domain.error import Error
 from system.backend.app.models.schemas.chunk_indexing_schema import ChunkData
 from system.backend.app.repositories.chunk_repository import ChunkRepository
+from system.backend.app.repositories.embedding_repository import (
+    EmbeddingRepository,
+)
 from system.backend.app.repositories.error_repo import ErrorRepo
 from system.backend.app.services.search_tools.embedding_service import (
     EmbeddingService,
@@ -26,11 +29,15 @@ class WorkspaceIndexingService:
     def __init__(
         self,
         chunk_repository: ChunkRepository = Depends(ChunkRepository),
+        embedding_repository: EmbeddingRepository = Depends(
+            EmbeddingRepository
+        ),
         embedding_service: EmbeddingService = Depends(EmbeddingService),
         pinecone_service: PineconeService = Depends(PineconeService),
         error_repository: ErrorRepo = Depends(ErrorRepo),
     ):
         self.chunk_repository = chunk_repository
+        self.embedding_repository = embedding_repository
         self.embedding_service = embedding_service
         self.pinecone_service = pinecone_service
         self.error_repository = error_repository
@@ -114,58 +121,96 @@ class WorkspaceIndexingService:
                 detail=f"Error decompressing payload: {str(e)}",
             )
 
-    async def identify_new_chunks(
+    async def identify_and_prepare_chunks_with_embeddings(
         self, workspace_hash: str, incoming_chunks: List[ChunkData]
-    ) -> Tuple[List[ChunkData], List[Chunk], Set[str]]:
-        """Identify which chunks are new vs existing"""
+    ) -> Tuple[List[Chunk], List[ChunkData], int]:
+        """Identify chunks and prepare them with embeddings from global collection or generate new ones"""
         try:
-            # Get all existing chunk hashes in one DB call
-            existing_hashes = (
-                await self.chunk_repository.get_existing_chunk_hashes(
-                    workspace_hash
+            # Get all incoming chunk hashes
+            incoming_hashes = [chunk.chunk_hash for chunk in incoming_chunks]
+
+            # Get existing embeddings from global collection
+            existing_embeddings = (
+                await self.embedding_repository.get_embeddings_by_hashes(
+                    incoming_hashes
                 )
             )
 
-            # Separate new chunks from existing ones
-            new_chunks = []
-            existing_chunks = []
-            incoming_hashes = set()
+            # Separate chunks that need new embeddings vs those with existing embeddings
+            chunks_needing_embeddings = []
+            chunks_with_embeddings = []
 
             for chunk_data in incoming_chunks:
-                incoming_hashes.add(chunk_data.chunk_hash)
-                if chunk_data.chunk_hash not in existing_hashes:
-                    new_chunks.append(chunk_data)
+                if chunk_data.chunk_hash in existing_embeddings:
+                    # Use existing embedding
+                    chunk = Chunk(
+                        chunk_hash=chunk_data.chunk_hash,
+                        content=chunk_data.content,
+                        obfuscated_path=chunk_data.obfuscated_path,
+                        start_line=chunk_data.start_line,
+                        end_line=chunk_data.end_line,
+                        language=chunk_data.language,
+                        chunk_type=chunk_data.chunk_type,
+                        git_branch=chunk_data.git_branch,
+                        token_count=chunk_data.token_count,
+                        embedding=existing_embeddings[chunk_data.chunk_hash],
+                        created_at=datetime.now(),
+                        updated_at=datetime.now(),
+                    )
+                    chunks_with_embeddings.append(chunk)
+                else:
+                    # Needs new embedding
+                    chunks_needing_embeddings.append(chunk_data)
 
-            # Get existing chunks that match incoming hashes for Pinecone upsert
-            if existing_hashes:
-                matching_hashes = list(
-                    existing_hashes.intersection(incoming_hashes)
+            # Generate embeddings for chunks that need them
+            new_embeddings_generated = 0
+            if chunks_needing_embeddings:
+                new_chunks_with_embeddings = (
+                    await self.generate_embeddings_for_chunks(
+                        chunks_needing_embeddings
+                    )
                 )
-                if matching_hashes:
-                    existing_chunks = (
-                        await self.chunk_repository.get_chunks_by_hashes(
-                            workspace_hash, matching_hashes
-                        )
+                chunks_with_embeddings.extend(new_chunks_with_embeddings)
+                new_embeddings_generated = len(new_chunks_with_embeddings)
+
+                # Store new embeddings in global collection
+                embeddings_to_store = []
+                for chunk in new_chunks_with_embeddings:
+                    embeddings_to_store.append(
+                        {
+                            "chunk_hash": chunk.chunk_hash,
+                            "embedding": chunk.embedding,
+                        }
+                    )
+
+                if embeddings_to_store:
+                    await self.embedding_repository.store_embeddings_batch(
+                        embeddings_to_store
                     )
 
             loggers["main"].info(
-                f"Chunk analysis for workspace {workspace_hash}: "
-                f"total={len(incoming_chunks)}, new={len(new_chunks)}, existing={len(existing_chunks)}"
+                f"Chunk processing for workspace {workspace_hash}: "
+                f"total={len(incoming_chunks)}, reused_embeddings={len(existing_embeddings)}, "
+                f"new_embeddings={new_embeddings_generated}"
             )
 
-            return new_chunks, existing_chunks, existing_hashes
+            return (
+                chunks_with_embeddings,
+                chunks_needing_embeddings,
+                new_embeddings_generated,
+            )
 
         except Exception as e:
             await self.error_repository.insert_error(
                 Error(
                     tool_name="workspace_indexing",
-                    error_message=f"Error identifying new chunks: {str(e)}",
+                    error_message=f"Error identifying and preparing chunks: {str(e)}",
                     timestamp=datetime.now().isoformat(),
                 )
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error identifying new chunks: {str(e)}",
+                detail=f"Error identifying and preparing chunks: {str(e)}",
             )
 
     async def _process_embedding_chunk(
@@ -459,6 +504,113 @@ class WorkspaceIndexingService:
                 detail=f"Error upserting chunks to Pinecone: {str(e)}",
             )
 
+    async def handle_chunk_level_deletion(
+        self, workspace_hash: str, incoming_chunks: List[ChunkData]
+    ) -> Tuple[int, int]:
+        """Handle deletion of individual chunks that are no longer present"""
+        try:
+            if not incoming_chunks:
+                loggers["main"].info(
+                    "No incoming chunks, skipping chunk-level deletion"
+                )
+                return 0, 0
+
+            # Group incoming chunks by git_branch and obfuscated_path
+            incoming_grouped = {}
+            for chunk in incoming_chunks:
+                path = chunk.obfuscated_path
+                branch = chunk.git_branch
+
+                if path not in incoming_grouped:
+                    incoming_grouped[path] = {}
+                if branch not in incoming_grouped[path]:
+                    incoming_grouped[path][branch] = set()
+
+                incoming_grouped[path][branch].add(chunk.chunk_hash)
+
+            # Only process deletions for paths that are present in the incoming payload
+            mongodb_deleted_count = 0
+            pinecone_deleted_count = 0
+
+            loggers["main"].info(
+                f"Processing chunk deletion for {len(incoming_grouped)} unique paths in incoming payload"
+            )
+
+            for path, branches_in_path in incoming_grouped.items():
+                loggers["main"].info(
+                    f"Processing path: '{path}' with {len(branches_in_path)} branches: {list(branches_in_path.keys())}"
+                )
+
+                for branch, incoming_hashes in branches_in_path.items():
+                    loggers["main"].info(
+                        f"Processing branch '{branch}' for path '{path}' - incoming: {len(incoming_hashes)} chunks"
+                    )
+
+                    # Get existing chunks for this specific path and branch only
+                    existing_hashes = await self.chunk_repository.get_chunk_hashes_by_path_and_branch(
+                        workspace_hash, path, branch
+                    )
+
+                    loggers["main"].info(
+                        f"Found {len(existing_hashes)} existing chunks for path '{path}' on branch '{branch}'"
+                    )
+
+                    # Find chunks that exist in DB but are missing in the incoming payload
+                    hashes_to_delete = existing_hashes - incoming_hashes
+
+                    if hashes_to_delete:
+                        hashes_to_delete_list = list(hashes_to_delete)
+
+                        loggers["main"].info(
+                            f"🗑️  DELETING {len(hashes_to_delete)} chunks for path '{path}' ONLY from branch '{branch}'"
+                        )
+
+                        # Delete from MongoDB workspace collection (branch-specific)
+                        mongodb_deleted = await self.chunk_repository.delete_chunks_by_hashes_and_branch(
+                            workspace_hash, hashes_to_delete_list, branch
+                        )
+                        mongodb_deleted_count += mongodb_deleted
+
+                        # Delete from Pinecone (branch-specific namespace)
+                        pinecone_deleted = (
+                            await self._delete_chunks_from_pinecone(
+                                workspace_hash, hashes_to_delete_list, branch
+                            )
+                        )
+                        pinecone_deleted_count += pinecone_deleted
+
+                        loggers["main"].info(
+                            f"✅ Successfully deleted {mongodb_deleted} from MongoDB and {pinecone_deleted} from Pinecone namespace '{branch}'"
+                        )
+                    else:
+                        loggers["main"].info(
+                            f"✨ No chunks to delete for path '{path}' on branch '{branch}' - all chunks are up to date"
+                        )
+
+            if mongodb_deleted_count == 0 and pinecone_deleted_count == 0:
+                loggers["main"].info(
+                    "No individual chunks needed to be deleted"
+                )
+            else:
+                loggers["main"].info(
+                    f"Successfully deleted {mongodb_deleted_count} chunks from workspace collection and {pinecone_deleted_count} from Pinecone"
+                )
+
+            return mongodb_deleted_count, pinecone_deleted_count
+
+        except Exception as e:
+            await self.error_repository.insert_error(
+                Error(
+                    tool_name="workspace_indexing",
+                    error_message=f"Error handling chunk-level deletion: {str(e)}",
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error handling chunk-level deletion: {str(e)}",
+            )
+
     async def handle_deleted_files(
         self,
         workspace_hash: str,
@@ -495,7 +647,14 @@ class WorkspaceIndexingService:
                 f"Found {len(chunks_to_delete)} chunks to delete for {len(deleted_files_obfuscated_paths)} deleted files on branch {current_git_branch}"
             )
 
-            # Step 2: Delete from Pinecone only
+            # Step 2: Delete from MongoDB workspace collection (branch-specific)
+            mongodb_deleted_count = 0
+            if chunk_hashes_to_delete:
+                mongodb_deleted_count = await self.chunk_repository.delete_chunks_by_hashes_and_branch(
+                    workspace_hash, chunk_hashes_to_delete, current_git_branch
+                )
+
+            # Step 3: Delete from Pinecone (branch-specific namespace)
             pinecone_deleted_count = 0
             if chunk_hashes_to_delete:
                 pinecone_deleted_count = (
@@ -507,10 +666,10 @@ class WorkspaceIndexingService:
                 )
 
             loggers["main"].info(
-                f"Successfully deleted {pinecone_deleted_count} vectors from Pinecone on branch {current_git_branch}"
+                f"Successfully deleted {mongodb_deleted_count} chunks from MongoDB and {pinecone_deleted_count} vectors from Pinecone on branch {current_git_branch}"
             )
 
-            return len(chunks_to_delete), pinecone_deleted_count
+            return mongodb_deleted_count, pinecone_deleted_count
 
         except Exception as e:
             await self.error_repository.insert_error(
