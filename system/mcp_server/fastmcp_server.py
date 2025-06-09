@@ -12,6 +12,7 @@ from system.mcp_server.tools.file_access_tools import (
     list_directory_tool,
     read_file_tool,
 )
+from system.mcp_server.tools.search_tools import codebase_search_tool
 
 logging.basicConfig(
     level=logging.INFO,
@@ -246,30 +247,34 @@ async def list_directory(
 #     return json_output
 
 
-# @mcp.tool()
-# async def codebase_search(
-#     query: str, explanation: str, target_directories: Optional[List[str]] = None
-# ) -> str:
-#     """
-#     Find snippets of code from the codebase most relevant to the search query.
-#     This is a semantic search tool, so the query should ask for something semantically matching what is needed.
-#     If it makes sense to only search in particular directories, please specify them in the target_directories field.
-#     Unless there is a clear reason to use your own search query, please just reuse the user's exact query with their wording.
-#     Their exact wording/phrasing can often be helpful for the semantic search query. Keeping the same exact question format can also be helpful.
-#     """
-#     logger.info(f"Searching codebase with query: {query}")
-#     try:
-#         result = await codebase_search_tool(
-#             query=query,
-#             explanation=explanation,
-#             target_directories=target_directories,
-#         )
-#     except Exception as e:
-#         logger.error(f"Error occurred while searching the codebase: {e}")
-#         result = {"error": str(e)}
+@mcp.tool()
+async def codebase_search(
+    query: str,
+    explanation: str,
+    hashed_workspace_path: str,
+    git_branch: str = "default",
+) -> str:
+    """
+    Find snippets of code from the codebase most relevant to the search query.
+    This is a semantic search tool, so the query should ask for something semantically matching what is needed.
+    If it makes sense to only search in particular directories, please specify them in the target_directories field.
+    Unless there is a clear reason to use your own search query, please just reuse the user's exact query with their wording.
+    Their exact wording/phrasing can often be helpful for the semantic search query. Keeping the same exact question format can also be helpful.
+    """
+    logger.info(f"Searching codebase with query: {query}")
+    try:
+        result = await codebase_search_tool(
+            query=query,
+            explanation=explanation,
+            hashed_workspace_path=hashed_workspace_path,
+            git_branch=git_branch,
+        )
+    except Exception as e:
+        logger.error(f"Error occurred while searching the codebase: {e}")
+        result = {"error": str(e)}
 
-#     json_output = json.dumps(result, indent=2)
-#     return json_output
+    json_output = json.dumps(result, indent=2)
+    return json_output
 
 
 # @mcp.tool()

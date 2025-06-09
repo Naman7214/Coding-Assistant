@@ -1,10 +1,14 @@
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import * as vscode from 'vscode';
 import { ContextApiServer } from './api/ContextApiServer';
 import { ContextManager } from './context/ContextManager';
 import { ProcessedContext } from './context/types/context';
-import { IndexingManager, IndexingStatusInfo } from './indexing';
+import { IndexingManager, IndexingStatusInfo, hashWorkspacePath } from './indexing';
 import { EnhancedStreamingClient } from './streaming_client';
 import { getSystemInfo, getWebviewContent } from './utilities';
+
+const execAsync = promisify(exec);
 
 const STREAMING_API_URL = 'http://0.0.0.0:5001';
 
@@ -511,17 +515,25 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       // Collect always-send context (system info + active file + open files)
       const alwaysSendContext = await this.collectAlwaysSendContext();
 
+      // Get additional required data
+      const hashedWorkspacePath = hashWorkspacePath(alwaysSendContext.workspace.path);
+      const currentGitBranch = await this.getCurrentGitBranch(alwaysSendContext.workspace.path);
+
       // Log what context is being sent
       this.outputChannel.appendLine(`[Query] Always-send context summary:`);
       this.outputChannel.appendLine(`[Query] - System info: OS=${alwaysSendContext.systemInfo.platform}, Shell=${alwaysSendContext.systemInfo.defaultShell}`);
       this.outputChannel.appendLine(`[Query] - Active file: ${alwaysSendContext.activeFile?.relativePath || 'None'}`);
       this.outputChannel.appendLine(`[Query] - Open files: ${alwaysSendContext.openFiles?.length || 0} files`);
+      this.outputChannel.appendLine(`[Query] - Hashed workspace path: ${hashedWorkspacePath}`);
+      this.outputChannel.appendLine(`[Query] - Git branch: ${currentGitBranch}`);
 
       // Send query with always-send context to backend
       if (this.enhancedStreamingClient) {
         const streamRequest: any = {
           query: query,
           workspace_path: alwaysSendContext.workspace.path,
+          hashed_workspace_path: hashedWorkspacePath,
+          git_branch: currentGitBranch,
           system_info: alwaysSendContext.systemInfo,
           active_file_context: alwaysSendContext.activeFile,
           open_files_context: alwaysSendContext.openFiles,
@@ -535,6 +547,8 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         // DEBUG: Log the exact request being sent
         this.outputChannel.appendLine(`[Query] Sending request with context mentions: ${JSON.stringify(contextMentions)}`);
         this.outputChannel.appendLine(`[Query] Workspace: ${streamRequest.workspace_path}`);
+        this.outputChannel.appendLine(`[Query] Hashed workspace path: ${streamRequest.hashed_workspace_path}`);
+        this.outputChannel.appendLine(`[Query] Git branch: ${streamRequest.git_branch}`);
         this.outputChannel.appendLine(`[Query] System Info: ${JSON.stringify(streamRequest.system_info)}`);
         if (streamRequest.active_file_context) {
           this.outputChannel.appendLine(`[Query] Active File: ${streamRequest.active_file_context.relativePath}`);
@@ -644,6 +658,31 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         command: 'streamError',
         error: error instanceof Error ? error.message : String(error)
       });
+    }
+  }
+
+  /**
+   * Get current git branch for the workspace
+   */
+  private async getCurrentGitBranch(workspacePath: string): Promise<string> {
+    try {
+      // First try to get from indexing manager if available
+      if (this.indexingManager && this.isIndexingReady) {
+        const status = this.indexingManager.getStatus();
+        if (status.gitBranch && status.gitBranch !== 'default') {
+          return status.gitBranch;
+        }
+      }
+
+      // Fallback to direct git command
+      const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', {
+        cwd: workspacePath
+      });
+      return stdout.trim() || 'default';
+    } catch (error) {
+      // No git repository or other error
+      this.outputChannel.appendLine(`[GitBranch] Failed to get git branch: ${error}`);
+      return 'default';
     }
   }
 

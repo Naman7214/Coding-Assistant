@@ -17,31 +17,35 @@ logger = logging.getLogger(__name__)
 
 
 async def codebase_search_tool(
-    query: str, explanation: str, target_directories: Optional[list[str]] = []
+    query: str, explanation: str, hashed_workspace_path: str, git_branch: str
 ):
     """
     Search the codebase for the given query.
     """
-    url = settings.CODEBASE_SEARCH_API
+    metadata_url = settings.CODEBASE_SEARCH_METADATA_API
+    codebase_search_url = settings.CODEBASE_SEARCH_API
 
     payload = {
         "query": query,
         "explanation": explanation,
-        "target_directories": target_directories if target_directories else [],
+        "hashed_workspace_path": hashed_workspace_path,
+        "git_branch": git_branch,
     }
 
     try:
         async with httpx.AsyncClient(
             verify=False, timeout=settings.httpx_timeout
         ) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
-            # result = response_json.get("content", "")
-            return response_json
+            metadata_response = await client.post(metadata_url, json=payload)
+            metadata_response.raise_for_status()
+            metadata_response_json = metadata_response.json()
+            code_content_response = await client.post(
+                codebase_search_url, json=metadata_response_json
+            )
+            code_content_response.raise_for_status()
+            code_content_response_json = code_content_response.json()
+            print(json.dumps(code_content_response_json, indent=4))
+            return code_content_response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP status error occurred: {e.response.status_code} {e.response.text}"
     except httpx.RequestError as e:

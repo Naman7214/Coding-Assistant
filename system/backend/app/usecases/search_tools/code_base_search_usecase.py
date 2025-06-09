@@ -38,11 +38,13 @@ class CodeBaseSearchUsecase:
             "dotproduct-1024-npedpix.svc.aped-4627-b74a.pinecone.io"
         )
         self.llm_model = "claude-sonnet-4-20250514"  # Or the latest Claude 3.7 Sonnet model name
-        self.top_k = 20  # Number of results to retrieve from vector DB
-        self.top_n = 10  # Number of results after reranking
+        self.top_k = 5  # Number of results to retrieve from vector DB
+        self.top_n = 3  # Number of results after reranking
         self.error_repo = error_repo
 
-    async def perform_rag(self, query: str, target_directories: list[str]):
+    async def perform_rag(
+        self, query: str, hashed_workspace_path: str, git_branch: str
+    ):
         # Step 1: Generate embeddings for the query
         query_embedding = (
             await self.embedding_service.voyageai_dense_embeddings(
@@ -53,21 +55,21 @@ class CodeBaseSearchUsecase:
             )
         )
         query_embedding = query_embedding[0]
-        # Step 2: Query Pinecone with the embeddings
-        index_name = f"{self.similarity_metric}-{self.dimension}"
-        index_host = self.index_host
-
-        # Create metadata filter based on target directories if provided
-        filter_conditions = {}
-        if target_directories and len(target_directories) > 0:
-            filter_conditions = {"directory": {"$in": target_directories}}
+        # List existing indexes
+        list_result = await self.pinecone_service.list_pinecone_indexes()
+        indexes = list_result.get("indexes", [])
+        for index in indexes:
+            if index.get("name") == hashed_workspace_path:
+                index_host = index.get("host")
+                break
+        print(f" Using the index host: {index_host} for Query")
 
         vector_search_results = await self.pinecone_service.pinecone_query(
             index_host=index_host,
             top_k=self.top_k,
             vector=query_embedding,
             include_metadata=True,
-            filter_dict=filter_conditions,
+            namespace=git_branch,
         )
 
         if not vector_search_results or not vector_search_results.get(
@@ -75,35 +77,25 @@ class CodeBaseSearchUsecase:
         ):
             return []
 
-        # Step 3: Extract text passages and metadata from results
-        documents = []
+        # Step 3: Extract metadata from results
         doc_metadata = []
-        file_paths = []
         for match in vector_search_results.get("matches", []):
-            if match.get("metadata") and match.get("metadata").get("text"):
-                file_paths.append(
-                    match.get("metadata", {}).get("file_path", "unknown")
-                )
-                documents.append(match["metadata"]["text"])
-                doc_metadata.append(
-                    {
-                        "score": match.get("score", 0),
-                        "file_path": match.get("metadata", {}).get(
-                            "file_path", "unknown"
-                        ),
-                        "start_line": match.get("metadata", {}).get(
-                            "start_line", "unknown"
-                        ),
-                        "end_line": match.get("metadata", {}).get(
-                            "end_line", "unknown"
-                        ),
-                        "file_name": match.get("metadata", {}).get(
-                            "file_name", "unknown"
-                        ),
-                    }
-                )
+            doc_metadata.append(
+                {
+                    "obfuscated_path": match.get("metadata", {}).get(
+                        "obfuscated_path", "unknown"
+                    ),
+                    "score": match.get("score", 0),
+                    "start_line": match.get("metadata", {}).get(
+                        "start_line", "unknown"
+                    ),
+                    "end_line": match.get("metadata", {}).get(
+                        "end_line", "unknown"
+                    ),
+                }
+            )
 
-        if not documents:
+        if not doc_metadata:
             await self.error_repo.insert_error(
                 Error(
                     tool_name="code_base_search",
@@ -112,34 +104,18 @@ class CodeBaseSearchUsecase:
             )
             return []
 
-        reranked_results = await self.reranker_service.voyage_rerank(
-            self.reranker_model, query, documents, self.top_n
-        )
-
-        # Step 5: Combine reranked results with metadata
-        final_results = []
-        for result in reranked_results.get("data", []):
-            index = result.get("index")
-            if index is not None and 0 <= index < len(doc_metadata):
-                final_results.append(
-                    {
-                        "text": documents[index],
-                        "relevance_score": result.get("relevance_score", 0),
-                        "metadata": doc_metadata[index],
-                    }
-                )
-
-        full_final_results = final_results
-        return full_final_results
+        return doc_metadata
 
     async def process_query(self, request: CodeBaseSearchQueryRequest):
         start_time = time.time()
         query = request.query
-        target_directories = request.target_directories
+        hashed_workspace_path = request.hashed_workspace_path
+        git_branch = request.git_branch
 
-        retrieved_docs = await self.perform_rag(query, target_directories)
+        retrieved_docs = await self.perform_rag(
+            query, hashed_workspace_path, git_branch
+        )
 
-        # Step 3: Format and return the final response
         end_time = time.time()
         processing_time = end_time - start_time
 

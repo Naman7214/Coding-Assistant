@@ -48,6 +48,8 @@ interface ActiveFileContext {
 interface QueryRequest {
     query: string;
     workspace_path: string;
+    hashed_workspace_path: string;
+    git_branch: string;
     system_info?: SystemInfo;
     active_file_context?: ActiveFileContext;
     open_files_context?: any[];

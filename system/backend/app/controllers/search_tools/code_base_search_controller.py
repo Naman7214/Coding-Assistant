@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from system.backend.app.models.schemas.code_base_search_schema import (
     CodeBaseSearchQueryRequest,
 )
-from system.backend.app.usecases.search_tools.code_base_usecase import (
+from system.backend.app.usecases.search_tools.code_base_search_usecase import (
     CodeBaseSearchUsecase,
 )
 

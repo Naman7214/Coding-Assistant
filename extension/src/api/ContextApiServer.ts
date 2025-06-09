@@ -6,7 +6,34 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { PersistentTerminalManager } from '../bridge/PersistentTerminalManager';
 import { ContextManager } from '../context/ContextManager';
+import { deobfuscatePath } from '../indexing/utils/hash';
 
+// Interface for semantic search result item
+interface SemanticSearchResultItem {
+    obfuscated_path: string;
+    score: number;
+    start_line: number;
+    end_line: number;
+}
+
+// Interface for semantic search request payload
+interface SemanticSearchRequest {
+    data: SemanticSearchResultItem[];
+    message: string;
+    error: string | null;
+}
+
+// Interface for processed search result response
+interface ProcessedSearchResultItem {
+    path: string;
+    score: number;
+    start_line: number;
+    end_line: number;
+    context_start_line: number;
+    context_end_line: number;
+    content: string;
+    error?: string;
+}
 
 interface TerminalRequest {
     command: string;
@@ -107,6 +134,9 @@ export class ContextApiServer implements vscode.Disposable {
 
         // NEW: Directory listing endpoint (for list_directory tool)
         this.app.post('/api/directory/list', this.handleDirectoryList.bind(this));
+
+        // NEW: Semantic search results endpoint (for processing obfuscated paths)
+        this.app.post('/api/search/process-results', this.handleSemanticSearchResults.bind(this));
     }
 
     private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
@@ -631,6 +661,153 @@ export class ContextApiServer implements vscode.Disposable {
         }
     }
 
+    // NEW: Semantic search results handler
+    private async handleSemanticSearchResults(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const searchRequest: SemanticSearchRequest = req.body;
+            const workspaceId = req.body.workspaceId || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Processing semantic search results with ${searchRequest.data?.length || 0} items`);
+
+            // Validate request
+            if (!searchRequest.data || !Array.isArray(searchRequest.data)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid request: data array is required',
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
+            // Get workspace folder
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                res.status(500).json({
+                    success: false,
+                    error: 'No workspace folders available',
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
+            const workspaceFolder = workspaceFolders[0];
+            const workspacePath = workspaceFolder.uri.fsPath;
+
+            this.outputChannel.appendLine(`[ContextAPI] Using workspace: ${workspaceFolder.name} at ${workspacePath}`);
+
+            // Process each search result item
+            const processedResults: ProcessedSearchResultItem[] = await Promise.all(
+                searchRequest.data.map(async (item): Promise<ProcessedSearchResultItem> => {
+                    try {
+                        // Deobfuscate the path - now returns absolute path directly
+                        const absolutePath = deobfuscatePath(item.obfuscated_path);
+
+                        this.outputChannel.appendLine(`[ContextAPI] Deobfuscated absolute path: ${absolutePath}`);
+
+                        // Use the absolute path directly
+                        const fullFilePath = absolutePath;
+
+                        // Security check - ensure file is within workspace
+                        const normalizedWorkspacePath = path.normalize(workspacePath);
+                        const normalizedFilePath = path.normalize(fullFilePath);
+
+                        if (!normalizedFilePath.startsWith(normalizedWorkspacePath + path.sep) &&
+                            normalizedFilePath !== normalizedWorkspacePath) {
+                            throw new Error(`Access denied: File "${absolutePath}" is outside workspace`);
+                        }
+
+                        // Read file content
+                        const uri = vscode.Uri.file(fullFilePath);
+                        const content = await vscode.workspace.fs.readFile(uri);
+                        const fileContent = content.toString();
+                        const lines = fileContent.split('\n');
+
+                        // Calculate context lines (original range + 3 lines before and after)
+                        const contextStartLine = Math.max(1, item.start_line - 3);
+                        const contextEndLine = Math.min(lines.length, item.end_line + 3);
+
+                        // Extract the content with context
+                        const startIndex = Math.max(0, contextStartLine - 1);
+                        const endIndex = Math.min(lines.length, contextEndLine);
+                        const contextLines = lines.slice(startIndex, endIndex);
+
+                        // Calculate the relative path for the response (relative to workspace)
+                        const responseRelativePath = path.relative(workspacePath, absolutePath);
+
+                        this.outputChannel.appendLine(
+                            `[ContextAPI] Extracted ${contextLines.length} lines from ${responseRelativePath} ` +
+                            `(${contextStartLine}:${contextEndLine}, original: ${item.start_line}:${item.end_line})`
+                        );
+
+                        return {
+                            path: responseRelativePath,
+                            score: item.score,
+                            start_line: item.start_line,
+                            end_line: item.end_line,
+                            context_start_line: contextStartLine,
+                            context_end_line: contextEndLine,
+                            content: contextLines.join('\n')
+                        };
+
+                    } catch (error) {
+                        this.outputChannel.appendLine(`[ContextAPI] Error processing item: ${error}`);
+
+                        // Try to deobfuscate path for error reporting
+                        let pathForError = item.obfuscated_path;
+                        try {
+                            const absolutePath = deobfuscatePath(item.obfuscated_path);
+                            // Convert to relative path for display
+                            pathForError = path.relative(workspacePath, absolutePath);
+                        } catch {
+                            // Use original obfuscated path if deobfuscation fails
+                        }
+
+                        return {
+                            path: pathForError,
+                            score: item.score,
+                            start_line: item.start_line,
+                            end_line: item.end_line,
+                            context_start_line: item.start_line,
+                            context_end_line: item.end_line,
+                            content: '',
+                            error: error instanceof Error ? error.message : String(error)
+                        };
+                    }
+                })
+            );
+
+            // Filter successful results and count errors
+            const successfulResults = processedResults.filter(result => !result.error);
+            const errorCount = processedResults.length - successfulResults.length;
+
+            this.outputChannel.appendLine(
+                `[ContextAPI] Processed ${processedResults.length} search results: ` +
+                `${successfulResults.length} successful, ${errorCount} errors`
+            );
+
+            res.json({
+                success: true,
+                workspaceId,
+                originalMessage: searchRequest.message,
+                results: processedResults,
+                summary: {
+                    totalItems: processedResults.length,
+                    successfulItems: successfulResults.length,
+                    errorItems: errorCount
+                },
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error processing semantic search results: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
     // Terminal Bridge Handler Methods
     private async handleTerminalRequest(req: express.Request, res: express.Response): Promise<void> {
         const request: TerminalRequest = req.body;
@@ -717,7 +894,8 @@ export class ContextApiServer implements vscode.Disposable {
                 health: '/api/health',
                 sessions: '/api/terminal/sessions',
                 context: '/api/workspace/{workspaceId}/context/stream',
-                directoryList: '/api/directory/list'
+                directoryList: '/api/directory/list',
+                semanticSearchResults: '/api/search/process-results'
             },
             supportedOperations: [
                 'terminal_command',
@@ -725,7 +903,8 @@ export class ContextApiServer implements vscode.Disposable {
                 'write_file',
                 'list_directory',
                 'delete_file',
-                'search_files'
+                'search_files',
+                'semantic_search_results'
             ],
             timestamp: new Date().toISOString(),
             version: '1.0.0'
@@ -972,6 +1151,7 @@ export class ContextApiServer implements vscode.Disposable {
                 this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/context/git`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/context/open-files`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/directory/list`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/search/process-results`);
                 this.outputChannel.appendLine(`[UnifiedAPI]   Terminal Bridge API:`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/terminal/execute`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/terminal/sessions`);

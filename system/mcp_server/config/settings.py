@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     CODEBASE_SEARCH_API: str
     EXECUTE_GREP_SEARCH_API: str
     EDIT_FILE_API: str
+    CODEBASE_SEARCH_METADATA_API: str
 
     class Config:
         env_file = ".env"

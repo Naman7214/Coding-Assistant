@@ -343,7 +343,7 @@ class PineconeService:
         }
 
         payload = {
-            "namespace": "admin@gmail.com-observability_task",
+            "namespace": namespace,
             "vector": vector,
             "topK": top_k,
             "includeValues": False,

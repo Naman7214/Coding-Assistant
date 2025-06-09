@@ -68,6 +68,8 @@ def create_stream_event(
 async def stream_agent_response(
     query: str,
     workspace_path: str,
+    hashed_workspace_path: str,
+    git_branch: str,
     system_info: Optional[SystemInfo] = None,
     active_file_context: Optional[ActiveFileContext] = None,
     context_mentions: Optional[List[str]] = None,
@@ -78,6 +80,8 @@ async def stream_agent_response(
     print(f"🚀 Enhanced stream request received:")
     print(f"   Query: {query[:100]}...")
     print(f"   Workspace Path: {workspace_path}")
+    print(f"   Hashed Workspace Path: {hashed_workspace_path}")
+    print(f"   Git Branch: {git_branch}")
     print(f"   Context Mentions: {context_mentions}")
     if system_info:
         print(f"   System: {system_info.platform} {system_info.osVersion}")
@@ -171,6 +175,8 @@ async def stream_query(request: QueryRequest):
 
         print(f"🚀 Enhanced /stream endpoint called:")
         print(f"   Query: {request.query[:100]}...")
+        print(f"   Hashed Workspace Path: {request.hashed_workspace_path}")
+        print(f"   Git Branch: {request.git_branch}")
         print(f"   Context Mentions: {request.context_mentions}")
         print(f"   System Info: {bool(request.system_info)}")
         print(f"   Active File: {bool(request.active_file_context)}")
@@ -179,8 +185,11 @@ async def stream_query(request: QueryRequest):
             stream_agent_response(
                 request.query,
                 request.workspace_path,
+                request.hashed_workspace_path,
+                request.git_branch,
                 request.system_info,
                 request.active_file_context,
+                request.context_mentions,
             ),
             media_type="text/event-stream",
             headers={

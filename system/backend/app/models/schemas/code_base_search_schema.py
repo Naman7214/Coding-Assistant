@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class CodeBaseSearchQueryRequest(BaseModel):
     query: str
     explanation: str
-    target_directories: list[str] = Field(default=[])
+    hashed_workspace_path: str
+    git_branch: str = "default"

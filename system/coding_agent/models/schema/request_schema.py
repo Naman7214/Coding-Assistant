@@ -7,6 +7,8 @@ from pydantic import BaseModel
 class QueryRequest(BaseModel):
     query: str
     workspace_path: str
+    hashed_workspace_path: str
+    git_branch: str
     system_info: Optional[SystemInfo] = None
     active_file_context: Optional[ActiveFileContext] = None
     context_mentions: Optional[List[str]] = None
