@@ -2,45 +2,87 @@ import * as vscode from 'vscode';
 import { MerkleTreeBuilder } from '../../../indexing/core/merkle-tree-builder';
 import { MerkleTreeNode, TreeComparisonResult } from '../../../indexing/types/chunk';
 
+/**
+ * Manages merkle trees for recent edits tracking
+ * Provides storage and retrieval using VS Code's workspace storage
+ */
 export class MerkleTreeManager {
-    private merkleTreeBuilder: MerkleTreeBuilder;
+    private merkleBuilder: MerkleTreeBuilder;
+    private context: vscode.ExtensionContext;
     private outputChannel: vscode.OutputChannel;
-    private workspacePath: string;
+    private workspaceHash: string;
 
-    constructor(workspacePath: string, outputChannel: vscode.OutputChannel) {
-        this.workspacePath = workspacePath;
+    constructor(
+        context: vscode.ExtensionContext,
+        outputChannel: vscode.OutputChannel,
+        workspaceHash: string
+    ) {
+        this.context = context;
         this.outputChannel = outputChannel;
-        this.merkleTreeBuilder = new MerkleTreeBuilder(
-            [], // Use default exclude patterns
-            [], // Use default include patterns
-            outputChannel
+        this.workspaceHash = workspaceHash;
+
+        // Initialize merkle tree builder with optimized patterns for recent edits
+        this.merkleBuilder = new MerkleTreeBuilder(
+            [
+                // Standard exclusions
+                'node_modules/**', '.git/**', '**/.git/**', '**/*.log',
+                '**/dist/**', '**/build/**', '**/.DS_Store', '**/thumbs.db',
+                '.venv/**', '**/.venv/**', '**/site-packages/**', '**/lib/python*/**',
+                '**/bin/**', '**/__pycache__/**', '**/*.pyc',
+                // Additional exclusions for recent edits
+                '**/.snapshots/**', '**/tmp/**', '**/temp/**', '**/.cache/**'
+            ],
+            [
+                // Include common source code files
+                '**/*.ts', '**/*.js', '**/*.tsx', '**/*.jsx', '**/*.vue',
+                '**/*.py', '**/*.java', '**/*.cpp', '**/*.c', '**/*.h',
+                '**/*.cs', '**/*.php', '**/*.rb', '**/*.go', '**/*.rs',
+                '**/*.swift', '**/*.kt', '**/*.scala', '**/*.sh',
+                '**/*.yaml', '**/*.yml', '**/*.json', '**/*.xml',
+                '**/*.md', '**/*.txt', '**/*.sql', '**/*.css', '**/*.scss',
+                '**/*.less', '**/*.html', '**/*.htm'
+            ],
+            this.outputChannel
         );
     }
 
     /**
-     * Build current merkle tree for the workspace
+     * Build merkle tree for the workspace
      */
-    async buildCurrentTree(): Promise<MerkleTreeNode> {
+    async buildMerkleTree(workspacePath: string): Promise<MerkleTreeNode | null> {
         try {
-            this.outputChannel.appendLine('[MerkleTreeManager] Building current merkle tree...');
-            const tree = await this.merkleTreeBuilder.buildTree(this.workspacePath);
-            this.outputChannel.appendLine(`[MerkleTreeManager] Built tree with hash: ${tree.hash}`);
+            const startTime = Date.now();
+            this.outputChannel.appendLine(`[MerkleTreeManager] Building merkle tree for: ${workspacePath}`);
+
+            const tree = await this.merkleBuilder.buildTree(workspacePath);
+            const duration = Date.now() - startTime;
+
+            this.outputChannel.appendLine(
+                `[MerkleTreeManager] Merkle tree built successfully (${duration}ms, hash: ${tree.hash.substring(0, 8)}...)`
+            );
+
             return tree;
         } catch (error) {
             this.outputChannel.appendLine(`[MerkleTreeManager] Error building merkle tree: ${error}`);
-            throw error;
+            return null;
         }
     }
 
     /**
-     * Compare two merkle trees and get changed/deleted files
+     * Compare two merkle trees and find changes
      */
-    compareTree(oldTree: MerkleTreeNode | null, newTree: MerkleTreeNode): TreeComparisonResult {
+    compareTreesForChanges(
+        oldTree: MerkleTreeNode | null,
+        newTree: MerkleTreeNode
+    ): TreeComparisonResult {
         try {
-            const result = this.merkleTreeBuilder.compareTree(oldTree, newTree);
+            const startTime = Date.now();
+            const result = this.merkleBuilder.compareTree(oldTree, newTree);
+            const duration = Date.now() - startTime;
 
             this.outputChannel.appendLine(
-                `[MerkleTreeManager] Tree comparison: ${result.changedFiles.length} changed, ${result.deletedFiles.length} deleted`
+                `[MerkleTreeManager] Tree comparison completed (${duration}ms): ` +
+                `${result.changedFiles.length} changed, ${result.deletedFiles.length} deleted`
             );
 
             return result;
@@ -51,135 +93,193 @@ export class MerkleTreeManager {
     }
 
     /**
-     * Get all files from a merkle tree (for new files detection)
+     * Store merkle tree in VS Code workspace storage
      */
-    getAllFilesFromTree(tree: MerkleTreeNode): string[] {
-        const files: string[] = [];
-        this.collectFiles(tree, files);
-        return files;
+    async storeMerkleTree(tree: MerkleTreeNode, gitBranch: string): Promise<void> {
+        try {
+            const key = this.generateStorageKey(gitBranch);
+
+            // Serialize with compression-friendly format
+            const serializedTree = this.serializeMerkleTree(tree);
+
+            await this.context.workspaceState.update(key, serializedTree);
+
+            this.outputChannel.appendLine(
+                `[MerkleTreeManager] Stored merkle tree for branch '${gitBranch}' ` +
+                `(${this.formatBytes(JSON.stringify(serializedTree).length)})`
+            );
+        } catch (error) {
+            this.outputChannel.appendLine(`[MerkleTreeManager] Error storing merkle tree: ${error}`);
+            throw error;
+        }
     }
 
     /**
-     * Recursively collect all file paths from a merkle tree node
+     * Retrieve merkle tree from VS Code workspace storage
      */
-    private collectFiles(node: MerkleTreeNode, files: string[]): void {
-        if (!node.children) {
-            // It's a file
-            files.push(node.filePath);
-        } else {
-            // It's a directory, recurse into children
-            for (const child of node.children) {
-                this.collectFiles(child, files);
+    async retrieveMerkleTree(gitBranch: string): Promise<MerkleTreeNode | null> {
+        try {
+            const key = this.generateStorageKey(gitBranch);
+            const serializedTree = this.context.workspaceState.get<any>(key);
+
+            if (!serializedTree) {
+                this.outputChannel.appendLine(`[MerkleTreeManager] No stored merkle tree found for branch '${gitBranch}'`);
+                return null;
             }
-        }
-    }
 
-    /**
-     * Check if trees are identical
-     */
-    areTreesIdentical(tree1: MerkleTreeNode | null, tree2: MerkleTreeNode | null): boolean {
-        if (!tree1 && !tree2) {
-            return true;
-        }
-        if (!tree1 || !tree2) {
-            return false;
-        }
-        return tree1.hash === tree2.hash;
-    }
+            const tree = this.deserializeMerkleTree(serializedTree);
 
-    /**
-     * Serialize merkle tree for storage
-     */
-    serializeTree(tree: MerkleTreeNode): string {
-        try {
-            return JSON.stringify(tree, null, 2);
+            this.outputChannel.appendLine(
+                `[MerkleTreeManager] Retrieved merkle tree for branch '${gitBranch}' ` +
+                `(hash: ${tree.hash.substring(0, 8)}...)`
+            );
+
+            return tree;
         } catch (error) {
-            this.outputChannel.appendLine(`[MerkleTreeManager] Error serializing tree: ${error}`);
-            return '{}';
-        }
-    }
-
-    /**
-     * Deserialize merkle tree from storage
-     */
-    deserializeTree(treeData: string): MerkleTreeNode | null {
-        try {
-            return JSON.parse(treeData) as MerkleTreeNode;
-        } catch (error) {
-            this.outputChannel.appendLine(`[MerkleTreeManager] Error deserializing tree: ${error}`);
+            this.outputChannel.appendLine(`[MerkleTreeManager] Error retrieving merkle tree: ${error}`);
             return null;
         }
     }
 
     /**
-     * Get detailed file information from a merkle tree node
+     * Clean up old merkle trees for branches that no longer exist
      */
-    getFileInfo(tree: MerkleTreeNode, filePath: string): {
-        hash: string;
-        lastModified: number;
-        fileSize: number;
-    } | null {
-        const fileNode = this.findFileNode(tree, filePath);
-        if (fileNode) {
-            return {
-                hash: fileNode.hash,
-                lastModified: fileNode.lastModified,
-                fileSize: fileNode.fileSize
+    async cleanupOldTrees(currentBranch: string, existingBranches: string[]): Promise<void> {
+        try {
+            const allKeys = this.context.workspaceState.keys();
+            const prefix = `recent_changes_merkle_tree_${this.workspaceHash}_`;
+
+            let cleanedCount = 0;
+
+            for (const key of allKeys) {
+                if (key.startsWith(prefix)) {
+                    const branch = key.substring(prefix.length);
+
+                    // Keep current branch and any existing branches
+                    if (branch !== currentBranch && !existingBranches.includes(branch)) {
+                        await this.context.workspaceState.update(key, undefined);
+                        cleanedCount++;
+                        this.outputChannel.appendLine(`[MerkleTreeManager] Cleaned up tree for deleted branch: ${branch}`);
+                    }
+                }
+            }
+
+            if (cleanedCount > 0) {
+                this.outputChannel.appendLine(`[MerkleTreeManager] Cleaned up ${cleanedCount} old merkle trees`);
+            }
+        } catch (error) {
+            this.outputChannel.appendLine(`[MerkleTreeManager] Error during cleanup: ${error}`);
+        }
+    }
+
+    /**
+     * Generate storage key for merkle tree
+     */
+    private generateStorageKey(gitBranch: string): string {
+        return `recent_changes_merkle_tree_${this.workspaceHash}_${gitBranch}`;
+    }
+
+    /**
+     * Serialize merkle tree for storage (memory-efficient format)
+     */
+    private serializeMerkleTree(tree: MerkleTreeNode): any {
+        const serialize = (node: MerkleTreeNode): any => {
+            const serialized: any = {
+                h: node.hash,          // hash
+                p: node.filePath,      // path
+                m: node.lastModified,  // modified time
+                s: node.fileSize       // size
             };
-        }
-        return null;
-    }
 
-    /**
-     * Find a specific file node in the merkle tree
-     */
-    private findFileNode(node: MerkleTreeNode, targetPath: string): MerkleTreeNode | null {
-        if (node.filePath === targetPath) {
-            return node;
-        }
-
-        if (node.children) {
-            for (const child of node.children) {
-                const found = this.findFileNode(child, targetPath);
-                if (found) {
-                    return found;
-                }
+            // Only include children if they exist (saves space)
+            if (node.children && node.children.length > 0) {
+                serialized.c = node.children.map(serialize);
             }
-        }
 
-        return null;
-    }
-
-    /**
-     * Get statistics about the merkle tree
-     */
-    getTreeStats(tree: MerkleTreeNode): {
-        totalFiles: number;
-        totalDirectories: number;
-        totalSize: number;
-    } {
-        let totalFiles = 0;
-        let totalDirectories = 0;
-        let totalSize = 0;
-
-        const collectStats = (node: MerkleTreeNode) => {
-            if (node.children) {
-                totalDirectories++;
-                for (const child of node.children) {
-                    collectStats(child);
-                }
-            } else {
-                totalFiles++;
-                totalSize += node.fileSize;
-            }
+            return serialized;
         };
-
-        collectStats(tree);
 
         return {
-            totalFiles,
-            totalDirectories,
-            totalSize
+            version: '1.0',
+            timestamp: Date.now(),
+            tree: serialize(tree)
         };
     }
-} 
+
+    /**
+     * Deserialize merkle tree from storage
+     */
+    private deserializeMerkleTree(serialized: any): MerkleTreeNode {
+        if (!serialized || serialized.version !== '1.0') {
+            throw new Error('Invalid or incompatible merkle tree format');
+        }
+
+        const deserialize = (node: any): MerkleTreeNode => {
+            const result: MerkleTreeNode = {
+                hash: node.h,
+                filePath: node.p,
+                lastModified: node.m,
+                fileSize: node.s
+            };
+
+            if (node.c && Array.isArray(node.c)) {
+                result.children = node.c.map(deserialize);
+            }
+
+            return result;
+        };
+
+        return deserialize(serialized.tree);
+    }
+
+    /**
+     * Format bytes for logging
+     */
+    private formatBytes(bytes: number): string {
+        if (bytes === 0) return '0 Bytes';
+
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    /**
+     * Get storage statistics
+     */
+    async getStorageStats(): Promise<{
+        totalTrees: number;
+        totalSize: number;
+        branches: string[];
+    }> {
+        try {
+            const allKeys = this.context.workspaceState.keys();
+            const prefix = `recent_changes_merkle_tree_${this.workspaceHash}_`;
+
+            let totalSize = 0;
+            const branches: string[] = [];
+
+            for (const key of allKeys) {
+                if (key.startsWith(prefix)) {
+                    const branch = key.substring(prefix.length);
+                    branches.push(branch);
+
+                    const data = this.context.workspaceState.get(key);
+                    if (data) {
+                        totalSize += JSON.stringify(data).length;
+                    }
+                }
+            }
+
+            return {
+                totalTrees: branches.length,
+                totalSize,
+                branches
+            };
+        } catch (error) {
+            this.outputChannel.appendLine(`[MerkleTreeManager] Error getting storage stats: ${error}`);
+            return { totalTrees: 0, totalSize: 0, branches: [] };
+        }
+    }
+}

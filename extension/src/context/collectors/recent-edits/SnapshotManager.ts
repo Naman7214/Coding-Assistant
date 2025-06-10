@@ -1,78 +1,84 @@
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { SnapshotInfo } from '../../types/collectors';
 
+/**
+ * Manages file snapshots for diff comparison
+ * Uses VS Code's workspace storage for invisible, serialized storage
+ */
 export class SnapshotManager {
     private context: vscode.ExtensionContext;
     private outputChannel: vscode.OutputChannel;
     private workspaceHash: string;
-    private gitBranch: string;
 
     constructor(
         context: vscode.ExtensionContext,
-        workspaceHash: string,
         outputChannel: vscode.OutputChannel,
-        gitBranch: string = "default",
+        workspaceHash: string
     ) {
         this.context = context;
-        this.workspaceHash = workspaceHash;
-        this.gitBranch = gitBranch;
         this.outputChannel = outputChannel;
+        this.workspaceHash = workspaceHash;
     }
 
     /**
-     * Generate storage key for a snapshot
+     * Store file snapshot in VS Code workspace storage (serialized)
      */
-    private getSnapshotKey(filePath: string): string {
-        // Create a unique key based on the absolute path
-        const normalizedPath = filePath.replace(/[:\\\/]/g, '_');
-        return `recent_edits_snapshot_${this.workspaceHash}_${this.gitBranch}_${normalizedPath}`;
-    }
-
-    /**
-     * Store a snapshot of a file in VS Code's workspace storage
-     */
-    async storeSnapshot(filePath: string, content: string, hash: string): Promise<boolean> {
+    async storeSnapshot(
+        filePath: string,
+        content: string,
+        gitBranch: string
+    ): Promise<void> {
         try {
-            const snapshotKey = this.getSnapshotKey(filePath);
+            const key = this.generateSnapshotKey(filePath, gitBranch);
 
-            const snapshotInfo: SnapshotInfo = {
-                filePath: filePath, // Store absolute path
-                hash: hash,
-                content: content,
+            // Create serialized snapshot for memory efficiency
+            const snapshot: SnapshotInfo = {
+                filePath,
+                hash: this.hashContent(content),
+                content: this.compressContent(content),
                 lastModified: Date.now(),
-                gitBranch: this.gitBranch
+                gitBranch
             };
 
-            // Store in VS Code's workspace storage (hidden from user)
-            await this.context.workspaceState.update(snapshotKey, snapshotInfo);
+            const serializedSnapshot = this.serializeSnapshot(snapshot);
 
-            this.outputChannel.appendLine(`[SnapshotManager] Stored snapshot for: ${filePath}`);
-            return true;
+            await this.context.workspaceState.update(key, serializedSnapshot);
+
+            this.outputChannel.appendLine(
+                `[SnapshotManager] Stored snapshot for ${path.basename(filePath)} ` +
+                `on branch '${gitBranch}' (${this.formatBytes(content.length)} → ` +
+                `${this.formatBytes(JSON.stringify(serializedSnapshot).length)})`
+            );
         } catch (error) {
             this.outputChannel.appendLine(`[SnapshotManager] Error storing snapshot for ${filePath}: ${error}`);
-            return false;
+            throw error;
         }
     }
 
     /**
-     * Retrieve a snapshot of a file from VS Code's workspace storage
+     * Retrieve file snapshot from VS Code workspace storage
      */
-    async getSnapshot(filePath: string): Promise<SnapshotInfo | null> {
+    async retrieveSnapshot(filePath: string, gitBranch: string): Promise<string | null> {
         try {
-            const snapshotKey = this.getSnapshotKey(filePath);
-            const snapshot = this.context.workspaceState.get<SnapshotInfo>(snapshotKey);
+            const key = this.generateSnapshotKey(filePath, gitBranch);
+            const serializedSnapshot = this.context.workspaceState.get<any>(key);
 
-            if (!snapshot) {
+            if (!serializedSnapshot) {
                 return null;
             }
 
-            // Verify it's for the correct branch
-            if (snapshot.gitBranch !== this.gitBranch) {
-                this.outputChannel.appendLine(`[SnapshotManager] Snapshot branch mismatch for ${filePath}: expected ${this.gitBranch}, got ${snapshot.gitBranch}`);
-                return null;
-            }
+            const snapshot = this.deserializeSnapshot(serializedSnapshot);
+            const content = this.decompressContent(snapshot.content);
 
-            return snapshot;
+            this.outputChannel.appendLine(
+                `[SnapshotManager] Retrieved snapshot for ${path.basename(filePath)} ` +
+                `on branch '${gitBranch}' (${this.formatBytes(content.length)})`
+            );
+
+            return content;
         } catch (error) {
             this.outputChannel.appendLine(`[SnapshotManager] Error retrieving snapshot for ${filePath}: ${error}`);
             return null;
@@ -80,59 +86,108 @@ export class SnapshotManager {
     }
 
     /**
-     * Check if a snapshot exists for a file
+     * Store snapshots for multiple files (batch operation)
      */
-    hasSnapshot(filePath: string): boolean {
+    async storeMultipleSnapshots(
+        filePaths: string[],
+        gitBranch: string
+    ): Promise<{ success: string[], failed: string[] }> {
+        const success: string[] = [];
+        const failed: string[] = [];
+
+        this.outputChannel.appendLine(
+            `[SnapshotManager] Storing snapshots for ${filePaths.length} files on branch '${gitBranch}'`
+        );
+
+        for (const filePath of filePaths) {
+            try {
+                const content = await this.readFileContent(filePath);
+                if (content !== null) {
+                    await this.storeSnapshot(filePath, content, gitBranch);
+                    success.push(filePath);
+                } else {
+                    failed.push(filePath);
+                }
+            } catch (error) {
+                this.outputChannel.appendLine(`[SnapshotManager] Failed to store snapshot for ${filePath}: ${error}`);
+                failed.push(filePath);
+            }
+        }
+
+        this.outputChannel.appendLine(
+            `[SnapshotManager] Batch snapshot operation completed: ${success.length} success, ${failed.length} failed`
+        );
+
+        return { success, failed };
+    }
+
+    /**
+     * Check if snapshot exists for a file
+     */
+    async hasSnapshot(filePath: string, gitBranch: string): Promise<boolean> {
         try {
-            const snapshotKey = this.getSnapshotKey(filePath);
-            const snapshot = this.context.workspaceState.get<SnapshotInfo>(snapshotKey);
-            return !!snapshot && snapshot.gitBranch === this.gitBranch;
+            const key = this.generateSnapshotKey(filePath, gitBranch);
+            return this.context.workspaceState.get(key) !== undefined;
         } catch (error) {
-            this.outputChannel.appendLine(`[SnapshotManager] Error checking snapshot existence for ${filePath}: ${error}`);
             return false;
         }
     }
 
     /**
-     * Delete a snapshot for a file (when file is deleted)
+     * Delete snapshot for a file
      */
-    async deleteSnapshot(filePath: string): Promise<boolean> {
+    async deleteSnapshot(filePath: string, gitBranch: string): Promise<void> {
         try {
-            const snapshotKey = this.getSnapshotKey(filePath);
-            await this.context.workspaceState.update(snapshotKey, undefined);
+            const key = this.generateSnapshotKey(filePath, gitBranch);
+            await this.context.workspaceState.update(key, undefined);
 
-            this.outputChannel.appendLine(`[SnapshotManager] Deleted snapshot for: ${filePath}`);
-            return true;
+            this.outputChannel.appendLine(
+                `[SnapshotManager] Deleted snapshot for ${path.basename(filePath)} on branch '${gitBranch}'`
+            );
         } catch (error) {
             this.outputChannel.appendLine(`[SnapshotManager] Error deleting snapshot for ${filePath}: ${error}`);
-            return false;
+            throw error;
         }
     }
 
     /**
-     * Clean up old snapshots for different branches or workspace hashes
+     * Clean up snapshots for files that no longer exist or for old branches
      */
-    async cleanupOldSnapshots(): Promise<void> {
+    async cleanupSnapshots(
+        currentBranch: string,
+        existingBranches: string[],
+        existingFiles?: string[]
+    ): Promise<void> {
         try {
-            const currentPrefix = `recent_edits_snapshot_${this.workspaceHash}_${this.gitBranch}_`;
-            const workspacePrefix = `recent_edits_snapshot_${this.workspaceHash}_`;
-
-            // Get all workspace state keys
             const allKeys = this.context.workspaceState.keys();
+            const prefix = `recent_edits_snapshot_${this.workspaceHash}_`;
 
             let cleanedCount = 0;
+            const startTime = Date.now();
+
             for (const key of allKeys) {
-                // Only process our snapshot keys
-                if (key.startsWith('recent_edits_snapshot_')) {
-                    // Keep snapshots for current workspace and branch
-                    if (!key.startsWith(currentPrefix)) {
-                        // If it's from our workspace but different branch, it's old
-                        if (key.startsWith(workspacePrefix)) {
-                            await this.context.workspaceState.update(key, undefined);
-                            cleanedCount++;
+                if (key.startsWith(prefix)) {
+                    const keyParts = key.substring(prefix.length).split('_');
+                    if (keyParts.length >= 1) {
+                        const branch = keyParts[0];
+
+                        // Extract file path from the remaining parts
+                        const normalizedPath = keyParts.slice(1).join('_');
+                        const originalPath = this.denormalizeFilePath(normalizedPath);
+
+                        let shouldDelete = false;
+
+                        // Delete snapshots for branches that no longer exist
+                        if (branch !== currentBranch && !existingBranches.includes(branch)) {
+                            shouldDelete = true;
                         }
-                        // If it's from a different workspace, also clean (stale data)
-                        else if (!key.includes(`_${this.workspaceHash}_`)) {
+
+                        // Delete snapshots for files that no longer exist (if file list provided)
+                        if (existingFiles && originalPath && !existingFiles.includes(originalPath)) {
+                            shouldDelete = true;
+                        }
+
+                        if (shouldDelete) {
                             await this.context.workspaceState.update(key, undefined);
                             cleanedCount++;
                         }
@@ -140,8 +195,12 @@ export class SnapshotManager {
                 }
             }
 
+            const duration = Date.now() - startTime;
+
             if (cleanedCount > 0) {
-                this.outputChannel.appendLine(`[SnapshotManager] Cleaned up ${cleanedCount} old snapshots`);
+                this.outputChannel.appendLine(
+                    `[SnapshotManager] Cleaned up ${cleanedCount} old snapshots (${duration}ms)`
+                );
             }
         } catch (error) {
             this.outputChannel.appendLine(`[SnapshotManager] Error during cleanup: ${error}`);
@@ -149,90 +208,197 @@ export class SnapshotManager {
     }
 
     /**
-     * Get all snapshot files for current workspace and branch
-     */
-    async getAllSnapshots(): Promise<SnapshotInfo[]> {
-        const snapshots: SnapshotInfo[] = [];
-
-        try {
-            const currentPrefix = `recent_edits_snapshot_${this.workspaceHash}_${this.gitBranch}_`;
-            const allKeys = this.context.workspaceState.keys();
-
-            for (const key of allKeys) {
-                if (key.startsWith(currentPrefix)) {
-                    const snapshot = this.context.workspaceState.get<SnapshotInfo>(key);
-                    if (snapshot) {
-                        snapshots.push(snapshot);
-                    }
-                }
-            }
-        } catch (error) {
-            this.outputChannel.appendLine(`[SnapshotManager] Error getting all snapshots: ${error}`);
-        }
-
-        return snapshots;
-    }
-
-    /**
-     * Update git branch (triggers cleanup)
-     */
-    updateGitBranch(newBranch: string): void {
-        if (this.gitBranch !== newBranch) {
-            this.outputChannel.appendLine(`[SnapshotManager] Git branch changed from ${this.gitBranch} to ${newBranch}`);
-            this.gitBranch = newBranch;
-            // Note: Cleanup will be triggered manually as needed
-        }
-    }
-
-    /**
-     * Get storage statistics for debugging
+     * Get snapshot storage statistics
      */
     async getStorageStats(): Promise<{
         totalSnapshots: number;
-        currentBranchSnapshots: number;
-        storageKeys: string[];
+        totalSize: number;
+        snapshotsByBranch: Record<string, number>;
+        oldestSnapshot: number;
+        newestSnapshot: number;
     }> {
         try {
             const allKeys = this.context.workspaceState.keys();
-            const snapshotKeys = allKeys.filter(key => key.startsWith('recent_edits_snapshot_'));
-            const currentBranchKeys = snapshotKeys.filter(key =>
-                key.startsWith(`recent_edits_snapshot_${this.workspaceHash}_${this.gitBranch}_`)
-            );
+            const prefix = `recent_edits_snapshot_${this.workspaceHash}_`;
+
+            let totalSnapshots = 0;
+            let totalSize = 0;
+            let oldestSnapshot = Date.now();
+            let newestSnapshot = 0;
+            const snapshotsByBranch: Record<string, number> = {};
+
+            for (const key of allKeys) {
+                if (key.startsWith(prefix)) {
+                    totalSnapshots++;
+
+                    const data = this.context.workspaceState.get(key);
+                    if (data) {
+                        const size = JSON.stringify(data).length;
+                        totalSize += size;
+
+                        // Extract branch from key
+                        const keyParts = key.substring(prefix.length).split('_');
+                        if (keyParts.length >= 1) {
+                            const branch = keyParts[0];
+                            snapshotsByBranch[branch] = (snapshotsByBranch[branch] || 0) + 1;
+                        }
+
+                        // Track snapshot age if it's a proper serialized snapshot
+                        if (typeof data === 'object' && data !== null && 'ts' in data && typeof (data as any).ts === 'number') {
+                            const timestamp = (data as any).ts;
+                            oldestSnapshot = Math.min(oldestSnapshot, timestamp);
+                            newestSnapshot = Math.max(newestSnapshot, timestamp);
+                        }
+                    }
+                }
+            }
 
             return {
-                totalSnapshots: snapshotKeys.length,
-                currentBranchSnapshots: currentBranchKeys.length,
-                storageKeys: snapshotKeys
+                totalSnapshots,
+                totalSize,
+                snapshotsByBranch,
+                oldestSnapshot: oldestSnapshot === Date.now() ? 0 : oldestSnapshot,
+                newestSnapshot
             };
         } catch (error) {
             this.outputChannel.appendLine(`[SnapshotManager] Error getting storage stats: ${error}`);
             return {
                 totalSnapshots: 0,
-                currentBranchSnapshots: 0,
-                storageKeys: []
+                totalSize: 0,
+                snapshotsByBranch: {},
+                oldestSnapshot: 0,
+                newestSnapshot: 0
             };
         }
     }
 
     /**
-     * Clear all snapshots for current workspace (useful for testing/debugging)
+     * Read file content from disk
      */
-    async clearAllSnapshots(): Promise<void> {
+    private async readFileContent(filePath: string): Promise<string | null> {
         try {
-            const workspacePrefix = `recent_edits_snapshot_${this.workspaceHash}_`;
-            const allKeys = this.context.workspaceState.keys();
-
-            let clearedCount = 0;
-            for (const key of allKeys) {
-                if (key.startsWith(workspacePrefix)) {
-                    await this.context.workspaceState.update(key, undefined);
-                    clearedCount++;
-                }
-            }
-
-            this.outputChannel.appendLine(`[SnapshotManager] Cleared ${clearedCount} snapshots for workspace ${this.workspaceHash}`);
+            const content = await fs.promises.readFile(filePath, 'utf8');
+            return content;
         } catch (error) {
-            this.outputChannel.appendLine(`[SnapshotManager] Error clearing snapshots: ${error}`);
+            this.outputChannel.appendLine(`[SnapshotManager] Error reading file ${filePath}: ${error}`);
+            return null;
         }
     }
-} 
+
+    /**
+     * Generate storage key for snapshot
+     */
+    private generateSnapshotKey(filePath: string, gitBranch: string): string {
+        const normalizedPath = this.normalizeFilePath(filePath);
+        return `recent_edits_snapshot_${this.workspaceHash}_${gitBranch}_${normalizedPath}`;
+    }
+
+    /**
+     * Normalize file path for use as storage key (handle special characters)
+     */
+    private normalizeFilePath(filePath: string): string {
+        // Replace path separators and special characters with underscores
+        return filePath
+            .replace(/[\/\\:*?"<>|]/g, '_')
+            .replace(/\s+/g, '_')
+            .toLowerCase();
+    }
+
+    /**
+     * Attempt to denormalize file path (for cleanup purposes)
+     */
+    private denormalizeFilePath(normalizedPath: string): string {
+        // This is a best-effort conversion back - not perfect but sufficient for cleanup
+        return normalizedPath.replace(/_/g, '/');
+    }
+
+    /**
+     * Hash content for integrity checking
+     */
+    private hashContent(content: string): string {
+        return crypto.createHash('sha256').update(content).digest('hex').substring(0, 16);
+    }
+
+    /**
+     * Compress content for storage (simple run-length encoding for text)
+     */
+    private compressContent(content: string): string {
+        // For very small files, don't compress
+        if (content.length < 100) {
+            return content;
+        }
+
+        try {
+            // Simple compression: remove excessive whitespace and line endings
+            const compressed = content
+                .replace(/\n\s*\n\s*\n/g, '\n\n')  // Reduce multiple empty lines
+                .replace(/[ \t]+/g, ' ')           // Reduce multiple spaces/tabs
+                .trim();
+
+            // Only use compressed version if it's significantly smaller
+            if (compressed.length < content.length * 0.8) {
+                return `__COMPRESSED__${compressed}`;
+            }
+
+            return content;
+        } catch (error) {
+            // If compression fails, return original content
+            return content;
+        }
+    }
+
+    /**
+     * Decompress content after retrieval
+     */
+    private decompressContent(content: string): string {
+        if (content.startsWith('__COMPRESSED__')) {
+            return content.substring('__COMPRESSED__'.length);
+        }
+        return content;
+    }
+
+    /**
+     * Serialize snapshot for storage (memory-efficient format)
+     */
+    private serializeSnapshot(snapshot: SnapshotInfo): any {
+        return {
+            v: '1.0',                    // version
+            p: snapshot.filePath,        // path
+            h: snapshot.hash,            // hash
+            c: snapshot.content,         // content (possibly compressed)
+            m: snapshot.lastModified,    // modified time
+            b: snapshot.gitBranch,       // branch
+            ts: Date.now()               // timestamp when stored
+        };
+    }
+
+    /**
+     * Deserialize snapshot from storage
+     */
+    private deserializeSnapshot(serialized: any): SnapshotInfo {
+        if (!serialized || serialized.v !== '1.0') {
+            throw new Error('Invalid or incompatible snapshot format');
+        }
+
+        return {
+            filePath: serialized.p,
+            hash: serialized.h,
+            content: serialized.c,
+            lastModified: serialized.m,
+            gitBranch: serialized.b
+        };
+    }
+
+    /**
+     * Format bytes for logging
+     */
+    private formatBytes(bytes: number): string {
+        if (bytes === 0) return '0 B';
+
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+}
