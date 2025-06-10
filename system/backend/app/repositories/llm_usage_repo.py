@@ -10,4 +10,7 @@ class LLMUsageRepository:
         self.collection = collection
 
     async def add_llm_usage(self, llm_usage: dict):
-        await self.collection.insert_one(llm_usage)
+        try:
+            await self.collection.insert_one(llm_usage)
+        except Exception as e:
+            pass

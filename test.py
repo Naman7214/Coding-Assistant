@@ -14,16 +14,16 @@
 #             tools = await session.list_tools()
 #             print(f"Available tools: {tools}")
 
-#             # # Call the list_dir tool
-#             # result = await session.call_tool(
-#             #     "list_dir",
-#             #     {
-#             #         "dir_path": "/Users/krishgoyani/Developer/TESTING",
-#             #         "explanation": "Exploring the project directory structure",
-#             #         "workspace_path": "/Users/krishgoyani/Developer/TESTING"
-#             #     },
-#             # )
-#             # print(result)
+#             # Call the list_dir tool
+#             result = await session.call_tool(
+#                 "list_dir",
+#                 {
+#                     "dir_path": "/Users/krishgoyani/Developer/TESTING",
+#                     "explanation": "Exploring the project directory structure",
+#                     "workspace_path": "/Users/krishgoyani/Developer/TESTING",
+#                 },
+#             )
+#             print(result)
 
 
 # if __name__ == "__main__":

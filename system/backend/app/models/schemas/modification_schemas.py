@@ -42,7 +42,7 @@ class EditFileRequest(BaseModel):
     )
     code_snippet: str = Field(..., description="The code snippet to edit")
     explanation: str = Field(
-        ..., description="The explanation for the file edit request"
+        default=None, description="The explanation for the file edit request"
     )
     workspace_path: str = Field(
         default=None, description="The path to the workspace"

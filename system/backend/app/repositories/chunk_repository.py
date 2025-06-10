@@ -85,32 +85,6 @@ class ChunkRepository:
                 status_code=500, detail=f"Error retrieving chunks: {str(e)}"
             )
 
-    async def get_existing_chunk_hashes(self, workspace_hash: str) -> Set[str]:
-        """Get all existing chunk hashes for efficient comparison"""
-        try:
-            collection = await self._get_or_create_collection(workspace_hash)
-
-            # Only fetch chunk_hash field for efficiency
-            cursor = collection.find({}, {"chunk_hash": 1, "_id": 0})
-            chunk_hashes = set()
-
-            async for doc in cursor:
-                chunk_hashes.add(doc["chunk_hash"])
-
-            loggers["main"].info(
-                f"Retrieved {len(chunk_hashes)} existing chunk hashes from workspace {workspace_hash}"
-            )
-            return chunk_hashes
-
-        except Exception as e:
-            loggers["main"].error(
-                f"Error retrieving chunk hashes for workspace {workspace_hash}: {str(e)}"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error retrieving chunk hashes: {str(e)}",
-            )
-
     async def upsert_chunks_batch(
         self, workspace_hash: str, chunks: List[Chunk]
     ) -> Dict[str, int]:
@@ -168,60 +142,6 @@ class ChunkRepository:
                 status_code=500, detail=f"Error upserting chunks: {str(e)}"
             )
 
-    async def get_chunks_by_hashes(
-        self, workspace_hash: str, chunk_hashes: List[str]
-    ) -> List[Chunk]:
-        """Get specific chunks by their hashes"""
-        try:
-            collection = await self._get_or_create_collection(workspace_hash)
-
-            cursor = collection.find({"chunk_hash": {"$in": chunk_hashes}})
-            chunks = []
-
-            async for doc in cursor:
-                # Remove MongoDB's _id field before converting
-                if "_id" in doc:
-                    del doc["_id"]
-                chunks.append(Chunk.from_dict(doc))
-
-            loggers["main"].info(
-                f"Retrieved {len(chunks)} specific chunks from workspace {workspace_hash}"
-            )
-            return chunks
-
-        except Exception as e:
-            loggers["main"].error(
-                f"Error retrieving specific chunks for workspace {workspace_hash}: {str(e)}"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error retrieving specific chunks: {str(e)}",
-            )
-
-    async def delete_workspace_chunks(self, workspace_hash: str) -> int:
-        """Delete all chunks for a workspace (cleanup operation)"""
-        try:
-            collection_name = self._get_collection_name(workspace_hash)
-
-            # Drop the entire collection for efficiency
-            await self.mongodb_client[self.db_name].drop_collection(
-                collection_name
-            )
-
-            loggers["main"].info(
-                f"Deleted all chunks for workspace {workspace_hash}"
-            )
-            return 1  # Success indicator
-
-        except Exception as e:
-            loggers["main"].error(
-                f"Error deleting chunks for workspace {workspace_hash}: {str(e)}"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error deleting workspace chunks: {str(e)}",
-            )
-
     async def get_chunks_by_obfuscated_paths(
         self, workspace_hash: str, obfuscated_paths: List[str]
     ) -> List[Chunk]:
@@ -252,32 +172,6 @@ class ChunkRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Error retrieving chunks by obfuscated paths: {str(e)}",
-            )
-
-    async def delete_chunks_by_hashes(
-        self, workspace_hash: str, chunk_hashes: List[str]
-    ) -> int:
-        """Delete chunks by their hashes (across all branches)"""
-        try:
-            collection = await self._get_or_create_collection(workspace_hash)
-
-            result = await collection.delete_many(
-                {"chunk_hash": {"$in": chunk_hashes}}
-            )
-            deleted_count = result.deleted_count
-
-            loggers["main"].info(
-                f"Deleted {deleted_count} chunks by hashes from workspace {workspace_hash}"
-            )
-            return deleted_count
-
-        except Exception as e:
-            loggers["main"].error(
-                f"Error deleting chunks by hashes for workspace {workspace_hash}: {str(e)}"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error deleting chunks by hashes: {str(e)}",
             )
 
     async def delete_chunks_by_hashes_and_branch(

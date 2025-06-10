@@ -105,7 +105,8 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         this.outputChannel.appendLine('[Extension] Creating Context API server...');
         this.contextApiServer = new ContextApiServer(
           this.contextManager,
-          this.outputChannel
+          this.outputChannel,
+          this.context // Pass extension context for hidden backup storage
         );
 
         this.outputChannel.appendLine('[Extension] Starting Context API server...');
@@ -529,15 +530,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       const hashedWorkspacePath = hashWorkspacePath(workspacePath);
       const currentGitBranch = await this.getCurrentGitBranch(workspacePath);
 
-      // Log what context is being sent
-      this.outputChannel.appendLine(`[Query] Always-send context summary:`);
-      this.outputChannel.appendLine(`[Query] - System info: ${systemInfoData ? 'Available' : 'Not available'}`);
-      this.outputChannel.appendLine(`[Query] - Active file: ${activeFileData?.data?.file?.relativePath || 'None'}`);
-      this.outputChannel.appendLine(`[Query] - Open files: ${openFilesData?.data?.files?.length || 0} files`);
-      this.outputChannel.appendLine(`[Query] - Recent edits: ${recentEditsData ? (recentEditsData.data.summary?.hasChanges ? `${recentEditsData.data.summary.totalFiles} files changed` : 'No recent changes') : 'Not available'}`);
-      this.outputChannel.appendLine(`[Query] - Hashed workspace path: ${hashedWorkspacePath}`);
-      this.outputChannel.appendLine(`[Query] - Git branch: ${currentGitBranch}`);
-      this.outputChannel.appendLine(`[Query] - Context mentions: ${contextMentions.join(', ')}`);
 
       // Send query with always-send context to backend
       if (this.enhancedStreamingClient) {
@@ -548,30 +540,15 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           git_branch: currentGitBranch,
           system_info: systemInfoData?.data || null,
           active_file_context: activeFileData?.data || null,
-          open_files_context: openFilesData?.data?.files || [],
+          open_files_context: openFilesData?.data || [],
           recent_edits_context: recentEditsData?.data || null,
           context_mentions: contextMentions
         };
-
+        this.outputChannel.appendLine(`[Query] Stream request: ${JSON.stringify(streamRequest)}`);
         const requestHeaders = {
           'X-Workspace-ID': this.contextManager!.getWorkspaceId()
         };
 
-        // DEBUG: Log the exact request being sent
-        this.outputChannel.appendLine(`[Query] Sending request with context mentions: ${JSON.stringify(contextMentions)}`);
-        this.outputChannel.appendLine(`[Query] Workspace: ${streamRequest.workspace_path}`);
-        this.outputChannel.appendLine(`[Query] Hashed workspace path: ${streamRequest.hashed_workspace_path}`);
-        this.outputChannel.appendLine(`[Query] Git branch: ${streamRequest.git_branch}`);
-        this.outputChannel.appendLine(`[Query] System Info: ${streamRequest.system_info ? 'Available' : 'Not available'}`);
-        if (streamRequest.active_file_context?.file) {
-          this.outputChannel.appendLine(`[Query] Active File: ${streamRequest.active_file_context.file.relativePath}`);
-        }
-        if (streamRequest.open_files_context && Array.isArray(streamRequest.open_files_context)) {
-          this.outputChannel.appendLine(`[Query] Open Files: ${streamRequest.open_files_context.length} files`);
-        }
-        if (streamRequest.recent_edits_context) {
-          this.outputChannel.appendLine(`[Query] Recent Edits: ${streamRequest.recent_edits_context.summary?.hasChanges ? `${streamRequest.recent_edits_context.summary.totalFiles} files changed` : 'No recent changes'}`);
-        }
 
         // Stream the query with comprehensive event handling for App
         await this.enhancedStreamingClient.streamQuery(
@@ -870,8 +847,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
       `Project structure: ${context.projectStructure.length > 0 ? 'Available' : 'Not available'}`,
       `Git branch: ${context.gitContext.branch || 'none'}`,
       `Git changes: ${context.gitContext.hasChanges ? 'yes' : 'no'}`,
-      `Recent commits: ${context.gitContext.recentCommits.length}`,
-      `Total tokens: ${context.totalTokens}`
+      `Recent commits: ${context.gitContext.recentCommits.length}`
     ].join('\n');
   }
 
@@ -977,7 +953,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         options: {
           includeFileContent: true,
           maxFileSize: 1024 * 1024,
-          excludePatterns: ['**/node_modules/**', '**/.git/**'],
+          excludePatterns: ['**/node_modules/**', '**/.git/**', '**/.venv/**', '**/.env/**', '**/dist/**', '**/build/**'],
           includeHiddenFiles: false,
           respectGitignore: true,
           maxDepth: 10,

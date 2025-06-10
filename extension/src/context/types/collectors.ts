@@ -84,6 +84,7 @@ export interface ActiveFileCollectorData {
 
 export interface OpenFilesCollectorData extends Array<{
     path: string;
+    relativePath: string;
     languageId: string;
     lineCount: number;
     fileSize: number;
@@ -93,11 +94,6 @@ export interface OpenFilesCollectorData extends Array<{
 export interface ProjectStructureCollectorData {
     root: string;
     treeStructure: string;
-    packageInfo: {
-        managers: string[];
-        mainFiles: string[];
-        scripts: Record<string, string>;
-    };
 }
 
 export interface GitCollectorData {

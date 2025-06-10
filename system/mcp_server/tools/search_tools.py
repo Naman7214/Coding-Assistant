@@ -4,6 +4,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
+from fastapi import HTTPException
 
 from system.mcp_server.config.settings import settings
 
@@ -36,22 +37,54 @@ async def codebase_search_tool(
         async with httpx.AsyncClient(
             verify=False, timeout=settings.httpx_timeout
         ) as client:
-            metadata_response = await client.post(metadata_url, json=payload)
-            metadata_response.raise_for_status()
-            metadata_response_json = metadata_response.json()
-            code_content_response = await client.post(
-                codebase_search_url, json=metadata_response_json
-            )
-            code_content_response.raise_for_status()
-            code_content_response_json = code_content_response.json()
-            print(json.dumps(code_content_response_json, indent=4))
-            return code_content_response_json
-    except httpx.HTTPStatusError as e:
-        return f"HTTP status error occurred: {e.response.status_code} {e.response.text}"
-    except httpx.RequestError as e:
-        return f" HTTP Request error occurred: {str(e)}"
+            try:
+                metadata_response = await client.post(
+                    metadata_url, json=payload
+                )
+                metadata_response.raise_for_status()
+                metadata_response_json = metadata_response.json()
+
+                # Validate metadata response structure
+                if not isinstance(metadata_response_json, dict):
+                    raise ValueError(
+                        "Metadata API returned invalid response format"
+                    )
+
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(
+                    status_code=e.response.status_code,
+                    detail=f"Metadata API error: {e.response.text}",
+                )
+            except httpx.RequestError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Metadata API request failed: {str(e)}",
+                )
+
+            try:
+                code_content_response = await client.post(
+                    codebase_search_url, json=metadata_response_json
+                )
+                code_content_response.raise_for_status()
+                code_content_response_json = code_content_response.json()
+
+                return code_content_response_json
+
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(
+                    status_code=e.response.status_code,
+                    detail=f"Codebase search API error: {e.response.text}",
+                )
+            except httpx.RequestError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Codebase search API request failed: {str(e)}",
+                )
+
     except Exception as e:
-        return f"Error: {str(e)}"
+        raise HTTPException(
+            status_code=500, detail=f"Unexpected error: {str(e)}"
+        )
 
 
 async def execute_grep_search_tool(

@@ -355,12 +355,6 @@ export class VSCodeStorage {
                     uncommittedChanges: [],
                     isRepo: false
                 },
-                lspContext: {
-                    symbols: [],
-                    diagnostics: [],
-                    references: [],
-                    definitions: []
-                },
                 problemsContext: {
                     problems: [],
                     summary: {
@@ -383,15 +377,7 @@ export class VSCodeStorage {
                     activeShell: 'bash',
                     environmentVariables: {}
                 },
-                userBehavior: {
-                    recentFiles: recentFiles.map(f => f.path),
-                    searchHistory: [],
-                    navigationPatterns: [],
-                    editingPatterns: [],
-                    commandUsage: {}
-                },
-                relevanceScores: {},
-                totalTokens: Math.min(maxTokens, recentFiles.length * 100) // Rough estimate
+                relevanceScores: {}
             };
         } catch (error) {
             this.outputChannel.appendLine(`[VSCodeStorage] Error getting context: ${error}`);

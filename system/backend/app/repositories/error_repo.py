@@ -11,10 +11,13 @@ class ErrorRepo:
         self.collection = collection
 
     async def insert_error(self, error: Error) -> None:
-        insert_result = await self.collection.insert_one(error.to_dict())
-        if not insert_result.inserted_id:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to insert complaint. \n error from error_repository in insert_error()",
-            )
+        try:
+            insert_result = await self.collection.insert_one(error.to_dict())
+            if not insert_result.inserted_id:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to insert complaint. \n error from error_repository in insert_error()",
+                )
+        except Exception as e:
+            pass
         return insert_result

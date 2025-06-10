@@ -99,8 +99,20 @@ export class GitContextCollector extends BaseCollector {
             // Get history information
             const history = await this.getHistoryInfo(workspacePath);
 
-            // Get diff information
-            const diff = await this.getDiffInfo(workspacePath);
+            // Get diff information conditionally based on includeFileContent option
+            const includeChanges = this.config.options.includeFileContent !== false;
+            let diff: GitCollectorData['diff'];
+
+            if (includeChanges) {
+                diff = await this.getDiffInfo(workspacePath);
+            } else {
+                // Return empty diff when changes are not requested
+                diff = {
+                    stagedChanges: '',
+                    unstagedChanges: '',
+                    conflictFiles: []
+                };
+            }
 
             const data: GitCollectorData = {
                 repository,

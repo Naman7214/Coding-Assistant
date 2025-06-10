@@ -74,8 +74,8 @@ export class RecentEditsCollector extends BaseCollector {
         this.snapshotManager = new SnapshotManager(
             this.context,
             this.workspaceId,
-            this.currentGitBranch,
-            this.outputChannel
+            this.outputChannel,
+            this.currentGitBranch
         );
 
         // Build initial merkle tree and store it

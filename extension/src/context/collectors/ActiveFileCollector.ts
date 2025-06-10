@@ -24,9 +24,9 @@ export class ActiveFileCollector extends BaseCollector {
                 cacheTimeout: 0, // Disable caching by setting timeout to 0
                 options: {
                     includeSurroundingLines: 20,
-                    analyzeContext: true,
-                    includeSymbols: true,
-                    includeDiagnostics: true,
+                    analyzeContext: false,
+                    includeSymbols: false,
+                    includeDiagnostics: false,
                     debug: false
                 }
             }

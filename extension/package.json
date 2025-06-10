@@ -257,7 +257,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.6.0",
     "chokidar": "^4.0.3",
-    "chonkie": "0.2.5",
+    "chonkie": "^0.2.6",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "express": "^4.21.2",

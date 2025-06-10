@@ -192,13 +192,10 @@ export interface ProcessedContext {
     openFiles: FileInfo[];
     projectStructure: string;
     gitContext: GitContext;
-    lspContext: LspContext;
     problemsContext: ProblemsContext;
     terminalContext: TerminalContext;
-    userBehavior: UserBehaviorData;
     recentEdits?: import('./collectors').RecentEditsCollectorData;
     relevanceScores: Record<string, number>;
-    totalTokens: number;
 }
 
 // Context optimization

@@ -434,7 +434,7 @@ const App: React.FC = () => {
                                 </svg>
                             </div>
                             <div className="welcome-message">
-                                Hello I am the Rocket Copilot just order me and take a sip of coffee and I will do all your coding related tasks
+                                I’m Rocket 🚀 Copilot—your AI wingman for code. Drop your toughest tasks, take a break, and I’ll handle the heavy lifting. From boilerplate to brain-twisters—consider it done.
                             </div>
                         </div>
                     )}

@@ -77,13 +77,10 @@ export class ProjectStructureCollector extends BaseCollector {
             // Generate tree structure
             const treeStructure = await this.generateProjectTree(workspacePath);
 
-            // Detect basic package info
-            const packageInfo = await this.detectBasicPackageInfo(workspacePath);
-
+        
             const data: ProjectStructureCollectorData = {
                 root: workspacePath,
-                treeStructure,
-                packageInfo
+                treeStructure
             };
 
             this.outputChannel.appendLine(`[${this.name}] Completed scan`);
@@ -224,68 +221,6 @@ export class ProjectStructureCollector extends BaseCollector {
         );
     }
 
-    /**
-     * Detect basic package information from package managers
-     */
-    private async detectBasicPackageInfo(workspacePath: string): Promise<ProjectStructureCollectorData['packageInfo']> {
-        const packageInfo: ProjectStructureCollectorData['packageInfo'] = {
-            managers: [],
-            mainFiles: [],
-            scripts: {}
-        };
-
-        try {
-            // Check for package.json (Node.js)
-            const packageJsonPath = path.join(workspacePath, 'package.json');
-            if (await this.fileExists(packageJsonPath)) {
-                packageInfo.managers.push('npm');
-                try {
-                    const packageJson = JSON.parse(await fs.promises.readFile(packageJsonPath, 'utf8'));
-                    if (packageJson.main) {
-                        packageInfo.mainFiles.push(packageJson.main);
-                    }
-                    if (packageJson.scripts) {
-                        packageInfo.scripts = { ...packageInfo.scripts, ...packageJson.scripts };
-                    }
-                } catch (error) {
-                    this.debug(`Error reading package.json: ${error}`);
-                }
-            }
-
-            // Check for requirements.txt (Python)
-            if (await this.fileExists(path.join(workspacePath, 'requirements.txt'))) {
-                packageInfo.managers.push('pip');
-            }
-
-            // Check for Cargo.toml (Rust)
-            if (await this.fileExists(path.join(workspacePath, 'Cargo.toml'))) {
-                packageInfo.managers.push('cargo');
-            }
-
-            // Check for go.mod (Go)
-            if (await this.fileExists(path.join(workspacePath, 'go.mod'))) {
-                packageInfo.managers.push('go');
-            }
-
-            // Check for Gemfile (Ruby)
-            if (await this.fileExists(path.join(workspacePath, 'Gemfile'))) {
-                packageInfo.managers.push('bundler');
-            }
-
-            // Look for common main files
-            const commonMainFiles = ['index.js', 'index.ts', 'main.js', 'main.ts', 'app.js', 'app.ts', 'server.js', 'server.ts'];
-            for (const mainFile of commonMainFiles) {
-                if (await this.fileExists(path.join(workspacePath, mainFile))) {
-                    packageInfo.mainFiles.push(mainFile);
-                }
-            }
-
-        } catch (error) {
-            this.debug(`Error detecting package info: ${error}`);
-        }
-
-        return packageInfo;
-    }
 
     /**
      * Check if file exists

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { getSystemInfo } from '../utilities';
 import { ActiveFileCollector } from './collectors/ActiveFileCollector';
 import { GitContextCollector } from './collectors/GitContextCollector';
 import { OpenFilesCollector } from './collectors/OpenFilesCollector';
@@ -311,39 +312,17 @@ export class ContextManager extends EventEmitter {
      */
     private async getSystemInfo(): Promise<any> {
         try {
-            const vscodeVersion = vscode.version;
-            const extensionVersion = vscode.extensions.getExtension('vscode.enhanced-assistant')?.packageJSON.version || 'unknown';
-            const platform = process.platform;
-            const architecture = process.arch;
-            const osVersion = process.platform === 'darwin' ? 'macOS' :
-                process.platform === 'win32' ? 'Windows' :
-                    process.platform === 'linux' ? 'Linux' : 'Unknown';
-
-            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            const workspacePath = workspaceFolder?.uri.fsPath || '';
-            const workspaceName = workspaceFolder?.name || '';
-
-            return {
-                vscode: {
-                    version: vscodeVersion,
-                    extensionVersion
-                },
-                system: {
-                    platform,
-                    architecture,
-                    osVersion
-                },
-                workspace: {
-                    path: workspacePath,
-                    name: workspaceName
-                },
-                timestamp: Date.now()
-            };
+            // Use the standardized getSystemInfo from utilities.ts
+            // This returns: { platform, osVersion, architecture, workspacePath, defaultShell }
+            return await getSystemInfo();
         } catch (error) {
             this.outputChannel.appendLine(`[ContextManager] Error getting system info: ${error}`);
             return {
-                error: 'Failed to get system information',
-                timestamp: Date.now()
+                platform: 'unknown',
+                osVersion: 'unknown',
+                architecture: 'unknown',
+                workspacePath: '',
+                defaultShell: 'unknown'
             };
         }
     }
@@ -409,7 +388,7 @@ export class ContextManager extends EventEmitter {
             options: {
                 includeFileContent: true,
                 maxFileSize: 1024 * 1024, // 1MB
-                excludePatterns: ['**/node_modules/**', '**/.git/**'],
+                excludePatterns: ['**/node_modules/**', '**/.git/**', '**/node_modules/**'],
                 includeHiddenFiles: false,
                 respectGitignore: true,
                 maxDepth: 10,
@@ -464,6 +443,17 @@ export class ContextManager extends EventEmitter {
                 }
 
                 try {
+                    // For GitContextCollector, pass the includeFileContent option
+                    if (collectorName === 'GitContextCollector' && 'updateConfig' in collector) {
+                        const baseCollector = collector as any;
+                        const currentConfig = baseCollector.getConfig();
+                        baseCollector.updateConfig({
+                            options: {
+                                ...currentConfig.options,
+                                includeFileContent: fullRequest.options.includeFileContent
+                            }
+                        });
+                    }
                     // For non-cacheable contexts or when cache is disabled, always collect fresh data
                     if (!this.isCacheableContext(collector.type) || !fullRequest.options.useCache) {
                         const data = await collector.collectSafely();
@@ -788,7 +778,7 @@ export class ContextManager extends EventEmitter {
                 visibleRanges: activeFileData.viewport?.visibleRanges || [],
                 cursorLineContent: activeFileData.cursor?.lineContent || undefined
             } : null,
-            openFiles: openFilesData?.files ? openFilesData.files.map((file: any) => ({
+            openFiles: openFilesData && Array.isArray(openFilesData) ? openFilesData.map((file: any) => ({
                 path: file.path || '',
                 relativePath: file.relativePath || '',
                 languageId: file.languageId || '',
@@ -825,12 +815,6 @@ export class ContextManager extends EventEmitter {
                 recentCommits: [],
                 uncommittedChanges: [],
                 isRepo: false
-            },
-            lspContext: {
-                symbols: [],
-                diagnostics: [],
-                references: [],
-                definitions: []
             },
             problemsContext: problemsData ? {
                 problems: problemsData.problems || [],
@@ -870,16 +854,8 @@ export class ContextManager extends EventEmitter {
                 activeShell: '',
                 environmentVariables: {}
             },
-            userBehavior: {
-                recentFiles: [],
-                searchHistory: [],
-                navigationPatterns: [],
-                editingPatterns: [],
-                commandUsage: {}
-            },
             recentEdits: recentEditsData || undefined,
-            relevanceScores: {},
-            totalTokens: this.estimateTokenCount(activeFileData, openFilesData, projectStructureData, gitContextData, problemsData, recentEditsData)
+            relevanceScores: {}
         };
 
         // Add system info
@@ -905,92 +881,6 @@ export class ContextManager extends EventEmitter {
         if (gitStatus.includes('deleted')) return 'deleted';
         if (gitStatus.includes('renamed')) return 'renamed';
         return 'modified';
-    }
-
-    /**
-     * Estimate token count for context
-     */
-    private estimateTokenCount(
-        activeFileData: any,
-        openFilesData: any,
-        projectStructureData: any,
-        gitContextData: any,
-        problemsData?: any,
-        recentEditsData?: any
-    ): number {
-        let tokens = 0;
-
-        if (activeFileData?.file) {
-            // Roughly 4 characters per token for the active file content
-            // Since we don't include content anymore, estimate based on file size
-            tokens += Math.ceil((activeFileData.file.fileSize || 0) / 4);
-
-            // Add tokens for surrounding lines context
-            if (activeFileData.context?.surroundingLines) {
-                const contextText = activeFileData.context.surroundingLines.join('\n');
-                tokens += Math.ceil(contextText.length / 4);
-            }
-
-            // Add tokens for cursor line content
-            if (activeFileData.cursor?.lineContent) {
-                const cursorContent = activeFileData.cursor.lineContent;
-                const lineContentText = [
-                    cursorContent.above || '',
-                    cursorContent.current || '',
-                    cursorContent.below || ''
-                ].join('\n');
-                tokens += Math.ceil(lineContentText.length / 4);
-            }
-        }
-
-        if (openFilesData?.files && Array.isArray(openFilesData.files)) {
-            // Estimate metadata tokens
-            tokens += openFilesData.files.length * 50; // ~50 tokens per file metadata
-        }
-
-        if (projectStructureData?.treeStructure) {
-            // Project structure tokens
-            tokens += Math.ceil(projectStructureData.treeStructure.length / 4);
-        }
-
-        if (gitContextData) {
-            // Git context tokens
-            if (gitContextData.history?.recentCommits && Array.isArray(gitContextData.history.recentCommits)) {
-                tokens += gitContextData.history.recentCommits.length * 30; // ~30 tokens per commit
-            }
-
-            const stagedChanges = gitContextData.diff?.stagedChanges || '';
-            const unstagedChanges = gitContextData.diff?.unstagedChanges || '';
-            tokens += Math.ceil((stagedChanges.length + unstagedChanges.length) / 4);
-        }
-
-        if (problemsData?.problems && Array.isArray(problemsData.problems)) {
-            // Estimate problems tokens - ~50 tokens per problem (message + metadata)
-            tokens += problemsData.problems.length * 50;
-        }
-
-        if (recentEditsData) {
-            // Recent edits tokens - metadata + diff content
-            tokens += 100; // Base metadata tokens
-
-            // Add tokens for modified files diffs
-            if (recentEditsData.modifiedFiles && Array.isArray(recentEditsData.modifiedFiles)) {
-                for (const file of recentEditsData.modifiedFiles) {
-                    if (file.diffs && Array.isArray(file.diffs)) {
-                        for (const diff of file.diffs) {
-                            tokens += Math.ceil((diff.content || '').length / 4);
-                        }
-                    }
-                }
-            }
-
-            // Add tokens for added/deleted files (just metadata)
-            const totalFilesCount = (recentEditsData.addedFiles?.length || 0) +
-                (recentEditsData.deletedFiles?.length || 0);
-            tokens += totalFilesCount * 30; // ~30 tokens per file metadata
-        }
-
-        return tokens;
     }
 
     /**
@@ -1288,12 +1178,6 @@ export class ContextManager extends EventEmitter {
                 uncommittedChanges: [],
                 isRepo: false
             },
-            lspContext: {
-                symbols: [],
-                diagnostics: [],
-                references: [],
-                definitions: []
-            },
             problemsContext: {
                 problems: [],
                 summary: {
@@ -1316,15 +1200,7 @@ export class ContextManager extends EventEmitter {
                 activeShell: '',
                 environmentVariables: {}
             },
-            userBehavior: {
-                recentFiles: [],
-                searchHistory: [],
-                navigationPatterns: [],
-                editingPatterns: [],
-                commandUsage: {}
-            },
             relevanceScores: {},
-            totalTokens: 0
         };
 
         // Add system info
@@ -1342,7 +1218,8 @@ export class ContextManager extends EventEmitter {
         // Add open files
         if (mustSendContexts.has(ContextType.OPEN_FILES)) {
             const openFilesData = mustSendContexts.get(ContextType.OPEN_FILES);
-            processedContext.openFiles = openFilesData.data.files || [];
+            // OpenFilesCollectorData is directly an array, not nested under .files
+            processedContext.openFiles = openFilesData.data || [];
         }
 
         // Add recent edits
@@ -1362,15 +1239,6 @@ export class ContextManager extends EventEmitter {
             processedContext.projectStructure = projectStructureData.data;
         }
 
-        // Estimate token count
-        processedContext.totalTokens = this.estimateTokenCount(
-            processedContext.activeFile,
-            processedContext.openFiles,
-            processedContext.projectStructure,
-            processedContext.gitContext,
-            processedContext.problemsContext,
-            processedContext.recentEdits
-        );
 
         return processedContext;
     }

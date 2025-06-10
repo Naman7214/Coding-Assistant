@@ -1,19 +1,10 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { CollectorMetadata, OpenFilesCollectorData } from '../types/collectors';
 import { ContextData } from '../types/context';
 import { BaseCollector } from './base/BaseCollector';
 
-interface FileScore {
-    filePath: string;
-    score: number;
-    reasons: string[];
-}
-
 export class OpenFilesCollector extends BaseCollector {
     private disposables: vscode.Disposable[] = [];
-    private fileAccessTimes: Map<string, number> = new Map();
-    private fileEditCounts: Map<string, number> = new Map();
 
     constructor(
         outputChannel: vscode.OutputChannel,
@@ -30,13 +21,8 @@ export class OpenFilesCollector extends BaseCollector {
             {
                 options: {
                     maxFiles: 50,
-                    includeContent: false, // Never include content
-                    prioritizeByAccess: true,
-                    prioritizeByRecency: true,
-                    prioritizeByLanguage: true,
-                    includeTabOrder: true,
                     excludeUntitled: false,
-                    debug: false
+                    debug: true // Enable debug logging for testing
                 }
             }
         );
@@ -50,52 +36,62 @@ export class OpenFilesCollector extends BaseCollector {
 
     async collect(): Promise<ContextData | null> {
         try {
-            // Use VSCode API to get all open text documents
+            this.debug('Starting collection of open files');
+
+            // Get all open text documents
             const openDocuments = vscode.workspace.textDocuments.filter(doc => {
-                // Filter system documents and output channels
+                // Include both file and untitled documents
                 if (doc.uri.scheme !== 'file' && doc.uri.scheme !== 'untitled') {
+                    this.debug(`Excluding document with scheme: ${doc.uri.scheme}`);
                     return false;
                 }
 
-                // Filter untitled documents if configured
+                // Optionally exclude untitled documents
                 if (this.config.options.excludeUntitled && doc.isUntitled) {
+                    this.debug(`Excluding untitled document: ${doc.uri.toString()}`);
                     return false;
                 }
 
                 return true;
             });
 
+            this.debug(`Found ${openDocuments.length} open documents after filtering`);
+
             if (openDocuments.length === 0) {
+                this.debug('No open documents found');
                 return null;
             }
 
-            // Score and prioritize files
-            const scoredFiles = await this.scoreAndPrioritizeFiles(openDocuments);
-
-            // Limit to max files
+            // Limit to max files if configured
             const maxFiles = this.config.options.maxFiles || 50;
-            const topFiles = scoredFiles.slice(0, maxFiles);
+            const documentsToProcess = openDocuments.slice(0, maxFiles);
 
-            // Gather file information using VSCode API
+            this.debug(`Processing ${documentsToProcess.length} documents (limited by maxFiles: ${maxFiles})`);
+
+            // Gather file information for each document
             const files = await Promise.all(
-                topFiles.map(({ filePath }) => this.gatherFileInfoFromVSCode(filePath))
+                documentsToProcess.map(doc => this.gatherFileInfo(doc))
             );
 
-            // Filter out any null results and ensure type safety
+            // Filter out any null results
             const validFiles = files.filter((file): file is NonNullable<typeof file> => file !== null);
 
-            // Create simple array format
-            const data: OpenFilesCollectorData = validFiles as OpenFilesCollectorData;
+            this.debug(`Successfully gathered info for ${validFiles.length} files`);
+
+            // Create the data array as expected by OpenFilesCollectorData type
+            const data: OpenFilesCollectorData = validFiles;
 
             const contextData = this.createContextData(
                 this.generateId(),
                 data,
                 {
                     fileCount: validFiles.length,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    totalOpenDocuments: openDocuments.length
                 }
             );
 
+            this.debug(`Context data created successfully with ${validFiles.length} files`);
             return contextData;
 
         } catch (error) {
@@ -107,274 +103,124 @@ export class OpenFilesCollector extends BaseCollector {
     getMetadata(): CollectorMetadata {
         return {
             name: this.name,
-            description: 'Collects context about all open files with smart prioritization based on access patterns and relevance',
-            version: '1.0.0',
+            description: 'Collects context about all open files in the workspace',
+            version: '1.1.0',
             dependencies: ['vscode.workspace', 'vscode.window'],
             configurable: true,
-            cacheable: false, // Changed to false since we're removing caching
+            cacheable: false, // Don't cache since open files change frequently
             priority: 8
         };
     }
 
     /**
-     * Score and prioritize files based on various factors
+     * Gather basic file information from a VSCode TextDocument
      */
-    private async scoreAndPrioritizeFiles(documents: vscode.TextDocument[]): Promise<FileScore[]> {
-        const scored: FileScore[] = [];
-
-        for (const document of documents) {
-            const filePath = document.uri.fsPath;
-
-            // Skip files not in workspace
-            if (!this.shouldIncludeFile(filePath)) {
-                continue;
-            }
-
-            const score = await this.calculateFileScore(document);
-            scored.push(score);
-        }
-
-        // Sort by score (highest first)
-        return scored.sort((a, b) => b.score - a.score);
-    }
-
-    /**
-     * Calculate relevance score for a file
-     */
-    private async calculateFileScore(document: vscode.TextDocument): Promise<FileScore> {
-        const filePath = document.uri.fsPath;
-        const reasons: string[] = [];
-        let score = 0;
-
-        // Base score
-        score += 1;
-
-        // Active editor bonus
-        if (vscode.window.activeTextEditor?.document === document) {
-            score += 10;
-            reasons.push('Active file');
-        }
-
-        // Visible editor bonus
-        const visibleEditors = vscode.window.visibleTextEditors;
-        if (visibleEditors.some(editor => editor.document === document)) {
-            score += 5;
-            reasons.push('Visible in editor');
-        }
-
-        // Recent access bonus
-        const lastAccess = this.fileAccessTimes.get(filePath);
-        if (lastAccess) {
-            const timeSinceAccess = Date.now() - lastAccess;
-            const hoursAgo = timeSinceAccess / (1000 * 60 * 60);
-
-            if (hoursAgo < 1) {
-                score += 8;
-                reasons.push('Accessed recently');
-            } else if (hoursAgo < 24) {
-                score += 4;
-                reasons.push('Accessed today');
-            }
-        }
-
-        // Edit frequency bonus
-        const editCount = this.fileEditCounts.get(filePath) || 0;
-        if (editCount > 0) {
-            score += Math.min(editCount * 0.5, 5);
-            reasons.push(`Edited ${editCount} times`);
-        }
-
-        // Language relevance bonus
-        score += this.getLanguageRelevanceScore(document.languageId);
-
-        // File type importance
-        score += this.getFileTypeScore(filePath);
-
-        return { filePath, score, reasons };
-    }
-
-    /**
-     * Get language relevance score
-     */
-    private getLanguageRelevanceScore(languageId: string): number {
-        const highPriority = ['typescript', 'javascript', 'python', 'java', 'cpp', 'c', 'csharp', 'go', 'rust'];
-        const mediumPriority = ['html', 'css', 'scss', 'less', 'json', 'yaml', 'xml'];
-        const lowPriority = ['markdown', 'txt', 'log'];
-
-        if (highPriority.includes(languageId)) {
-            return 3;
-        } else if (mediumPriority.includes(languageId)) {
-            return 2;
-        } else if (lowPriority.includes(languageId)) {
-            return 0.5;
-        }
-        return 1;
-    }
-
-    /**
-     * Get file type importance score
-     */
-    private getFileTypeScore(filePath: string): number {
-        const fileName = path.basename(filePath).toLowerCase();
-
-        // Configuration files
-        if (['package.json', 'tsconfig.json', 'webpack.config.js', 'vite.config.js'].includes(fileName)) {
-            return 4;
-        }
-
-        // Main entry files
-        if (['index.js', 'index.ts', 'main.js', 'main.ts', 'app.js', 'app.ts'].includes(fileName)) {
-            return 3;
-        }
-
-        // Test files
-        if (fileName.includes('.test.') || fileName.includes('.spec.')) {
-            return 2;
-        }
-
-        return 1;
-    }
-
-    /**
-     * Get tab order for a document using VSCode API
-     */
-    private getTabOrder(document: vscode.TextDocument): number {
-        const visibleEditors = vscode.window.visibleTextEditors;
-        const tabGroups = vscode.window.tabGroups.all;
-
-        for (let groupIndex = 0; groupIndex < tabGroups.length; groupIndex++) {
-            const group = tabGroups[groupIndex];
-            for (let tabIndex = 0; tabIndex < group.tabs.length; tabIndex++) {
-                const tab = group.tabs[tabIndex];
-                // Fix for TabInputText type not existing
-                if (tab.input && typeof tab.input === 'object' && 'uri' in tab.input && tab.input.uri && tab.input.uri.toString() === document.uri.toString()) {
-                    return tabIndex;
-                }
-            }
-        }
-
-        return 999; // Default high number for files not found in tabs
-    }
-
-    /**
-     * Gather file information using VSCode API only
-     */
-    private async gatherFileInfoFromVSCode(filePath: string): Promise<{
+    private async gatherFileInfo(document: vscode.TextDocument): Promise<{
         path: string;
+        relativePath: string;
         languageId: string;
         lineCount: number;
         fileSize: number;
         lastModified: string;
     } | null> {
         try {
-            // Find the document in VSCode's open documents
-            const document = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === filePath);
-            if (!document) {
-                return null;
-            }
+            const filePath = document.uri.fsPath || document.uri.toString();
 
-            // Get file stats for lastModified
+            this.debug(`Gathering info for file: ${filePath}`);
+
+            // Get file stats for lastModified (try to get from filesystem first)
             let lastModified: string;
             try {
-                const stats = await vscode.workspace.fs.stat(document.uri);
-                lastModified = new Date(stats.mtime).toISOString();
+                if (document.uri.scheme === 'file') {
+                    const stats = await vscode.workspace.fs.stat(document.uri);
+                    lastModified = new Date(stats.mtime).toISOString();
+                } else {
+                    // For untitled documents, use current time
+                    lastModified = new Date().toISOString();
+                }
             } catch {
+                // Fallback to current time if we can't get file stats
                 lastModified = new Date().toISOString();
             }
 
-            return {
+            // Calculate file size from document content
+            const fileSize = Buffer.byteLength(document.getText(), 'utf8');
+
+            const fileInfo = {
                 path: filePath,
+                relativePath: this.getRelativePath(filePath),
                 languageId: document.languageId,
                 lineCount: document.lineCount,
-                fileSize: Buffer.byteLength(document.getText(), 'utf8'),
-                lastModified
+                fileSize: fileSize,
+                lastModified: lastModified
             };
 
+            this.debug(`File info gathered: ${JSON.stringify(fileInfo)}`);
+            return fileInfo;
+
         } catch (error) {
-            this.debug(`Error gathering file info for ${filePath}: ${error}`);
+            this.error(`Error gathering file info for ${document.uri.toString()}`, error);
             return null;
         }
     }
 
+    /**
+     * Setup event listeners for tracking file changes (optional)
+     */
     private setupEventListeners(): void {
-        // Track when documents are opened
+        // These are just for logging/debugging purposes since we don't cache
         this.disposables.push(
             vscode.workspace.onDidOpenTextDocument((document: vscode.TextDocument) => {
-                if (document.uri.scheme === 'file') {
-                    this.fileAccessTimes.set(document.uri.fsPath, Date.now());
-                }
+                this.debug(`Document opened: ${document.uri.toString()}`);
             })
         );
 
-        // Track when documents are closed
         this.disposables.push(
             vscode.workspace.onDidCloseTextDocument((document: vscode.TextDocument) => {
-                // No-op, just track the event
-            })
-        );
-
-        // Track when documents are edited
-        this.disposables.push(
-            vscode.workspace.onDidChangeTextDocument((event: vscode.TextDocumentChangeEvent) => {
-                if (event.document.uri.scheme === 'file' && event.contentChanges.length > 0) {
-                    const filePath = event.document.uri.fsPath;
-                    this.fileEditCounts.set(filePath, (this.fileEditCounts.get(filePath) || 0) + 1);
-                    this.fileAccessTimes.set(filePath, Date.now());
-                }
-            })
-        );
-
-        // Track when active editor changes
-        this.disposables.push(
-            vscode.window.onDidChangeActiveTextEditor((editor: vscode.TextEditor | undefined) => {
-                if (editor?.document.uri.scheme === 'file') {
-                    this.fileAccessTimes.set(editor.document.uri.fsPath, Date.now());
-                }
-            })
-        );
-
-        // Track when visible editors change
-        this.disposables.push(
-            vscode.window.onDidChangeVisibleTextEditors((editors: readonly vscode.TextEditor[]) => {
-                editors.forEach(editor => {
-                    if (editor.document.uri.scheme === 'file') {
-                        this.fileAccessTimes.set(editor.document.uri.fsPath, Date.now());
-                    }
-                });
+                this.debug(`Document closed: ${document.uri.toString()}`);
             })
         );
     }
 
+    /**
+     * Get simple stats about open files
+     */
     getStats(): {
         totalOpenFiles: number;
-        trackedAccessTimes: number;
-        trackedEditCounts: number;
-        averageFileSize: number;
         languageDistribution: Record<string, number>;
+        averageFileSize: number;
+        schemeDistribution: Record<string, number>;
     } {
-        const openDocs = vscode.workspace.textDocuments.filter(doc =>
-            doc.uri.scheme === 'file' || doc.uri.scheme === 'untitled'
-        );
-
-        const totalSize = openDocs.reduce((sum, doc) => sum + doc.getText().length, 0);
-        const averageFileSize = openDocs.length > 0 ? totalSize / openDocs.length : 0;
+        const openDocs = vscode.workspace.textDocuments;
 
         const languageDistribution: Record<string, number> = {};
+        const schemeDistribution: Record<string, number> = {};
+        let totalSize = 0;
+
         openDocs.forEach(doc => {
+            // Count by language
             languageDistribution[doc.languageId] = (languageDistribution[doc.languageId] || 0) + 1;
+
+            // Count by scheme
+            schemeDistribution[doc.uri.scheme] = (schemeDistribution[doc.uri.scheme] || 0) + 1;
+
+            // Add to total size
+            totalSize += doc.getText().length;
         });
+
+        const averageFileSize = openDocs.length > 0 ? totalSize / openDocs.length : 0;
 
         return {
             totalOpenFiles: openDocs.length,
-            trackedAccessTimes: this.fileAccessTimes.size,
-            trackedEditCounts: this.fileEditCounts.size,
+            languageDistribution,
             averageFileSize,
-            languageDistribution
+            schemeDistribution
         };
     }
 
     dispose(): void {
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
+        super.dispose();
     }
 } 

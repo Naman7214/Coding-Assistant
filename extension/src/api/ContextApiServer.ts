@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { ApplyApiRequest, ApplyApiResponse } from '../apply/api/ApplyApiHandler';
+import { getApplyApiHandler } from '../apply/api/ApplyApiHandler';
 import { PersistentTerminalManager } from '../bridge/PersistentTerminalManager';
 import { ContextManager } from '../context/ContextManager';
 import { deobfuscatePath } from '../indexing/utils/hash';
@@ -69,13 +71,17 @@ export class ContextApiServer implements vscode.Disposable {
     private readonly outputChannel: vscode.OutputChannel;
     private isRunning: boolean = false;
     private terminalManager: PersistentTerminalManager;
+    private applyApiHandler: any; // Instance of ApplyApiHandler with proper context
 
     constructor(
         private contextManager: ContextManager,
-        outputChannel: vscode.OutputChannel
+        outputChannel: vscode.OutputChannel,
+        private extensionContext?: vscode.ExtensionContext
     ) {
         this.outputChannel = outputChannel;
         this.terminalManager = new PersistentTerminalManager(outputChannel);
+        // Initialize apply handler with extension context for proper backup storage
+        this.applyApiHandler = getApplyApiHandler(this.extensionContext);
         this.app = express();
         this.setupMiddleware();
         this.setupRoutes();
@@ -137,6 +143,16 @@ export class ContextApiServer implements vscode.Disposable {
 
         // NEW: Semantic search results endpoint (for processing obfuscated paths)
         this.app.post('/api/search/process-results', this.handleSemanticSearchResults.bind(this));
+
+        // APPLY FEATURE ENDPOINTS
+        this.app.post('/api/apply', this.handleApplyRequest.bind(this));
+        this.app.get('/api/apply/status', this.handleApplyStatus.bind(this));
+        this.app.post('/api/apply/cancel', this.handleApplyCancel.bind(this));
+        this.app.get('/api/apply/test-connection', this.handleApplyTestConnection.bind(this));
+        this.app.get('/api/apply/config', this.handleApplyConfig.bind(this));
+        this.app.put('/api/apply/config', this.handleApplyConfigUpdate.bind(this));
+        this.app.post('/api/apply/clear-decorations', this.handleApplyClearDecorations.bind(this));
+        this.app.get('/api/apply/statistics', this.handleApplyStatistics.bind(this));
     }
 
     private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
@@ -300,7 +316,7 @@ export class ContextApiServer implements vscode.Disposable {
                 options: {
                     includeFileContent: false,
                     maxFileSize: 1048576,
-                    excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+                    excludePatterns: ['node_modules', '.git', 'dist', 'build', '.venv', '.env', 'venv', 'env'],
                     includeHiddenFiles: false,
                     respectGitignore: true,
                     maxDepth,
@@ -359,7 +375,7 @@ export class ContextApiServer implements vscode.Disposable {
                 options: {
                     includeFileContent: includeChanges,
                     maxFileSize: 1048576,
-                    excludePatterns: ['node_modules', '.git', 'dist', 'build'],
+                    excludePatterns: ['node_modules', '.git', 'dist', 'build', '.venv', '.env', 'venv', 'env'],
                     includeHiddenFiles: false,
                     respectGitignore: true,
                     maxDepth: 10,
@@ -585,25 +601,17 @@ export class ContextApiServer implements vscode.Disposable {
             }
 
             const items: Array<{
-                name: string;
                 path: string;
                 type: string;
-                size: number | null;
-                modified: Date;
                 created: Date;
             }> = [];
 
-            let filteredEntries = 0;
-            let totalEntries = 0;
-
             for (const entry of entries) {
-                totalEntries++;
                 try {
                     const entryName = entry[0] || entry.name;
 
                     // Skip excluded directories
                     if (shouldExclude(entryName)) {
-                        filteredEntries++;
                         this.outputChannel.appendLine(`[ContextAPI] Excluding entry: ${entryName}`);
                         continue;
                     }
@@ -624,11 +632,8 @@ export class ContextApiServer implements vscode.Disposable {
                     }
 
                     items.push({
-                        name: entryName,
                         path: relativePath,
                         type: entryType,
-                        size: entryType === 'file' ? stats.size : null,
-                        modified: new Date(stats.mtime),
                         created: new Date(stats.ctime || stats.birthtime || 0)
                     });
                 } catch (statError) {
@@ -637,18 +642,13 @@ export class ContextApiServer implements vscode.Disposable {
                 }
             }
 
-            this.outputChannel.appendLine(`[ContextAPI] Found ${items.length} items in directory ${directoryPath} (excluded ${filteredEntries} of ${totalEntries} total entries)`);
+            this.outputChannel.appendLine(`[ContextAPI] Found ${items.length} items in directory ${directoryPath}`);
 
             res.json({
                 success: true,
                 workspaceId,
                 directoryPath,
-                contents: {
-                    directory: directoryPath || '.',
-                    items: items,
-                    totalItems: items.length,
-                    filteredItems: filteredEntries
-                },
+                items: items,
                 timestamp: new Date().toISOString()
             });
         } catch (error) {
@@ -808,6 +808,233 @@ export class ContextApiServer implements vscode.Disposable {
         }
     }
 
+    // APPLY FEATURE HANDLER METHODS
+    private async handleApplyRequest(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const requestBody: ApplyApiRequest = req.body;
+            const workspaceId = req.body.workspaceId || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply request received for file: ${requestBody.filePath}`);
+
+            // Validate request
+            if (!requestBody.filePath || !requestBody.codeSnippet) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields: filePath and codeSnippet',
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
+            // Execute the apply operation
+            const result: ApplyApiResponse = await this.applyApiHandler.handleApplyRequest(requestBody);
+
+            // Log the result
+            this.outputChannel.appendLine(`[ContextAPI] Apply completed: ${result.success ? 'SUCCESS' : 'FAILED'}`);
+            if (result.linterErrors && result.linterErrors.length > 0) {
+                this.outputChannel.appendLine(`[ContextAPI] Linter errors found: ${result.linterErrors.length}`);
+            }
+
+            res.json({
+                ...result,
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Apply request failed: ${error}`);
+            res.status(500).json({
+                success: false,
+                message: error instanceof Error ? error.message : 'Unknown error occurred',
+                linterErrors: [],
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyStatus(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+            const status = this.applyApiHandler.getApplyStatus();
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply status requested - In Progress: ${status.inProgress}`);
+
+            res.json({
+                success: true,
+                workspaceId,
+                status,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting apply status: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyCancel(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.body.workspaceId || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply cancel requested`);
+
+            this.applyApiHandler.cancelApplyOperation();
+
+            res.json({
+                success: true,
+                message: 'Apply operation cancelled',
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error cancelling apply operation: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyTestConnection(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Testing FastAPI connection`);
+
+            const isConnected = await this.applyApiHandler.testConnection();
+
+            this.outputChannel.appendLine(`[ContextAPI] FastAPI connection test result: ${isConnected ? 'SUCCESS' : 'FAILED'}`);
+
+            res.json({
+                success: true,
+                connected: isConnected,
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error testing FastAPI connection: ${error}`);
+            res.status(500).json({
+                success: false,
+                connected: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyConfig(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply configuration requested`);
+
+            const config = this.applyApiHandler.getApplyConfig();
+
+            res.json({
+                success: true,
+                config,
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting apply configuration: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyConfigUpdate(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.body.workspaceId || this.contextManager.getWorkspaceId();
+            const newConfig = req.body.config || req.body;
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply configuration update requested`);
+
+            // Remove workspaceId from config if it exists
+            const { workspaceId: _, ...configToUpdate } = newConfig;
+
+            this.applyApiHandler.updateApplyConfig(configToUpdate);
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply configuration updated successfully`);
+
+            res.json({
+                success: true,
+                message: 'Configuration updated successfully',
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error updating apply configuration: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyClearDecorations(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.body.workspaceId || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Clear apply decorations requested`);
+
+            this.applyApiHandler.clearDecorations();
+
+            res.json({
+                success: true,
+                message: 'Apply decorations cleared successfully',
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error clearing apply decorations: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    private async handleApplyStatistics(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const workspaceId = req.query.workspaceId as string || this.contextManager.getWorkspaceId();
+
+            this.outputChannel.appendLine(`[ContextAPI] Apply statistics requested`);
+
+            const statistics = this.applyApiHandler.getApplyStatistics();
+
+            res.json({
+                success: true,
+                statistics,
+                workspaceId,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            this.outputChannel.appendLine(`[ContextAPI] Error getting apply statistics: ${error}`);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
     // Terminal Bridge Handler Methods
     private async handleTerminalRequest(req: express.Request, res: express.Response): Promise<void> {
         const request: TerminalRequest = req.body;
@@ -895,7 +1122,14 @@ export class ContextApiServer implements vscode.Disposable {
                 sessions: '/api/terminal/sessions',
                 context: '/api/workspace/{workspaceId}/context/stream',
                 directoryList: '/api/directory/list',
-                semanticSearchResults: '/api/search/process-results'
+                semanticSearchResults: '/api/search/process-results',
+                apply: '/api/apply',
+                applyStatus: '/api/apply/status',
+                applyCancel: '/api/apply/cancel',
+                applyTestConnection: '/api/apply/test-connection',
+                applyConfig: '/api/apply/config',
+                applyClearDecorations: '/api/apply/clear-decorations',
+                applyStatistics: '/api/apply/statistics'
             },
             supportedOperations: [
                 'terminal_command',
@@ -904,7 +1138,14 @@ export class ContextApiServer implements vscode.Disposable {
                 'list_directory',
                 'delete_file',
                 'search_files',
-                'semantic_search_results'
+                'semantic_search_results',
+                'apply_code',
+                'apply_status',
+                'apply_cancel',
+                'apply_test_connection',
+                'apply_config',
+                'apply_clear_decorations',
+                'apply_statistics'
             ],
             timestamp: new Date().toISOString(),
             version: '1.0.0'
@@ -1156,6 +1397,15 @@ export class ContextApiServer implements vscode.Disposable {
                 this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/terminal/execute`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/terminal/sessions`);
                 this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/bridge/info`);
+                this.outputChannel.appendLine(`[UnifiedAPI]   Apply Feature API:`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/apply`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/apply/status`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/apply/cancel`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/apply/test-connection`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/apply/config`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     PUT /api/apply/config`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     POST /api/apply/clear-decorations`);
+                this.outputChannel.appendLine(`[UnifiedAPI]     GET /api/apply/statistics`);
 
                 // Setup periodic cleanup of inactive terminal sessions
                 setInterval(() => {
@@ -1228,5 +1478,8 @@ export class ContextApiServer implements vscode.Disposable {
 
         // Clean up terminal manager
         this.terminalManager.dispose();
+
+        // Clean up apply handler
+        this.applyApiHandler.dispose();
     }
 } 

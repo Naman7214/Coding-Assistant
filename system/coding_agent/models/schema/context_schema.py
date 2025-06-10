@@ -18,7 +18,6 @@ class ActiveFileContext(BaseModel):
     lineCount: Optional[int] = None
     fileSize: Optional[int] = None
     lastModified: Optional[str] = None
-    content: Optional[str] = None
     cursorPosition: Optional[Dict[str, Any]] = None
     selection: Optional[Dict[str, Any]] = None
     visibleRanges: Optional[List[Dict[str, Any]]] = None

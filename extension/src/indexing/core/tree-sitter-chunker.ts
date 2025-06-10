@@ -260,9 +260,6 @@ export class TreeSitterChunker {
             // Async
             'async': 'async',
 
-            // Decorator
-            '@': 'decorator',
-
             // Return statements
             'return': 'return'
         };
@@ -358,22 +355,8 @@ export class TreeSitterChunker {
             '.scss': 'css',
             '.sass': 'css',
             '.less': 'css',
-            '.json': 'json',
-            '.xml': 'xml',
-            '.yaml': 'yaml',
-            '.yml': 'yaml',
-            '.toml': 'toml',
             '.md': 'markdown',
-            '.sql': 'sql',
-            '.sh': 'bash',
-            '.bash': 'bash',
-            '.zsh': 'bash',
-            '.ps1': 'powershell',
-            '.r': 'r',
-            '.m': 'matlab',
-            '.lua': 'lua',
-            '.perl': 'perl',
-            '.pl': 'perl'
+            '.sql': 'sql'
         };
 
         return languageMap[ext] || null;
