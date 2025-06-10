@@ -116,8 +116,7 @@ export class OpenFilesCollector extends BaseCollector {
      * Gather basic file information from a VSCode TextDocument
      */
     private async gatherFileInfo(document: vscode.TextDocument): Promise<{
-        path: string;
-        relativePath: string;
+        path: string;        
         languageId: string;
         lineCount: number;
         fileSize: number;
@@ -148,7 +147,6 @@ export class OpenFilesCollector extends BaseCollector {
 
             const fileInfo = {
                 path: filePath,
-                relativePath: this.getRelativePath(filePath),
                 languageId: document.languageId,
                 lineCount: document.lineCount,
                 fileSize: fileSize,

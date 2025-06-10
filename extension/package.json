@@ -28,6 +28,9 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
   "main": "./out/extension_streaming.js",
   "contributes": {
     "viewsContainers": {
@@ -269,6 +272,7 @@
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^15.6.1",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "tree-sitter-wasms": "^0.1.12"
   }
 }

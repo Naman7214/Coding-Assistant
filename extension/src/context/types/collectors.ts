@@ -84,7 +84,6 @@ export interface ActiveFileCollectorData {
 
 export interface OpenFilesCollectorData extends Array<{
     path: string;
-    relativePath: string;
     languageId: string;
     lineCount: number;
     fileSize: number;
