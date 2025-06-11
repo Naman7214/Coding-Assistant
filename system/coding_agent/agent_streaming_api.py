@@ -9,7 +9,7 @@ from agent_with_stream import AnthropicStreamingAgent
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from models.schema.context_schema import ActiveFileContext, SystemInfo
+from models.schema.context_schema import ActiveFileContext, RecentEditsContext, SystemInfo
 from models.schema.request_schema import (
     PermissionResponse,
     QueryRequest,
@@ -73,7 +73,7 @@ async def stream_agent_response(
     system_info: Optional[SystemInfo] = None,
     active_file_context: Optional[ActiveFileContext] = None,
     open_files_context: Optional[List[Dict[str, Any]]] = None,
-    recent_edits_context: Optional[Dict[str, Any]] = None,
+    recent_edits_context: Optional[RecentEditsContext] = None,
     context_mentions: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream the agent's response with enhanced context system"""
@@ -87,15 +87,13 @@ async def stream_agent_response(
     print(f"   Context Mentions: {context_mentions}")
     if system_info:
         print(f"   System: {system_info.platform} {system_info.osVersion}")
-    if active_file_context:
-        print(f"   Active File: {active_file_context.relativePath}")
     if open_files_context:
         print(f"   Open Files: {len(open_files_context)} files")
     if recent_edits_context:
-        summary = recent_edits_context.get("summary", {})
-        if summary.get("hasChanges", False):
+        summary = recent_edits_context.summary
+        if summary.hasChanges:
             print(
-                f"   Recent Edits: {summary.get('totalFiles', 0)} files changed"
+                f"   Recent Edits: {summary.totalFiles} files changed"
             )
         else:
             print(f"   Recent Edits: No recent changes")
@@ -144,7 +142,7 @@ async def stream_agent_response(
                 "workspace": workspace_path,
                 "context_mentions": context_mentions,
                 "active_file": (
-                    active_file_context.relativePath
+                    active_file_context.model_dump()
                     if active_file_context
                     else None
                 ),
@@ -421,6 +419,9 @@ async def process_enhanced_streaming_tool_calls(
     thinking_content = ""
     text_content = ""
     tool_calls = []
+    
+    # Track tool preparation state to prevent duplicate events
+    tool_preparation_sent = {}  # Track which tools have sent preparation events
 
     # Don't send initial thinking message for depth > 0
     if depth == 0:
@@ -471,10 +472,19 @@ async def process_enhanced_streaming_tool_calls(
                 if text_chunk:
                     yield create_stream_event("assistant_response", text_chunk)
             elif delta_type == "input_json_delta":
-                # Tool input is being streamed - show friendly progress
-                yield create_stream_event(
-                    "tool_execution", ".", {"status": "preparing"}
-                )
+                # Tool input is being streamed - only send preparation event once per tool
+                content_block_index = data.get("index", 0)
+                
+                # Only send the preparation event once per tool block
+                if content_block_index not in tool_preparation_sent:
+                    tool_preparation_sent[content_block_index] = True
+                    print(f"Enhanced: Tool preparation started for block {content_block_index}")
+                    yield create_stream_event(
+                        "tool_execution", 
+                        "Preparing tool arguments...", 
+                        {"status": "preparing"}
+                    )
+                # Note: We silently accumulate the JSON input without sending events for each delta
 
         elif event_type == "content_block_stop":
             # Content block ended - we can finalize tool information here
@@ -568,13 +578,17 @@ async def process_enhanced_streaming_tool_calls(
                     "command": command,
                     "permission_id": permission_id,
                     "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
                     "is_background": is_background,
+                    "timeout_seconds": 300,  # 5 minutes
+                    "friendly_name": friendly_name,
                 },
             )
 
             try:
+                # Wait for permission response with 5-minute timeout
                 permission_granted = await asyncio.wait_for(
-                    permission_future, timeout=60.0
+                    permission_future, timeout=300.0  # 5 minutes
                 )
 
                 if not permission_granted:
@@ -600,22 +614,33 @@ async def process_enhanced_streaming_tool_calls(
                 print(f"Enhanced: Permission granted for command: {command}")
 
             except asyncio.TimeoutError:
+                # Send permission timeout event to close UI modal
+                yield create_stream_event(
+                    "permission_timeout",
+                    "Permission request timed out after 5 minutes",
+                    {
+                        "permission_id": permission_id,
+                        "timeout": True,
+                    },
+                )
+                
                 yield create_stream_event(
                     "tool_result",
-                    "Permission request timed out",
+                    "Permission request timed out after 5 minutes. Command was not executed.",
                     {
                         "tool_name": tool_name,
                         "tool_use_id": tool_use_id,
                         "friendly_name": friendly_name,
                         "error": True,
                         "timeout": True,
+                        "permission_denied": True,
                     },
                 )
                 agent_instance.agent_memory.add_tool_call(
-                    tool_call, "Permission request timed out"
+                    tool_call, "Permission request timed out after 5 minutes"
                 )
                 agent_instance.agent_memory.add_tool_result(
-                    tool_use_id, "Permission request timed out"
+                    tool_use_id, "Permission request timed out after 5 minutes. Command was not executed."
                 )
                 continue
             finally:

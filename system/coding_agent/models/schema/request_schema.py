@@ -1,6 +1,11 @@
 from typing import Any, Dict, List, Optional
 
-from models.schema.context_schema import ActiveFileContext, SystemInfo
+from models.schema.context_schema import (
+    ActiveFileContext, 
+    OpenFileInfo, 
+    RecentEditsContext, 
+    SystemInfo
+)
 from pydantic import BaseModel
 
 
@@ -11,8 +16,8 @@ class QueryRequest(BaseModel):
     git_branch: str
     system_info: Optional[SystemInfo] = None
     active_file_context: Optional[ActiveFileContext] = None
-    open_files_context: Optional[List[Dict[str, Any]]] = None
-    recent_edits_context: Optional[Dict[str, Any]] = None
+    open_files_context: Optional[List[OpenFileInfo]] = None
+    recent_edits_context: Optional[RecentEditsContext] = None
     context_mentions: Optional[List[str]] = None
 
 

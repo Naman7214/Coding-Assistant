@@ -1,319 +1,201 @@
 def format_system_info_context(system_info) -> str:
-    """Format system information for the prompt"""
+    """Format system information concisely"""
     if not system_info:
-        return "No system information available."
-
-    try:
-
-        context = f"""
-                SYSTEM INFORMATION:
-                - Platform: {system_info.get('platform', 'unknown')}
-                - OS Version: {system_info.get('osVersion', 'unknown')}
-                - Architecture: {system_info.get('architecture', 'unknown')}
-                - Workspace Path: {system_info.get('workspacePath', 'unknown')}
-                - Default Shell: {system_info.get('defaultShell', 'unknown')}
-                """
-    except Exception as e:
-        context = str(system_info)
-    return context
+        return ""
+    
+    return f"OS: {system_info.get('platform', 'unknown')} {system_info.get('osVersion', '')}, Shell: {system_info.get('defaultShell', '/bin/bash')}"
 
 
 def format_active_file_context(active_file_context) -> str:
-    """Format active file context for inclusion in system prompt"""
+    """Format active file context concisely"""
     if not active_file_context:
         return ""
-
+    
     try:
-        context = f"""
-=== ACTIVE FILE CONTEXT ===
-Currently editing: {active_file_context.get('relativePath', 'Unknown')}
-Language: {active_file_context.get('languageId', 'unknown')}
-Lines: {active_file_context.get('lineCount', 0)}"""
-
-        # Add absolute path if available
-        if active_file_context.get("path"):
-            context += f"\nAbsolute Path: {active_file_context['path']}"
-
-        # Add file size and last modified if available
-        if active_file_context.get("fileSize"):
-            file_size = active_file_context["fileSize"]
-            if file_size > 1024 * 1024:
-                context += f"\nFile Size: {file_size / (1024 * 1024):.1f} MB"
-            elif file_size > 1024:
-                context += f"\nFile Size: {file_size / 1024:.1f} KB"
-            else:
-                context += f"\nFile Size: {file_size} bytes"
-
-        if active_file_context.get("lastModified"):
-            context += f"\nLast Modified: {active_file_context['lastModified']}"
-
-        # Add cursor position if available
-        if active_file_context.get("cursorPosition"):
-            cursor_pos = active_file_context["cursorPosition"]
-            context += f"\nCursor Position: Line {cursor_pos.get('line', 0)}, Character {cursor_pos.get('character', 0)}"
-
-        # Add cursor line content if available (very useful for context)
-        if active_file_context.get("cursorLineContent"):
-            cursor_content = active_file_context["cursorLineContent"]
-            context += f"\nCursor Context:"
-            if cursor_content.get("above"):
-                context += f"\n  Line Above: '{cursor_content['above']}'"
-            if cursor_content.get("current"):
-                context += f"\n  Current Line: '{cursor_content['current']}'"
-            if cursor_content.get("below"):
-                context += f"\n  Line Below: '{cursor_content['below']}'"
-
-        # Add selection if available (fix: check for start/end, not isEmpty)
-        if active_file_context.get("selection"):
-            selection = active_file_context["selection"]
-            start = selection.get("start", {})
-            end = selection.get("end", {})
-
-            # Check if there's actually a selection (start != end)
-            start_line = start.get("line", 0)
-            start_char = start.get("character", 0)
-            end_line = end.get("line", 0)
-            end_char = end.get("character", 0)
-
-            if start_line != end_line or start_char != end_char:
-                if start_line == end_line:
-                    context += f"\nSelection: Line {start_line}, Characters {start_char}-{end_char}"
-                else:
-                    context += f"\nSelection: Lines {start_line}-{end_line} (from {start_line}:{start_char} to {end_line}:{end_char})"
-
-        # Add visible ranges if available
-        if active_file_context.get("visibleRanges"):
-            visible_ranges = active_file_context["visibleRanges"]
-            if (
-                visible_ranges
-                and isinstance(visible_ranges, list)
-                and len(visible_ranges) > 0
-            ):
-                context += f"\nVisible in Editor:"
-                for i, range_info in enumerate(
-                    visible_ranges[:3]
-                ):  # Limit to first 3 ranges
-                    if isinstance(range_info, dict):
-                        start = range_info.get("start", {})
-                        end = range_info.get("end", {})
-                        context += f"\n  Range {i+1}: Lines {start.get('line', 0)}-{end.get('line', 0)}"
-                if len(visible_ranges) > 3:
-                    context += f"\n  ... and {len(visible_ranges) - 3} more visible ranges"
-
-        # Add file content if available (truncated for context)
-        if active_file_context.get("content"):
-            content = active_file_context["content"]
-            if len(content) > 5000:
-                context += f"\n\nFile Content (first 5000 chars):\n```\n{content[:5000]}\n...[truncated]\n```"
-            else:
-                context += f"\n\nFile Content:\n```\n{content}\n```"
-
-        context += "\n=== END ACTIVE FILE CONTEXT ===\n"
+        file = active_file_context.get('file', {})
+        cursor = active_file_context.get('cursor', {})
+        
+        # Extract file info
+        rel_path = file.get('path', '').replace(active_file_context.get('workspace_path', ''), '').lstrip('/')
+        lang = file.get('languageId', '')
+        lines = file.get('lineCount', 0)
+        
+        # Extract cursor info
+        cursor_line = cursor.get('line', 0) + 1  # Convert to 1-based
+        cursor_char = cursor.get('character', 0)
+        
+        # Extract line content
+        line_content = cursor.get('lineContent', {})
+        current_line = line_content.get('current', '').strip()
+        
+        # Build concise context
+        context = f"📁 {rel_path} ({lang}, {lines}L)"
+        context += f" | 📍 {cursor_line}:{cursor_char}"
+        
+        if current_line:
+            context += f" | Current: `{current_line[:50]}{'...' if len(current_line) > 50 else ''}`"
+        
+        # Add selection if exists
+        selection = cursor.get('selection', [])
+        if len(selection) >= 2:
+            start = selection[0]
+            end = selection[1] 
+            if start.get('line') != end.get('line') or start.get('character') != end.get('character'):
+                context += f" | Selected: {start.get('line', 0)+1}:{start.get('character', 0)}-{end.get('line', 0)+1}:{end.get('character', 0)}"
+        
+        return context
+        
     except Exception as e:
-        context = str(active_file_context)
-    return context
+        return f"Active file: {str(active_file_context)[:100]}..."
 
 
 def format_open_files_context(open_files_context) -> str:
-    """Format open files context for inclusion in system prompt"""
-    if not open_files_context or not isinstance(open_files_context, list):
+    """Format open files context concisely"""
+    if not open_files_context:
         return ""
-
+    
     try:
-        context = f"""
-=== OPEN FILES CONTEXT ===
-Currently open files: {len(open_files_context)} files"""
-
-        if open_files_context:
-            for i, file_info in enumerate(
-                open_files_context[:10]
-            ):  # Limit to 10 files
-                context += f"\n  {i+1}. {file_info.get('relativePath', 'unknown')} ({file_info.get('languageId', 'unknown')})"
-                if file_info.get("isActive"):
-                    context += " [ACTIVE]"
-
-                # Add file size info
-                file_size = file_info.get("fileSize", 0)
-                if file_size > 1024:
-                    context += f" - {file_size // 1024}KB"
-                else:
-                    context += f" - {file_size}B"
-
-            if len(open_files_context) > 10:
-                context += (
-                    f"\n  ... and {len(open_files_context) - 10} more files"
-                )
-
-        context += "\n=== END OPEN FILES CONTEXT ===\n"
-    except Exception as e:
-        context = f"Error formatting open files context: {str(e)}"
-
-    return context
+        count = len(open_files_context)
+        if count == 0:
+            return ""
+        
+        # Show first few files
+        files_str = ""
+        for i, file_info in enumerate(open_files_context[:3]):
+            path = file_info.get('path', '')
+            # Extract just filename or relative path
+            name = path.split('/')[-1] if '/' in path else path
+            lang = file_info.get('languageId', '')
+            if i > 0:
+                files_str += ", "
+            files_str += f"{name}({lang})"
+        
+        if count > 3:
+            files_str += f", +{count-3} more"
+        
+        return f"📂 Open: {files_str}"
+        
+    except Exception:
+        return f"📂 {len(open_files_context)} files open"
 
 
 def format_recent_edits_context(recent_edits_context) -> str:
-    """Format recent edits context for inclusion in system prompt"""
+    """Format recent edits context concisely"""
     if not recent_edits_context:
         return ""
-
+    
     try:
-        summary = recent_edits_context.get("summary", {})
-
-        context = f"""
-=== RECENT EDITS CONTEXT ===
-Time Window: {summary.get('timeWindow', 'last 3 minutes')}
-Has Changes: {summary.get('hasChanges', False)}"""
-
-        if summary.get("hasChanges", False):
-            total_files = summary.get("totalFiles", 0)
-            context += f"\nTotal Files Changed: {total_files}"
-
-            # Format modified files
-            modified_files = recent_edits_context.get("modifiedFiles", [])
-            if modified_files:
-                context += f"\n\nModified Files ({len(modified_files)}):"
-                for file_info in modified_files[:5]:  # Limit to 5 files
-                    context += (
-                        f"\n  • {file_info.get('relativePath', 'unknown')}"
-                    )
-                    diffs = file_info.get("diffs", [])
-                    if diffs:
-                        added_lines = sum(
-                            1 for diff in diffs if diff.get("type") == "added"
-                        )
-                        removed_lines = sum(
-                            1 for diff in diffs if diff.get("type") == "removed"
-                        )
-                        context += f" (+{added_lines} -{removed_lines} lines)"
-
-                        # Show first few diffs for context
-                        for diff in diffs[:3]:
-                            diff_type = diff.get("type", "unknown")
-                            line_num = diff.get("lineNumber", 0)
-                            content = diff.get("content", "").strip()
-                            prefix = (
-                                "+"
-                                if diff_type == "added"
-                                else "-" if diff_type == "removed" else " "
-                            )
-                            context += f"\n    {prefix}{line_num}: {content[:80]}{'...' if len(content) > 80 else ''}"
-
-                if len(modified_files) > 5:
-                    context += f"\n  ... and {len(modified_files) - 5} more modified files"
-
-            # Format added files
-            added_files = recent_edits_context.get("addedFiles", [])
-            if added_files:
-                context += f"\n\nAdded Files ({len(added_files)}):"
-                for file_info in added_files[:10]:  # Limit to 10 files
-                    context += (
-                        f"\n  + {file_info.get('relativePath', 'unknown')}"
-                    )
-                if len(added_files) > 10:
-                    context += (
-                        f"\n  ... and {len(added_files) - 10} more added files"
-                    )
-
-            # Format deleted files
-            deleted_files = recent_edits_context.get("deletedFiles", [])
-            if deleted_files:
-                context += f"\n\nDeleted Files ({len(deleted_files)}):"
-                for file_info in deleted_files[:10]:  # Limit to 10 files
-                    context += (
-                        f"\n  - {file_info.get('relativePath', 'unknown')}"
-                    )
-                if len(deleted_files) > 10:
-                    context += f"\n  ... and {len(deleted_files) - 10} more deleted files"
-
-            # Add git branch info
-            git_branch = recent_edits_context.get("gitBranch", "default")
-            context += f"\n\nGit Branch: {git_branch}"
+        # Handle both Pydantic model and dict for backward compatibility
+        if hasattr(recent_edits_context, 'summary'):
+            # Pydantic model
+            summary = recent_edits_context.summary
+            has_changes = summary.hasChanges
+            total_files = summary.totalFiles
+            modified = recent_edits_context.modifiedFiles
+            added = recent_edits_context.addedFiles
+            deleted = recent_edits_context.deletedFiles
         else:
-            context += "\nNo recent changes detected in the last 3 minutes."
-
-        context += "\n=== END RECENT EDITS CONTEXT ===\n"
-    except Exception as e:
-        context = f"Error formatting recent edits context: {str(e)}"
-
-    return context
+            # Dictionary (backward compatibility)
+            summary = recent_edits_context.get('summary', {})
+            has_changes = summary.get('hasChanges', False)
+            total_files = summary.get('totalFiles', 0)
+            modified = recent_edits_context.get('modifiedFiles', [])
+            added = recent_edits_context.get('addedFiles', [])
+            deleted = recent_edits_context.get('deletedFiles', [])
+        
+        if not has_changes:
+            return ""
+        
+        context = f"📝 Recent: {total_files} file{'s' if total_files != 1 else ''} changed"
+        
+        # Add file names if available
+        files = []
+        for f in modified[:2]:
+            if hasattr(f, 'relativePath'):
+                rel_path = f.relativePath
+            else:
+                rel_path = f.get('relativePath', '')
+            files.append(f"~{rel_path}")
+        for f in added[:2]:
+            if hasattr(f, 'relativePath'):
+                rel_path = f.relativePath
+            else:
+                rel_path = f.get('relativePath', '')
+            files.append(f"+{rel_path}")
+        for f in deleted[:2]:
+            if hasattr(f, 'relativePath'):
+                rel_path = f.relativePath
+            else:
+                rel_path = f.get('relativePath', '')
+            files.append(f"-{rel_path}")
+        
+        if files:
+            context += f" ({', '.join(files)})"
+            
+        return context
+        
+    except Exception:
+        return "📝 Recent changes detected"
 
 
 def format_additional_context(additional_context) -> str:
-    """Format additional on-demand context for inclusion in system prompt"""
+    """Format additional context concisely"""
     if not additional_context:
         return ""
-    try:
-        context = "\n=== ADDITIONAL CONTEXT ===\n"
-        print(f"Additional context type: {type(additional_context)}")
+    
+    # This can be extended for future context types
+    return ""
 
-        # Format problems context
-        if "problems" in additional_context:
-            problems = additional_context["problems"]
-            context += "\n--- PROBLEMS/DIAGNOSTICS ---\n"
-            if problems and isinstance(problems, list):
-                for problem in problems[:10]:  # Limit to 10 problems
-                    severity = problem.get("severity", "unknown")
-                    source = problem.get("source", "unknown")
-                    message = problem.get("message", "No message")
-                    file_path = problem.get("file", "unknown file")
-                    line = problem.get("line", 0)
-                    context += f"  [{severity.upper()}] {source}: {message} ({file_path}:{line})\n"
-                if len(problems) > 10:
-                    context += f"  ... and {len(problems) - 10} more problems\n"
-            else:
-                context += "  No problems detected\n"
 
-        # Format git context
-        if "git" in additional_context:
-            git_info = additional_context["git"]
-            context += "\n--- GIT CONTEXT ---\n"
-            if git_info:
-                context += f"  Repository: {git_info.get('isRepo', False)}\n"
-                if git_info.get("isRepo"):
-                    context += (
-                        f"  Branch: {git_info.get('branch', 'unknown')}\n"
-                    )
-                    context += (
-                        f"  Has Changes: {git_info.get('hasChanges', False)}\n"
-                    )
-                    if git_info.get("changedFiles"):
-                        context += f"  Changed Files ({len(git_info['changedFiles'])}):\n"
-                        for file_change in git_info["changedFiles"][
-                            :5
-                        ]:  # Limit to 5 files
-                            context += f"    {file_change.get('status', '?')} {file_change.get('path', 'unknown')}\n"
-            else:
-                context += "  No git repository detected\n"
+def format_workspace_context(workspace_path: str, git_branch: str) -> str:
+    """Format workspace context concisely"""
+    if not workspace_path:
+        return ""
+    
+    workspace_name = workspace_path.split('/')[-1] if '/' in workspace_path else workspace_path
+    branch_info = f" (git: {git_branch})" if git_branch and git_branch != "default" else ""
+    
+    return f"🚀 Workspace: {workspace_name}{branch_info}"
 
-        # Format project structure context
-        if "project-structure" in additional_context:
-            structure = additional_context["project-structure"]
-            context += "\n--- PROJECT STRUCTURE ---\n"
-            if structure and structure.get("tree"):
-                context += f"Project tree:\n{structure['tree']}\n"
-            else:
-                context += "  No project structure available\n"
 
-        # Format open files context
-        if "open-files" in additional_context:
-            open_files = additional_context["open-files"]
-            context += "\n--- OPEN FILES ---\n"
-            if open_files and isinstance(open_files, list):
-                context += f"  {len(open_files)} files currently open:\n"
-                for file_info in open_files[:10]:  # Limit to 10 files
-                    path = file_info.get("path", "unknown")
-                    language = file_info.get("languageId", "unknown")
-                    is_dirty = file_info.get("isDirty", False)
-                    dirty_indicator = " (unsaved)" if is_dirty else ""
-                    context += f"    {path} ({language}){dirty_indicator}\n"
-                if len(open_files) > 10:
-                    context += (
-                        f"    ... and {len(open_files) - 10} more files\n"
-                    )
-            else:
-                context += "  No open files\n"
-
-        context += "=== END ADDITIONAL CONTEXT ===\n"
-    except Exception as e:
-        return str(additional_context)
-    return context
+def create_concise_context_prompt(
+    system_info=None,
+    active_file_context=None, 
+    open_files_context=None,
+    recent_edits_context=None,
+    workspace_path=None,
+    git_branch=None
+) -> str:
+    """Create a single concise context line for the system prompt"""
+    
+    context_parts = []
+    
+    # Add workspace info
+    workspace_ctx = format_workspace_context(workspace_path, git_branch)
+    if workspace_ctx:
+        context_parts.append(workspace_ctx)
+    
+    # Add system info
+    system_ctx = format_system_info_context(system_info)
+    if system_ctx:
+        context_parts.append(system_ctx)
+    
+    # Add active file
+    active_ctx = format_active_file_context(active_file_context)
+    if active_ctx:
+        context_parts.append(active_ctx)
+    
+    # Add open files
+    open_ctx = format_open_files_context(open_files_context)
+    if open_ctx:
+        context_parts.append(open_ctx)
+    
+    # Add recent edits
+    edits_ctx = format_recent_edits_context(recent_edits_context)
+    if edits_ctx:
+        context_parts.append(edits_ctx)
+    
+    if context_parts:
+        return f"\n<CONTEXT>\n{' | '.join(context_parts)}\n</CONTEXT>\n"
+    
+    return ""

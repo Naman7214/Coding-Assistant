@@ -104,7 +104,7 @@ class ChunkRepository:
                 chunk_dict = chunk.to_dict()
                 # Remove embedding from workspace collection (stored separately)
                 if "embedding" in chunk_dict:
-                    del chunk_dict["embedding"]
+                    chunk_dict["embedding"] = []
                 # Remove None values
                 chunk_dict = {
                     k: v for k, v in chunk_dict.items() if v is not None

@@ -59,40 +59,43 @@ function getEncryptionKey(): string {
 }
 
 /**
- * Encrypt a string using AES-256-CBC (simple and reliable)
+ * Simple deterministic encryption using XOR with persistent key
+ * Same input always produces same output
  */
 function encrypt(text: string): string {
-    const key = Buffer.from(getEncryptionKey(), 'hex');
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    const key = getEncryptionKey();
+    const keyBytes = Buffer.from(key, 'hex');
+    const textBytes = Buffer.from(text, 'utf8');
 
-    let encrypted = cipher.update(text, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
+    const encrypted = Buffer.alloc(textBytes.length);
 
-    // Combine iv + encrypted data
-    return iv.toString('hex') + ':' + encrypted;
+    // XOR each byte with cycling key
+    for (let i = 0; i < textBytes.length; i++) {
+        encrypted[i] = textBytes[i] ^ keyBytes[i % keyBytes.length];
+    }
+
+    // Return as hex string
+    return encrypted.toString('hex');
 }
 
 /**
- * Decrypt a string using AES-256-CBC
+ * Simple deterministic decryption using XOR with persistent key
+ * XOR is symmetric, so decryption is same as encryption
  */
-export function decrypt(encryptedText: string): string {
-    const key = Buffer.from(getEncryptionKey(), 'hex');
-    const parts = encryptedText.split(':');
+export function decrypt(encryptedHex: string): string {
+    const key = getEncryptionKey();
+    const keyBytes = Buffer.from(key, 'hex');
+    const encryptedBytes = Buffer.from(encryptedHex, 'hex');
 
-    if (parts.length !== 2) {
-        throw new Error('Invalid encrypted text format');
+    const decrypted = Buffer.alloc(encryptedBytes.length);
+
+    // XOR each byte with cycling key (same as encryption)
+    for (let i = 0; i < encryptedBytes.length; i++) {
+        decrypted[i] = encryptedBytes[i] ^ keyBytes[i % keyBytes.length];
     }
 
-    const iv = Buffer.from(parts[0], 'hex');
-    const encrypted = parts[1];
-
-    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
+    // Return as UTF-8 string
+    return decrypted.toString('utf8');
 }
 
 /**
@@ -102,7 +105,9 @@ export function decrypt(encryptedText: string): string {
 export function obfuscatePath(filePath: string, workspaceHash?: string): string {
     // Convert to absolute path if not already
     const absolutePath = path.resolve(filePath);
-    return encrypt(absolutePath);
+    // Normalize path separators for consistency across platforms
+    const normalizedPath = absolutePath.replace(/\\/g, '/');
+    return encrypt(normalizedPath);
 }
 
 /**
@@ -118,6 +123,13 @@ export function deobfuscatePath(obfuscatedPath: string): string {
 export function hashChunk(content: string, filePath: string, startLine: number, endLine: number): string {
     const chunkIdentifier = `${filePath}:${startLine}:${endLine}:${content}`;
     return hashString(chunkIdentifier);
+}
+
+/**
+ * Generate raw hash for chunk content only (used for embedding reuse)
+ */
+export function hashRawChunk(content: string): string {
+    return hashString(content);
 }
 
 /**

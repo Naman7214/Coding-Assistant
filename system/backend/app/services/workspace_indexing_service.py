@@ -127,12 +127,12 @@ class WorkspaceIndexingService:
         """Identify chunks and prepare them with embeddings from global collection or generate new ones"""
         try:
             # Get all incoming chunk hashes
-            incoming_hashes = [chunk.chunk_hash for chunk in incoming_chunks]
+            incoming_hashes_raw = [chunk.raw_chunk_hash for chunk in incoming_chunks]
 
             # Get existing embeddings from global collection
             existing_embeddings = (
                 await self.embedding_repository.get_embeddings_by_hashes(
-                    incoming_hashes
+                    incoming_hashes_raw
                 )
             )
 
@@ -141,11 +141,10 @@ class WorkspaceIndexingService:
             chunks_with_embeddings = []
 
             for chunk_data in incoming_chunks:
-                if chunk_data.chunk_hash in existing_embeddings:
-                    # Use existing embedding
+                if chunk_data.raw_chunk_hash in existing_embeddings:
                     chunk = Chunk(
                         chunk_hash=chunk_data.chunk_hash,
-                        content=chunk_data.content,
+                        raw_chunk_hash=chunk_data.raw_chunk_hash,
                         obfuscated_path=chunk_data.obfuscated_path,
                         start_line=chunk_data.start_line,
                         end_line=chunk_data.end_line,
@@ -153,7 +152,7 @@ class WorkspaceIndexingService:
                         chunk_type=chunk_data.chunk_type,
                         git_branch=chunk_data.git_branch,
                         token_count=chunk_data.token_count,
-                        embedding=existing_embeddings[chunk_data.chunk_hash],
+                        embedding=existing_embeddings[chunk_data.raw_chunk_hash],
                         created_at=datetime.now(),
                         updated_at=datetime.now(),
                     )
@@ -178,7 +177,7 @@ class WorkspaceIndexingService:
                 for chunk in new_chunks_with_embeddings:
                     embeddings_to_store.append(
                         {
-                            "chunk_hash": chunk.chunk_hash,
+                            "raw_chunk_hash": chunk.raw_chunk_hash,
                             "embedding": chunk.embedding,
                         }
                     )
@@ -277,7 +276,7 @@ class WorkspaceIndexingService:
             for i, chunk_data in enumerate(new_chunks):
                 chunk = Chunk(
                     chunk_hash=chunk_data.chunk_hash,
-                    content=chunk_data.content,
+                    raw_chunk_hash=chunk_data.raw_chunk_hash,
                     obfuscated_path=chunk_data.obfuscated_path,
                     start_line=chunk_data.start_line,
                     end_line=chunk_data.end_line,
@@ -408,8 +407,6 @@ class WorkspaceIndexingService:
             chunk_dicts = []
             for chunk in batch:
                 chunk_dict = chunk.to_dict()
-                # Add ID for pinecone
-                chunk_dict["_id"] = f"{chunk.chunk_hash}_{chunk.git_branch}"
                 chunk_dicts.append(chunk_dict)
 
             # Format for Pinecone upsert

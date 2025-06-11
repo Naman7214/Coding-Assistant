@@ -5,6 +5,8 @@ from datetime import datetime
 from logging import getLogger
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from models.schema.context_schema import RecentEditsContext
+
 import httpx
 from config.settings import settings
 from fastmcp import Client
@@ -66,7 +68,7 @@ class AnthropicStreamingAgent:
         self.active_file_context = active_file_context
         if active_file_context:
             logger.info(
-                f"Active file context updated: {active_file_context.get('relativePath', 'unknown')}"
+                f"Active file context updated: {active_file_context.get('file', 'unknown')}"
             )
         else:
             logger.info("Active file context cleared")
@@ -78,13 +80,13 @@ class AnthropicStreamingAgent:
             f"Open files context updated: {len(self.open_files_context)} files"
         )
 
-    def set_recent_edits_context(self, recent_edits_context: Optional[dict]):
+    def set_recent_edits_context(self, recent_edits_context: Optional[RecentEditsContext]):
         """Set recent edits context (always-send context)"""
         self.recent_edits_context = recent_edits_context
         if recent_edits_context:
-            summary = recent_edits_context.get("summary", {})
-            if summary.get("hasChanges", False):
-                total_files = summary.get("totalFiles", 0)
+            summary = recent_edits_context.summary
+            if summary.hasChanges:
+                total_files = summary.totalFiles
                 logger.info(
                     f"Recent edits context updated: {total_files} files changed in last 3 minutes"
                 )
@@ -98,7 +100,7 @@ class AnthropicStreamingAgent:
         system_info: Optional[dict] = None,
         active_file: Optional[dict] = None,
         open_files: Optional[list] = None,
-        recent_edits: Optional[dict] = None,
+        recent_edits: Optional[RecentEditsContext] = None,
         additional_context: Optional[dict] = None,
     ):
         """Update agent memory with enhanced context information"""

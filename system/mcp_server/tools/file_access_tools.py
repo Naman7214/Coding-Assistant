@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 async def read_file_tool(
     file_path: str,
     explanation: str,
-    start_line: Optional[int] = None,
-    end_line: Optional[int] = None,
+    start_line: Optional[int] = 0,
+    end_line: Optional[int] = 100,
     workspace_path: Optional[str] = None,
 ) -> Dict[str, Any]:
 

@@ -16,7 +16,7 @@ export {
 
 // Utility exports
 export {
-    combineHashes, hashChunk, hashFile, hashString, hashWorkspacePath,
+    combineHashes, hashChunk, hashFile, hashRawChunk, hashString, hashWorkspacePath,
     obfuscatePath
 } from './utils/hash';
 

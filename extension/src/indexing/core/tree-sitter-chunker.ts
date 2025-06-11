@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { CodeChunk } from '../types/chunk';
-import { hashChunk, obfuscatePath } from '../utils/hash';
+import { hashChunk, hashRawChunk, obfuscatePath } from '../utils/hash';
 
 // Import Chonkie CodeChunker
 import { CodeChunker } from 'chonkie';
@@ -123,7 +123,8 @@ export class TreeSitterChunker {
                 language: language,
                 chunk_type: chunkTypes,
                 git_branch: this.gitBranch,
-                token_count: chonkieChunk.tokenCount
+                token_count: chonkieChunk.tokenCount,
+                raw_chunk_hash: hashRawChunk(chonkieChunk.text)
             };
 
             chunks.push(chunk);
@@ -316,7 +317,8 @@ export class TreeSitterChunker {
                 language: language,
                 chunk_type: ['text'],
                 git_branch: this.gitBranch,
-                token_count: estimatedTokens
+                token_count: estimatedTokens,
+                raw_chunk_hash: hashRawChunk(chunkContent)
             };
 
             chunks.push(chunk);

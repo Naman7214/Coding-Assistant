@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from system.backend.app.controllers.workspace_indexing_controller import (
     WorkspaceIndexingController,
@@ -7,25 +7,25 @@ from system.backend.app.controllers.workspace_indexing_controller import (
 router = APIRouter()
 
 
-# @router.post("/index-workspace-chunks")
-# async def index_workspace_chunks(
-#     request: Request,
-#     workspace_indexing_controller: WorkspaceIndexingController = Depends(
-#         WorkspaceIndexingController
-#     ),
-# ):
-#     """
-#     Index workspace chunks from client.
+@router.post("/index-workspace-chunks")
+async def index_workspace_chunks(
+    request: Request,
+    workspace_indexing_controller: WorkspaceIndexingController = Depends(
+        WorkspaceIndexingController
+    ),
+):
+    """
+    Index workspace chunks from client.
 
-#     Expects:
-#     - Content-Type: application/json
-#     - Content-Encoding: gzip
-#     - Body: gzipped JSON payload with workspace_hash, chunks array, and timestamp
+    Expects:
+    - Content-Type: application/json
+    - Content-Encoding: gzip
+    - Body: gzipped JSON payload with workspace_hash, chunks array, and timestamp
 
-#     Returns:
-#     - Processing statistics and success/error information
-#     """
-#     return await workspace_indexing_controller.index_workspace_chunks(request)
+    Returns:
+    - Processing statistics and success/error information
+    """
+    return await workspace_indexing_controller.index_workspace_chunks(request)
 
 
 @router.get("/workspace-stats/{workspace_hash}")

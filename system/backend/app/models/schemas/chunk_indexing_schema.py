@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class ChunkData(BaseModel):
     chunk_hash: str = Field(..., description="Unique hash of the chunk")
+    raw_chunk_hash: str = Field(..., description="Hash of the chunk content")
     content: str = Field(..., description="The actual content of the chunk")
     obfuscated_path: str = Field(..., description="Obfuscated file path")
     start_line: int = Field(..., description="Starting line number")

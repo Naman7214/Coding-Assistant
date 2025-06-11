@@ -8,6 +8,7 @@ export interface CodeChunk {
     chunk_type: string[];    // ["function", "class", "import", "method", "variables"] etc - minimal semantic info as array
     git_branch: string;      // current git branch
     token_count: number;     // number of tokens in the chunk
+    raw_chunk_hash: string;  // hash of only the chunk content (used to reuse embeddings)
 }
 
 export interface MerkleTreeNode {

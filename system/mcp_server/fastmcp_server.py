@@ -40,54 +40,54 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(name="mcp-tool-server")
 
 
-@mcp.tool()
-async def grep_search(
-    query: Annotated[str, Field(description="The query to search for")],
-    case_sensitive: Annotated[
-        bool, Field(description="Whether to use case-sensitive search")
-    ],
-    include_pattern: Annotated[
-        Optional[str],
-        Field(
-            description="Glob pattern for files to include (e.g. '*.ts' for TypeScript files)"
-        ),
-    ],
-    exclude_pattern: Annotated[
-        Optional[str], Field(description="Glob pattern for files to exclude")
-    ],
-    explanation: Annotated[
-        Optional[str],
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ],
-    workspace_path: Annotated[
-        Optional[str], Field(description="The workspace path to search in")
-    ],
-) -> str:
-    """
-    This is best for finding exact text matches or regex patterns.
-    This is preferred over semantic search when we know the exact symbol/function name/etc. to search in some set of directories/file types.
-    Use this tool to run fast, exact regex searches over text files using the `ripgrep` engine.
-    To avoid overwhelming output, the results are capped at 50 matches.
-    Use the include or exclude patterns to filter the search scope by file type or specific paths.
-    """
-    logger.info(f"Executing grep search: {query}")
-    try:
-        result = await execute_grep_search_tool(
-            query=query,
-            case_sensitive=case_sensitive,
-            include_pattern=include_pattern,
-            exclude_pattern=exclude_pattern,
-            explanation=explanation,
-            workspace_path=workspace_path,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while executing grep_search: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def grep_search(
+#     query: Annotated[str, Field(description="The query to search for")],
+#     case_sensitive: Annotated[
+#         bool, Field(description="Whether to use case-sensitive search")
+#     ],
+#     include_pattern: Annotated[
+#         Optional[str],
+#         Field(
+#             description="Glob pattern for files to include (e.g. '*.ts' for TypeScript files)"
+#         ),
+#     ],
+#     exclude_pattern: Annotated[
+#         Optional[str], Field(description="Glob pattern for files to exclude")
+#     ],
+#     explanation: Annotated[
+#         Optional[str],
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ],
+#     workspace_path: Annotated[
+#         Optional[str], Field(description="The workspace path to search in")
+#     ],
+# ) -> str:
+#     """
+#     This is best for finding exact text matches or regex patterns.
+#     This is preferred over semantic search when we know the exact symbol/function name/etc. to search in some set of directories/file types.
+#     Use this tool to run fast, exact regex searches over text files using the `ripgrep` engine.
+#     To avoid overwhelming output, the results are capped at 50 matches.
+#     Use the include or exclude patterns to filter the search scope by file type or specific paths.
+#     """
+#     logger.info(f"Executing grep search: {query}")
+#     try:
+#         result = await execute_grep_search_tool(
+#             query=query,
+#             case_sensitive=case_sensitive,
+#             include_pattern=include_pattern,
+#             exclude_pattern=exclude_pattern,
+#             explanation=explanation,
+#             workspace_path=workspace_path,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while executing grep_search: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
 @mcp.tool()
@@ -180,363 +180,363 @@ async def run_terminal_command(
     return json_output
 
 
-@mcp.tool()
-async def delete_file(
-    path: Annotated[
-        str,
-        Field(
-            description="The absolute path to the file or directory that should be deleted."
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="A short explanation describing why this file or directory is being deleted and how it contributes to the overall task."
-        ),
-    ],
-    workspace_path: Optional[str] = None,
-) -> str:
-    """
-    Deletes a file or directory at the specified path with strict safety checks. Protected system or project-critical paths (e.g., node_modules, .env, src) and hidden/system files cannot be deleted. The tool returns the deletion status and an error message if the deletion is rejected or fails.
-    """
-    logger.info(f"Deleting file: {path}")
-    try:
-        result = await delete_file_tool(
-            path=path, explanation=explanation, workspace_path=workspace_path
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while deleting file: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def delete_file(
+#     path: Annotated[
+#         str,
+#         Field(
+#             description="The absolute path to the file or directory that should be deleted."
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="A short explanation describing why this file or directory is being deleted and how it contributes to the overall task."
+#         ),
+#     ],
+#     workspace_path: Optional[str] = None,
+# ) -> str:
+#     """
+#     Deletes a file or directory at the specified path with strict safety checks. Protected system or project-critical paths (e.g., node_modules, .env, src) and hidden/system files cannot be deleted. The tool returns the deletion status and an error message if the deletion is rejected or fails.
+#     """
+#     logger.info(f"Deleting file: {path}")
+#     try:
+#         result = await delete_file_tool(
+#             path=path, explanation=explanation, workspace_path=workspace_path
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while deleting file: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
-
-
-@mcp.tool()
-async def list_directory(
-    dir_path: Annotated[
-        str,
-        Field(
-            description="The path of the directory to list. If not provided, the current working directory is used."
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="A short explanation of why this directory listing is being performed and how it supports the overall goal."
-        ),
-    ],
-    workspace_path: Optional[str] = None,
-) -> str:
-    """
-    List the contents of a directory. The quick tool to use for discovery, before using more targeted tools like semantic search or file reading. Useful to try to understand the file structure before diving deeper into specific files. Can be used to explore the codebase. The tool returns a JSON array of file paths.
-    """
-    logger.info(f"Listing directory: {dir_path}")
-    try:
-        result = await list_directory_tool(
-            dir_path=dir_path,
-            explanation=explanation,
-            workspace_path=workspace_path,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while listing directory: {e}")
-        result = {"error": str(e)}
-
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def search_and_replace(
-    query: Annotated[
-        str, Field(description="The text or regex pattern to search for")
-    ],
-    replacement: Annotated[
-        str, Field(description="The text to replace the matched content with")
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ],
-    workspace_path: Annotated[
-        str, Field(description="The path to the workspace")
-    ],
-    options: Annotated[
-        Optional[Dict[str, Any]],
-        Field(description="Additional options for search and replace"),
-    ] = None,
-) -> str:
-    """
-    A tool for searching pattern in files and replace it with new text. this tool allows you to perform search and replace operation across files in codebase. you can specify file patterns to include/exclude and whether to do case-sensitive matching.
-    """
-    logger.info(f"Performing search and replace: {query} -> {replacement}")
-    try:
-        result = await search_and_replace_tool(
-            query=query,
-            replacement=replacement,
-            explanation=explanation,
-            workspace_path=workspace_path,
-            options=options,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while searching and replacing: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def list_directory(
+#     dir_path: Annotated[
+#         str,
+#         Field(
+#             description="The path of the directory to list. If not provided, the current working directory is used."
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="A short explanation of why this directory listing is being performed and how it supports the overall goal."
+#         ),
+#     ],
+#     workspace_path: Optional[str] = None,
+# ) -> str:
+#     """
+#     List the contents of a directory. The quick tool to use for discovery, before using more targeted tools like semantic search or file reading. Useful to try to understand the file structure before diving deeper into specific files. Can be used to explore the codebase. The tool returns a JSON array of file paths.
+#     """
+#     logger.info(f"Listing directory: {dir_path}")
+#     try:
+#         result = await list_directory_tool(
+#             dir_path=dir_path,
+#             explanation=explanation,
+#             workspace_path=workspace_path,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while listing directory: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def search_files(
-    query: Annotated[str, Field(description="Fuzzy filename to search for")],
-    explanation: Annotated[
-        str,
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ],
-    workspace_path: Annotated[
-        str, Field(description="The path to the workspace")
-    ],
-) -> str:
-    """
-    Fast file search based on fuzzy matching against file path. Use if you know part of the file path but don't know where it's located exactly. Response will be capped to 10 results. Make your query more specific if need to filter results further.
-    """
-    logger.info(f"Searching files with query: {query}")
-    try:
-        result = await search_files_tool(
-            query=query, explanation=explanation, workspace_path=workspace_path
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while searching files: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def search_and_replace(
+#     query: Annotated[
+#         str, Field(description="The text or regex pattern to search for")
+#     ],
+#     replacement: Annotated[
+#         str, Field(description="The text to replace the matched content with")
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ],
+#     workspace_path: Annotated[
+#         str, Field(description="The path to the workspace")
+#     ],
+#     options: Annotated[
+#         Optional[Dict[str, Any]],
+#         Field(description="Additional options for search and replace"),
+#     ] = None,
+# ) -> str:
+#     """
+#     A tool for searching pattern in files and replace it with new text. this tool allows you to perform search and replace operation across files in codebase. you can specify file patterns to include/exclude and whether to do case-sensitive matching.
+#     """
+#     logger.info(f"Performing search and replace: {query} -> {replacement}")
+#     try:
+#         result = await search_and_replace_tool(
+#             query=query,
+#             replacement=replacement,
+#             explanation=explanation,
+#             workspace_path=workspace_path,
+#             options=options,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while searching and replacing: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
-
-
-@mcp.tool()
-async def web_search(
-    search_term: Annotated[
-        str,
-        Field(
-            description="The search term to look up on the web. Be specific and include relevant keywords for better results. For technical queries, include version numbers or dates if relevant."
-        ),
-    ],
-    explanation: Annotated[
-        Optional[str],
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ] = None,
-    target_urls: Annotated[
-        Optional[List[str]],
-        Field(
-            description="Target urls to search on if this is given means this links will be directly used to search on."
-        ),
-    ] = None,
-) -> str:
-    """
-    Search the web for real-time information about any topic. Use this tool when you need up-to-date information that might not be available in your training data, or when you need to verify current facts. The search results will include relevant snippets and URLs from web pages. This is particularly useful for questions about current events, technology updates, or any topic that requires recent information. You can also specify target urls to search on. if target_urls are given then content of only those url will be used to search on.
-    """
-    logger.info(f"Performing web search: {search_term}")
-    try:
-        result = await web_search_tool(
-            search_term=search_term,
-            explanation=explanation,
-            target_urls=target_urls,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while searching the web: {e}")
-        result = {"error": str(e)}
-
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def codebase_search(
-    query: Annotated[
-        str,
-        Field(
-            description="The search query to find relevant code. You should reuse the user's exact query/most recent message with their wording unless there is a clear reason not to."
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ],
-    hashed_workspace_path: str,
-    git_branch: str = "default",
-) -> str:
-    """
-    Find snippets of code from the codebase most relevant to the search query.\\nThis is a semantic search tool, so the query should ask for something semantically matching what is needed.\\nIf it makes sense to only search in particular directories, please specify them in the target_directories field.\\nUnless there is a clear reason to use your own search query, please just reuse the user's exact query with their wording.\\nTheir exact wording/phrasing can often be helpful for the semantic search query. Keeping the same exact question format can also be helpful.
-    """
-    logger.info(f"Searching codebase with query: {query}")
-    try:
-        result = await codebase_search_tool(
-            query=query,
-            explanation=explanation,
-            hashed_workspace_path=hashed_workspace_path,
-            git_branch=git_branch,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while searching the codebase: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def search_files(
+#     query: Annotated[str, Field(description="Fuzzy filename to search for")],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ],
+#     workspace_path: Annotated[
+#         str, Field(description="The path to the workspace")
+#     ],
+# ) -> str:
+#     """
+#     Fast file search based on fuzzy matching against file path. Use if you know part of the file path but don't know where it's located exactly. Response will be capped to 10 results. Make your query more specific if need to filter results further.
+#     """
+#     logger.info(f"Searching files with query: {query}")
+#     try:
+#         result = await search_files_tool(
+#             query=query, explanation=explanation, workspace_path=workspace_path
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while searching files: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def edit_file(
-    target_file_path: Annotated[
-        str,
-        Field(
-            description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
-        ),
-    ],
-    code_snippet: Annotated[
-        str,
-        Field(
-            description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**. Instead, represent all unchanged code using the comment of the language you're editing in - example: `// ... existing code ...`"
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="A single sentence instruction describing what you are going to do for the sketched edit. This is used to assist the less intelligent model in applying the edit. Please use the first person to describe what you are going to do. Dont repeat what you have said previously in normal messages. And use it to disambiguate uncertainty in the edit."
-        ),
-    ],
-    workspace_path: Optional[str] = None,
-) -> str:
-    """
-    Use this tool to propose an edit to an existing file.\\n\\nThis will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.\\nWhen writing the edit, you should specify each edit in sequence, with the special comment `// ... existing code ...` to represent unchanged code in between edited lines.\\n\\nFor example:\\n\\n```\\n// ... existing code ...\\nFIRST_EDIT\\n// ... existing code ...\\nSECOND_EDIT\\n// ... existing code ...\\nTHIRD_EDIT\\n// ... existing code ...\\n```\\n\\nYou should still bias towards repeating as few lines of the original file as possible to convey the change.\\nBut, each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity.\\nDO NOT omit spans of pre-existing code (or comments) without using the `// ... existing code ...` comment to indicate its absence. If you omit the existing code comment, the model may inadvertently delete these lines.\\nMake sure it is clear what the edit should be, and where it should be applied.\\n\\nYou MUST provide the following required arguments: target_file_path (the file to edit), code_snippet (your proposed changes), and explanation (why you're making these changes). The target_file_path should always be specified first, followed by the code_snippet and explanation.
-    """
-    logger.info(f"Editing file: {target_file_path}")
-    try:
-        result = await edit_file_tool(
-            target_file_path=target_file_path,
-            code_snippet=code_snippet,
-            explanation=explanation,
-            workspace_path=workspace_path,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while editing file: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def web_search(
+#     search_term: Annotated[
+#         str,
+#         Field(
+#             description="The search term to look up on the web. Be specific and include relevant keywords for better results. For technical queries, include version numbers or dates if relevant."
+#         ),
+#     ],
+#     explanation: Annotated[
+#         Optional[str],
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ] = None,
+#     target_urls: Annotated[
+#         Optional[List[str]],
+#         Field(
+#             description="Target urls to search on if this is given means this links will be directly used to search on."
+#         ),
+#     ] = None,
+# ) -> str:
+#     """
+#     Search the web for real-time information about any topic. Use this tool when you need up-to-date information that might not be available in your training data, or when you need to verify current facts. The search results will include relevant snippets and URLs from web pages. This is particularly useful for questions about current events, technology updates, or any topic that requires recent information. You can also specify target urls to search on. if target_urls are given then content of only those url will be used to search on.
+#     """
+#     logger.info(f"Performing web search: {search_term}")
+#     try:
+#         result = await web_search_tool(
+#             search_term=search_term,
+#             explanation=explanation,
+#             target_urls=target_urls,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while searching the web: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def reapply(
-    target_file_path: Annotated[
-        str,
-        Field(
-            description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
-        ),
-    ],
-    code_snippet: Annotated[
-        str,
-        Field(
-            description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**. Instead, represent all unchanged code using the comment of the language you're editing in - example: `// ... existing code ...`"
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="A single sentence instruction describing what you are going to do for the sketched edit. This is used to assist the less intelligent model in applying the edit. Please use the first person to describe what you are going to do. Dont repeat what you have said previously in normal messages. And use it to disambiguate uncertainty in the edit."
-        ),
-    ],
-    workspace_path: Optional[str] = None,
-) -> str:
-    """
-    Calls a smarter model to apply the last edit to the specified file.\\nUse this tool immediately after the result of an edit_file tool call ONLY IF the diff is not what you expected, indicating the model applying the changes was not smart enough to follow your instructions.
-    """
-    logger.info(f"Reapplying changes to file: {target_file_path}")
-    try:
-        result = await reapply_tool(
-            target_file_path=target_file_path,
-            code_snippet=code_snippet,
-            explanation=explanation,
-            workspace_path=workspace_path,
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while reapplying changes: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def codebase_search(
+#     query: Annotated[
+#         str,
+#         Field(
+#             description="The search query to find relevant code. You should reuse the user's exact query/most recent message with their wording unless there is a clear reason not to."
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ],
+#     hashed_workspace_path: str,
+#     git_branch: str = "default",
+# ) -> str:
+#     """
+#     Find snippets of code from the codebase most relevant to the search query.\\nThis is a semantic search tool, so the query should ask for something semantically matching what is needed.\\nIf it makes sense to only search in particular directories, please specify them in the target_directories field.\\nUnless there is a clear reason to use your own search query, please just reuse the user's exact query with their wording.\\nTheir exact wording/phrasing can often be helpful for the semantic search query. Keeping the same exact question format can also be helpful.
+#     """
+#     logger.info(f"Searching codebase with query: {query}")
+#     try:
+#         result = await codebase_search_tool(
+#             query=query,
+#             explanation=explanation,
+#             hashed_workspace_path=hashed_workspace_path,
+#             git_branch=git_branch,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while searching the codebase: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def get_project_structure(
-    explanation: Annotated[
-        str,
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ],
-    max_depth: Annotated[
-        int,
-        Field(
-            description="Maximum depth to traverse the directory structure (default: 8)",
-            ge=1,
-            le=20,
-        ),
-    ] = 8,
-) -> str:
-    """
-    Returns the hierarchical project structure of the codebase up to a specified depth.
-    This tool provides a tree-like view of directories and files to help understand the overall organization of the project.
-    Useful for getting an overview of the codebase structure before diving into specific files or performing targeted searches.
-    """
-    logger.info(f"Getting project structure with max depth: {max_depth}")
-    try:
-        result = await get_project_structure_tool(max_depth=max_depth)
-    except Exception as e:
-        logger.error(f"Error occurred while getting project structure: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def edit_file(
+#     target_file_path: Annotated[
+#         str,
+#         Field(
+#             description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
+#         ),
+#     ],
+#     code_snippet: Annotated[
+#         str,
+#         Field(
+#             description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**. Instead, represent all unchanged code using the comment of the language you're editing in - example: `// ... existing code ...`"
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="A single sentence instruction describing what you are going to do for the sketched edit. This is used to assist the less intelligent model in applying the edit. Please use the first person to describe what you are going to do. Dont repeat what you have said previously in normal messages. And use it to disambiguate uncertainty in the edit."
+#         ),
+#     ],
+#     workspace_path: Optional[str] = None,
+# ) -> str:
+#     """
+#     Use this tool to propose an edit to an existing file.\\n\\nThis will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.\\nWhen writing the edit, you should specify each edit in sequence, with the special comment `// ... existing code ...` to represent unchanged code in between edited lines.\\n\\nFor example:\\n\\n```\\n// ... existing code ...\\nFIRST_EDIT\\n// ... existing code ...\\nSECOND_EDIT\\n// ... existing code ...\\nTHIRD_EDIT\\n// ... existing code ...\\n```\\n\\nYou should still bias towards repeating as few lines of the original file as possible to convey the change.\\nBut, each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity.\\nDO NOT omit spans of pre-existing code (or comments) without using the `// ... existing code ...` comment to indicate its absence. If you omit the existing code comment, the model may inadvertently delete these lines.\\nMake sure it is clear what the edit should be, and where it should be applied.\\n\\nYou MUST provide the following required arguments: target_file_path (the file to edit), code_snippet (your proposed changes), and explanation (why you're making these changes). The target_file_path should always be specified first, followed by the code_snippet and explanation.
+#     """
+#     logger.info(f"Editing file: {target_file_path}")
+#     try:
+#         result = await edit_file_tool(
+#             target_file_path=target_file_path,
+#             code_snippet=code_snippet,
+#             explanation=explanation,
+#             workspace_path=workspace_path,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while editing file: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def get_git_context(
-    explanation: Annotated[
-        str,
-        Field(
-            description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
-        ),
-    ],
-    include_changes: Annotated[
-        bool,
-        Field(
-            description="Whether to include diff information in the response (default: False)"
-        ),
-    ] = False,
-) -> str:
-    """
-    Returns git repository information including status, history, and optionally diff data.
-    This tool provides information about the current git repository state, recent commits, file changes,
-    and can optionally include detailed diff information when include_changes is False.
-    Useful for understanding the current state of version control and recent development activity.
-    """
-    logger.info(f"Getting git context with include_changes: {include_changes}")
-    try:
-        result = await get_git_context_tool(include_changes=include_changes)
-    except Exception as e:
-        logger.error(f"Error occurred while getting git context: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def reapply(
+#     target_file_path: Annotated[
+#         str,
+#         Field(
+#             description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
+#         ),
+#     ],
+#     code_snippet: Annotated[
+#         str,
+#         Field(
+#             description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**. Instead, represent all unchanged code using the comment of the language you're editing in - example: `// ... existing code ...`"
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="A single sentence instruction describing what you are going to do for the sketched edit. This is used to assist the less intelligent model in applying the edit. Please use the first person to describe what you are going to do. Dont repeat what you have said previously in normal messages. And use it to disambiguate uncertainty in the edit."
+#         ),
+#     ],
+#     workspace_path: Optional[str] = None,
+# ) -> str:
+#     """
+#     Calls a smarter model to apply the last edit to the specified file.\\nUse this tool immediately after the result of an edit_file tool call ONLY IF the diff is not what you expected, indicating the model applying the changes was not smart enough to follow your instructions.
+#     """
+#     logger.info(f"Reapplying changes to file: {target_file_path}")
+#     try:
+#         result = await reapply_tool(
+#             target_file_path=target_file_path,
+#             code_snippet=code_snippet,
+#             explanation=explanation,
+#             workspace_path=workspace_path,
+#         )
+#     except Exception as e:
+#         logger.error(f"Error occurred while reapplying changes: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
+
+
+# @mcp.tool()
+# async def get_project_structure(
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ],
+#     max_depth: Annotated[
+#         int,
+#         Field(
+#             description="Maximum depth to traverse the directory structure (default: 8)",
+#             ge=1,
+#             le=20,
+#         ),
+#     ] = 8,
+# ) -> str:
+#     """
+#     Returns the hierarchical project structure of the codebase up to a specified depth.
+#     This tool provides a tree-like view of directories and files to help understand the overall organization of the project.
+#     Useful for getting an overview of the codebase structure before diving into specific files or performing targeted searches.
+#     """
+#     logger.info(f"Getting project structure with max depth: {max_depth}")
+#     try:
+#         result = await get_project_structure_tool(max_depth=max_depth)
+#     except Exception as e:
+#         logger.error(f"Error occurred while getting project structure: {e}")
+#         result = {"error": str(e)}
+
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
+
+
+# @mcp.tool()
+# async def get_git_context(
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="One sentence explanation as to why this tool is being used, and how it contributes to the goal."
+#         ),
+#     ],
+#     include_changes: Annotated[
+#         bool,
+#         Field(
+#             description="Whether to include diff information in the response (default: False)"
+#         ),
+#     ] = False,
+# ) -> str:
+#     """
+#     Returns git repository information including status, history, and optionally diff data.
+#     This tool provides information about the current git repository state, recent commits, file changes,
+#     and can optionally include detailed diff information when include_changes is False.
+#     Useful for understanding the current state of version control and recent development activity.
+#     """
+#     logger.info(f"Getting git context with include_changes: {include_changes}")
+#     try:
+#         result = await get_git_context_tool(include_changes=include_changes)
+#     except Exception as e:
+#         logger.error(f"Error occurred while getting git context: {e}")
+#         result = {"error": str(e)}
+
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
 @click.command()
