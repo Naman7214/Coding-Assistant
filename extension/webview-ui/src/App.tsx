@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
 import ContextAwareInput from './components/ContextAwareInput';
 import ContextChips from './components/ContextChips';
+import MarkdownRenderer from './components/MarkdownRenderer';
 import { ContextChip } from './types/contextMentions';
 
 // Declare vscode API
@@ -43,6 +44,7 @@ const App: React.FC = () => {
     const [permissionTimeLeft, setPermissionTimeLeft] = useState<number>(0);
     const permissionTimerRef = useRef<NodeJS.Timeout | null>(null);
     const [isStreaming, setIsStreaming] = useState(false);
+    const [isStopped, setIsStopped] = useState(false);
     const [pendingQuery, setPendingQuery] = useState('');
     const [attachedContexts, setAttachedContexts] = useState<ContextChip[]>([]);
     const [contextSuggestions, setContextSuggestions] = useState<any[]>([]);
@@ -129,6 +131,12 @@ const App: React.FC = () => {
             const message = event.data;
             console.log('[UI] Received event:', message.command, 'content length:', message.content?.length || 0, 'full message:', message);
 
+            // If conversation was stopped by user, ignore all streaming messages
+            if (isStopped && ['thinking', 'toolSelection', 'tool_selection', 'toolExecution', 'tool_execution', 'toolResult', 'tool_result', 'responseUpdate', 'assistant_response'].includes(message.command)) {
+                console.log('[UI] Ignoring message due to user stop:', message.command);
+                return;
+            }
+
             switch (message.command) {
                 case 'streamStart':
                     handleStreamStart(message);
@@ -196,7 +204,7 @@ const App: React.FC = () => {
                 clearInterval(permissionTimerRef.current);
             }
         };
-    }, [handleContextSelected]);
+    }, [handleContextSelected, isStopped]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -211,11 +219,13 @@ const App: React.FC = () => {
         if (!queryText || queryText.trim().length === 0) {
             console.log('[UI] Skipping empty query in stream start');
             setIsStreaming(true);
+            setIsStopped(false);
             setPermissionRequest(null);
             return;
         }
 
         setIsStreaming(true);
+        setIsStopped(false);
         setPermissionRequest(null);
 
         setItems(prev => {
@@ -427,6 +437,7 @@ const App: React.FC = () => {
         });
 
         setIsStreaming(false);
+        setIsStopped(false);
         setPendingQuery('');
     };
 
@@ -455,6 +466,7 @@ const App: React.FC = () => {
         });
 
         setIsStreaming(false);
+        setIsStopped(false);
         setPendingQuery('');
     };
 
@@ -590,6 +602,51 @@ const App: React.FC = () => {
         }
     };
 
+    const handleStop = () => {
+        console.log('[UI] Stopping conversation - immediate stop requested');
+
+        // Set stopped flag FIRST to prevent processing any more messages
+        setIsStopped(true);
+
+        // Send stop command to extension
+        vscode.postMessage({
+            command: 'stopConversation'
+        });
+
+        // Mark all items as complete immediately
+        setItems(prev => {
+            const newItems = [...prev];
+            newItems.forEach(item => {
+                if (item.isStreaming) {
+                    item.isStreaming = false;
+                    // Add a "stopped" indicator for incomplete items
+                    if (item.type === 'thinking' || item.type === 'tool' || item.type === 'response') {
+                        if (item.type === 'response' && item.content.trim()) {
+                            item.content += '\n\n[Stopped by user]';
+                        } else if (item.type === 'thinking' && item.content.trim()) {
+                            item.content += '\n\n[Stopped by user]';
+                        }
+                    }
+                }
+            });
+            return newItems;
+        });
+
+        // Reset streaming state immediately
+        setIsStreaming(false);
+        setPendingQuery('');
+
+        // Clear any pending permission requests
+        if (permissionTimerRef.current) {
+            clearInterval(permissionTimerRef.current);
+            permissionTimerRef.current = null;
+        }
+        setPermissionRequest(null);
+        setPermissionTimeLeft(0);
+
+        console.log('[UI] Conversation stopped immediately');
+    };
+
     const renderItem = (item: ConversationItem) => {
         const { type, content, isStreaming, metadata } = item;
 
@@ -641,7 +698,7 @@ const App: React.FC = () => {
                 return (
                     <div key={item.id} className={`conversation-item response-item ${metadata?.isError ? 'error' : ''} ${isStreaming ? 'streaming' : ''}`}>
                         <div className="item-content response-content">
-                            {content}
+                            <MarkdownRenderer markdown={content} />
                             {isStreaming && <span className="streaming-cursor">|</span>}
                         </div>
                     </div>
@@ -699,10 +756,10 @@ const App: React.FC = () => {
 
                     <button
                         className="send-button"
-                        onClick={handleSubmit}
-                        disabled={!query.trim() || isStreaming}
+                        onClick={isStreaming ? handleStop : handleSubmit}
+                        disabled={!isStreaming && !query.trim()}
                     >
-                        {isStreaming ? '⏳' : '➤'}
+                        {isStreaming ? '⏹️' : '➤'}
                     </button>
                 </div>
             </div>

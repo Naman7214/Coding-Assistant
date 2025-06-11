@@ -97,10 +97,10 @@ class GrepSearchUsecase:
                 "results": (
                     "\n".join(matches) if matches else "No matches found"
                 ),
+                "currentDirectory": result.get("currentDirectory", "Not Found"),
                 "count": str(match_count),
                 "status": "success",
             }
-
         except Exception as e:
             await self.error_repo.insert_error(
                 Error(

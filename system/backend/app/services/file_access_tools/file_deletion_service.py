@@ -117,6 +117,9 @@ class FileDeletionService:
                 )
                 return {
                     "success": False,
+                    "current_directory": delete_result.get(
+                        "currentDirectory", "Not Found"
+                    ),
                     "message": f"Failed to delete {path}: {error_msg}",
                     "deleted": False,
                 }

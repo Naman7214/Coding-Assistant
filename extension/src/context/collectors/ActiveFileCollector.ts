@@ -158,6 +158,16 @@ export class ActiveFileCollector extends BaseCollector {
             lineBelowContent = lineBelow.text;
         }
 
+        // Check if selection spans more than 3 lines and get selected content
+        let selectedContent: string | undefined;
+        const selectionLineSpan = selection.end.line - selection.start.line + 1;
+        if (selectionLineSpan > 3) {
+            // Limit to max 50 lines
+            const endLine = Math.min(selection.end.line, selection.start.line + 49);
+            const range = new vscode.Range(selection.start.line, 0, endLine, document.lineAt(endLine).text.length);
+            selectedContent = document.getText(range);
+        }
+
         return {
             line: position.line + 1, // VSCode uses 0-indexed, display uses 1-indexed
             character: position.character + 1, // VSCode uses 0-indexed, display uses 1-indexed
@@ -175,7 +185,8 @@ export class ActiveFileCollector extends BaseCollector {
                 current: currentLineContent,
                 above: lineAboveContent,
                 below: lineBelowContent
-            }
+            },
+            selectedContent
         };
     }
 

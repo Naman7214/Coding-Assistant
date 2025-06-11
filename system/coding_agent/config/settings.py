@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     ANTHROPIC_MAX_TOOL_CALL_DEPTH: int = 100
     MCP_BASE_URL: str = "http://0.0.0.0:8001/sse"
 
+    # OpenAI API for summarization
+    OPENAI_API_KEY: str
+    OPENAI_MODEL: str = "gpt-4.1-mini-2025-04-14"
+
     MONGODB_URL: str = "mongodb://localhost:27017"
     MONGODB_DB_NAME: str = "code_assistant"
     LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"

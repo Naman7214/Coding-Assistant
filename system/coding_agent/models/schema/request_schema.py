@@ -1,10 +1,10 @@
 from typing import Any, Dict, List, Optional
 
 from models.schema.context_schema import (
-    ActiveFileContext, 
-    OpenFileInfo, 
-    RecentEditsContext, 
-    SystemInfo
+    ActiveFileContext,
+    OpenFileInfo,
+    RecentEditsContext,
+    SystemInfo,
 )
 from pydantic import BaseModel
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 class ContextMention(BaseModel):
     type: str
     value: str
-    data: Optional[Dict[str, Any]] = None
+    data: Any = None
 
 
 class QueryRequest(BaseModel):

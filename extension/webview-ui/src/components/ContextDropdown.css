@@ -98,6 +98,9 @@
 }
 
 .context-item-type {
+    display: none !important;
+    /* Completely hide type badges */
+    /*
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
@@ -109,6 +112,7 @@
     flex-shrink: 0;
     align-self: flex-start;
     margin-top: 1px;
+    */
 }
 
 .context-dropdown-item.selected .context-item-type {

@@ -71,6 +71,7 @@ export interface ActiveFileCollectorData {
             above?: string;
             below?: string;
         };
+        selectedContent?: string;
     };
     viewport: {
         visibleRanges: Array<Array<{

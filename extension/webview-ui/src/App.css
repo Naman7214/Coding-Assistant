@@ -531,3 +531,131 @@
     border-color: var(--vscode-focusBorder);
     transition: border-color 0.2s ease;
 }
+
+/* Markdown Content Integration */
+.response-content .markdown-content {
+    margin: 0;
+    padding: 0;
+    line-height: 1.5;
+}
+
+.response-content .markdown-content>*:first-child {
+    margin-top: 0 !important;
+}
+
+.response-content .markdown-content>*:last-child {
+    margin-bottom: 0 !important;
+}
+
+/* Override markdown styles to match VSCode theme */
+.response-content .markdown-content h1,
+.response-content .markdown-content h2,
+.response-content .markdown-content h3,
+.response-content .markdown-content h4,
+.response-content .markdown-content h5,
+.response-content .markdown-content h6 {
+    color: var(--vscode-editor-foreground);
+    margin: 12px 0 6px 0;
+    font-weight: 600;
+}
+
+.response-content .markdown-content p {
+    margin: 4px 0;
+    line-height: 1.5;
+}
+
+.response-content .markdown-content ul,
+.response-content .markdown-content ol {
+    margin: 6px 0;
+    padding-left: 24px;
+}
+
+.response-content .markdown-content li {
+    margin: 2px 0;
+}
+
+.response-content .markdown-content blockquote {
+    margin: 8px 0;
+    padding: 6px 12px;
+    border-left: 4px solid var(--vscode-focusBorder);
+    background-color: rgba(var(--vscode-textCodeBlock-background), 0.3);
+    font-style: italic;
+}
+
+.response-content .markdown-content code:not(pre code) {
+    background-color: var(--vscode-textCodeBlock-background);
+    color: var(--vscode-textPreformat-foreground);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 0.9em;
+}
+
+.response-content .markdown-content .code-block {
+    margin: 8px 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: var(--vscode-textCodeBlock-background);
+}
+
+.response-content .markdown-content .language-label {
+    background-color: rgba(0, 0, 0, 0.2);
+    color: var(--vscode-editor-foreground);
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.response-content .markdown-content .copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.response-content .markdown-content .copy-button:hover {
+    opacity: 1;
+    background: var(--vscode-button-hoverBackground);
+}
+
+.response-content .markdown-content table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    width: 100%;
+}
+
+.response-content .markdown-content th,
+.response-content .markdown-content td {
+    border: 1px solid var(--vscode-input-border);
+    padding: 6px 10px;
+    text-align: left;
+}
+
+.response-content .markdown-content th {
+    background-color: rgba(var(--vscode-textCodeBlock-background), 0.5);
+    font-weight: 600;
+}
+
+.response-content .markdown-content a {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+}
+
+.response-content .markdown-content a:hover {
+    text-decoration: underline;
+}
+
+/* Ensure streaming cursor appears after markdown content */
+.response-item.streaming .streaming-cursor {
+    display: inline-block;
+    margin-left: 4px;
+}

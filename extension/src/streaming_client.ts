@@ -54,6 +54,7 @@ interface QueryRequest {
     active_file_context?: ActiveFileContext;
     open_files_context?: any[];
     context_mentions?: string[];
+    recent_edits_context?: any;
 }
 
 interface ThinkingState {

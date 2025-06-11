@@ -1,7 +1,6 @@
 import asyncio
 import json
 import time
-import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import uvicorn
@@ -9,12 +8,17 @@ from agent_with_stream import AnthropicStreamingAgent
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from models.schema.context_schema import ActiveFileContext, RecentEditsContext, SystemInfo
+from models.schema.context_schema import (
+    ActiveFileContext,
+    RecentEditsContext,
+    SystemInfo,
+)
 from models.schema.request_schema import (
     PermissionResponse,
     QueryRequest,
     StreamEvent,
 )
+from utils.context_formatter import format_user_query
 
 # Create FastAPI app
 app = FastAPI(title="Agent True Streaming API")
@@ -79,25 +83,6 @@ async def stream_agent_response(
     """Stream the agent's response with enhanced context system"""
     global agent_instance
 
-    print(f"🚀 Enhanced stream request received:")
-    print(f"   Query: {query[:100]}...")
-    print(f"   Workspace Path: {workspace_path}")
-    print(f"   Hashed Workspace Path: {hashed_workspace_path}")
-    print(f"   Git Branch: {git_branch}")
-    print(f"   Context Mentions: {context_mentions}")
-    if system_info:
-        print(f"   System: {system_info.platform} {system_info.osVersion}")
-    if open_files_context:
-        print(f"   Open Files: {len(open_files_context)} files")
-    if recent_edits_context:
-        summary = recent_edits_context.summary
-        if summary.hasChanges:
-            print(
-                f"   Recent Edits: {summary.totalFiles} files changed"
-            )
-        else:
-            print(f"   Recent Edits: No recent changes")
-
     # Check if agent is initialized
     if not agent_instance or not agent_instance.client:
         try:
@@ -121,6 +106,10 @@ async def stream_agent_response(
             )
             return
 
+    # Store workspace context for tool injection
+    agent_instance.hashed_workspace_path = hashed_workspace_path
+    agent_instance.git_branch = git_branch
+
     # Update agent with always-send context
     if system_info:
         agent_instance.set_system_info(system_info.model_dump())
@@ -132,6 +121,8 @@ async def stream_agent_response(
         agent_instance.set_open_files_context(open_files_context)
     if recent_edits_context:
         agent_instance.set_recent_edits_context(recent_edits_context)
+    if context_mentions:
+        agent_instance.set_context_mentions(context_mentions)
 
     try:
         yield create_stream_event(
@@ -150,17 +141,14 @@ async def stream_agent_response(
         )
 
         # Update agent memory with enhanced context
-        await agent_instance.update_context_memory(
-            system_info=system_info.model_dump() if system_info else None,
-            active_file=(
-                active_file_context.model_dump()
-                if active_file_context
-                else None
-            ),
-            open_files=open_files_context,
-            recent_edits=recent_edits_context,
+        await agent_instance.update_context_memory()
+        query = format_user_query(
+            query,
+            active_file_context,
+            open_files_context,
+            recent_edits_context,
+            context_mentions,
         )
-
         # Add the query to agent memory
         agent_instance.agent_memory.add_user_message(query)
 
@@ -188,18 +176,15 @@ async def stream_agent_response(
 async def stream_query(request: QueryRequest):
     """Stream the agent's enhanced response with context system"""
     try:
-
-        print(f"🚀 Enhanced /stream endpoint called:")
-        print(f"   Query: {request.query[:100]}...")
-        print(f"   Hashed Workspace Path: {request.hashed_workspace_path}")
-        print(f"   Git Branch: {request.git_branch}")
-        print(f"   Context Mentions: {request.context_mentions}")
-        print(f"   System Info: {bool(request.system_info)}")
-        print(f"   Active File: {bool(request.active_file_context)}")
-        print(
-            f"   Open Files: {len(request.open_files_context) if request.open_files_context else 0} files"
-        )
-        print(f"   Recent Edits: {bool(request.recent_edits_context)}")
+        print(f"Query : {request.query}")
+        print(f"Workspace Path: {request.workspace_path}")
+        print(f"Hashed Workspace Path: {request.hashed_workspace_path}")
+        print(f"Git Branch: {request.git_branch}")
+        print(f"Context Mentions: {request.context_mentions}")
+        print(f"System Info: {request.system_info}")
+        print(f"Active File: {request.active_file_context}")
+        print(f"Open Files: {request.open_files_context}")
+        print(f"Recent Edits: {request.recent_edits_context}")
 
         return StreamingResponse(
             stream_agent_response(
@@ -271,125 +256,12 @@ async def health_check():
         }
 
 
-@app.post("/reset")
-async def reset_agent_endpoint():
-    """API endpoint to reset the agent in case of errors"""
-    try:
-        await reset_agent()
-        return {"status": "success", "message": "Agent reset successfully"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to reset agent: {str(e)}"
-        )
-
-
-@app.post("/sanitize")
-async def sanitize_conversation():
-    """API endpoint to sanitize the conversation history to remove duplicate tool IDs"""
-    global agent_instance
-    if not agent_instance:
-        raise HTTPException(status_code=400, detail="Agent not initialized")
-
-    try:
-        original_length = len(agent_instance.agent_memory.full_history)
-        fixed = sanitize_conversation_history(
-            agent_instance.agent_memory.full_history
-        )
-        agent_instance.agent_memory.full_history = fixed
-        return {
-            "status": "success",
-            "message": f"Conversation sanitized. Original length: {original_length}, New length: {len(fixed)}",
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to sanitize conversation: {str(e)}"
-        )
-
-
-def sanitize_conversation_history(history):
-    """Remove duplicate tool IDs from conversation history"""
-    # Track tool IDs we've seen
-    seen_tool_ids = set()
-    sanitized_history = []
-
-    for message in history:
-        # Handle system and user messages normally
-        if message.get("role") in ["system", "user"]:
-            sanitized_history.append(message)
-            continue
-
-        # For assistant messages, check content blocks for tool_use blocks
-        if message.get("role") == "assistant" and "content" in message:
-            content_blocks = []
-            for block in message.get("content", []):
-                # If it's a tool_use block, check for duplicate ID
-                if block.get("type") == "tool_use" and "id" in block:
-                    tool_id = block.get("id")
-                    if tool_id in seen_tool_ids:
-                        # Generate a new unique ID
-                        new_id = f"fixed_tool_{uuid.uuid4().hex[:8]}"
-                        print(
-                            f"Fixing duplicate tool ID: {tool_id} -> {new_id}"
-                        )
-                        block = (
-                            block.copy()
-                        )  # Create a copy to avoid modifying the original
-                        block["id"] = new_id
-                    seen_tool_ids.add(block.get("id"))
-                content_blocks.append(block)
-
-            # Create a new message with fixed content blocks
-            fixed_message = message.copy()
-            fixed_message["content"] = content_blocks
-            sanitized_history.append(fixed_message)
-        else:
-            # Handle other message types normally
-            sanitized_history.append(message)
-
-    return sanitized_history
-
-
 @app.get("/")
 async def root():
-    return {"message": "Agent TRUE Streaming API is running", "streaming": True}
-
-
-async def reset_agent():
-    """Reset the agent completely when conversation errors occur"""
-    global agent_instance
-
-    # Store the current workspace path and system info before cleanup
-    current_workspace_path = (
-        agent_instance.workspace_path if agent_instance else None
-    )
-    current_system_info = agent_instance.system_info if agent_instance else None
-
-    # Clean up existing agent if any
-    if agent_instance:
-        try:
-            await agent_instance.cleanup()
-        except Exception as e:
-            print(f"Error cleaning up agent: {e}")
-
-    # Create a fresh agent instance
-    try:
-        agent_instance = AnthropicStreamingAgent()
-        server_url = "http://localhost:8001/sse"
-        transport_type = "sse"
-        # Use the preserved workspace path and system info
-        success = await agent_instance.initialize_session(
-            server_url,
-            transport_type,
-            current_workspace_path,
-            current_system_info,
-        )
-        if success:
-            print("✅ Agent reset successfully with preserved system info")
-        else:
-            print("❌ Failed to reset agent")
-    except Exception as e:
-        print(f"❌ Error creating new agent instance: {e}")
-        agent_instance = None
+    return {
+        "message": "Agent TRUE Streaming API with Enhanced Memory is running",
+        "streaming": True,
+    }
 
 
 async def process_enhanced_streaming_tool_calls(
@@ -419,7 +291,7 @@ async def process_enhanced_streaming_tool_calls(
     thinking_content = ""
     text_content = ""
     tool_calls = []
-    
+
     # Track tool preparation state to prevent duplicate events
     tool_preparation_sent = {}  # Track which tools have sent preparation events
 
@@ -474,15 +346,17 @@ async def process_enhanced_streaming_tool_calls(
             elif delta_type == "input_json_delta":
                 # Tool input is being streamed - only send preparation event once per tool
                 content_block_index = data.get("index", 0)
-                
+
                 # Only send the preparation event once per tool block
                 if content_block_index not in tool_preparation_sent:
                     tool_preparation_sent[content_block_index] = True
-                    print(f"Enhanced: Tool preparation started for block {content_block_index}")
+                    print(
+                        f"Enhanced: Tool preparation started for block {content_block_index}"
+                    )
                     yield create_stream_event(
-                        "tool_execution", 
-                        "Preparing tool arguments...", 
-                        {"status": "preparing"}
+                        "tool_execution",
+                        "Preparing tool arguments...",
+                        {"status": "preparing"},
                     )
                 # Note: We silently accumulate the JSON input without sending events for each delta
 
@@ -580,7 +454,7 @@ async def process_enhanced_streaming_tool_calls(
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
                     "is_background": is_background,
-                    "timeout_seconds": 300,  # 5 minutes
+                    "timeout_seconds": 60,  # 5 minutes
                     "friendly_name": friendly_name,
                 },
             )
@@ -588,7 +462,7 @@ async def process_enhanced_streaming_tool_calls(
             try:
                 # Wait for permission response with 5-minute timeout
                 permission_granted = await asyncio.wait_for(
-                    permission_future, timeout=300.0  # 5 minutes
+                    permission_future, timeout=60.0  # 5 minutes
                 )
 
                 if not permission_granted:
@@ -623,7 +497,7 @@ async def process_enhanced_streaming_tool_calls(
                         "timeout": True,
                     },
                 )
-                
+
                 yield create_stream_event(
                     "tool_result",
                     "Permission request timed out after 5 minutes. Command was not executed.",
@@ -640,7 +514,8 @@ async def process_enhanced_streaming_tool_calls(
                     tool_call, "Permission request timed out after 5 minutes"
                 )
                 agent_instance.agent_memory.add_tool_result(
-                    tool_use_id, "Permission request timed out after 5 minutes. Command was not executed."
+                    tool_use_id,
+                    "Permission request timed out after 5 minutes. Command was not executed.",
                 )
                 continue
             finally:
@@ -670,6 +545,30 @@ async def process_enhanced_streaming_tool_calls(
                     print(
                         f"✅ Enhanced: Injected workspace_path for {tool_name}"
                     )
+
+            # Enhanced workspace context injection for codebase_search_tool
+            if tool_name == "codebase_search_tool":
+                if (
+                    hasattr(agent_instance, "hashed_workspace_path")
+                    and agent_instance.hashed_workspace_path
+                ):
+                    if "hashed_workspace_path" not in tool_input:
+                        tool_input["hashed_workspace_path"] = (
+                            agent_instance.hashed_workspace_path
+                        )
+                        print(
+                            f"✅ Enhanced: Injected hashed_workspace_path for {tool_name}"
+                        )
+
+                if (
+                    hasattr(agent_instance, "git_branch")
+                    and agent_instance.git_branch
+                ):
+                    if "git_branch" not in tool_input:
+                        tool_input["git_branch"] = agent_instance.git_branch
+                        print(
+                            f"✅ Enhanced: Injected git_branch for {tool_name}"
+                        )
 
             if tool_name == "list_directory" and agent_instance.workspace_path:
                 if tool_input.get("dir_path") == ".":

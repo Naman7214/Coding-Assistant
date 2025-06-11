@@ -168,7 +168,7 @@ const ContextAwareInput: React.FC<ContextAwareInputProps> = ({
             } else {
                 const filteredSuggestions = defaultSuggestions.filter(suggestion =>
                     suggestion.label.toLowerCase().includes(query.toLowerCase()) ||
-                    suggestion.type.toLowerCase().includes(query.toLowerCase())
+                    suggestion.description.toLowerCase().includes(query.toLowerCase())
                 );
                 setSuggestions(filteredSuggestions);
             }

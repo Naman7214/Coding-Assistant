@@ -5,21 +5,14 @@ from datetime import datetime
 from logging import getLogger
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from models.schema.context_schema import RecentEditsContext
-
 import httpx
 from config.settings import settings
 from fastmcp import Client
 from memory.agent_memory import AgentMemory
+from models.schema.context_schema import RecentEditsContext
 from motor.motor_asyncio import AsyncIOMotorClient
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
-from utils.context_formatter import (
-    format_active_file_context,
-    format_additional_context,
-    format_open_files_context,
-    format_recent_edits_context,
-    format_system_info_context,
-)
+from utils.context_formatter import format_system_info_context
 
 logger = getLogger(__name__)
 
@@ -30,7 +23,7 @@ class AnthropicStreamingAgent:
 
     def __init__(self, model_name="claude-sonnet-4-20250514"):
         self.model_name = model_name
-        self.agent_memory = AgentMemory()
+        self.agent_memory = AgentMemory(model_name)
         self.client = None
         self.anthropic_tools = []
         self.workspace_path = None
@@ -39,6 +32,7 @@ class AnthropicStreamingAgent:
         self.open_files_context = []  # New: store open files context
         self.recent_edits_context = None  # New: store recent edits context
         self.additional_context = {}  # New: store on-demand context
+        self.context_mentions = []  # New: store context mentions
         self.timeout = httpx.Timeout(
             connect=60.0,
             read=300.0,
@@ -80,7 +74,16 @@ class AnthropicStreamingAgent:
             f"Open files context updated: {len(self.open_files_context)} files"
         )
 
-    def set_recent_edits_context(self, recent_edits_context: Optional[RecentEditsContext]):
+    def set_context_mentions(self, context_mentions: Optional[list]):
+        """Set context mentions (always-send context)"""
+        self.context_mentions = context_mentions or []
+        logger.info(
+            f"Context mentions updated: {len(self.context_mentions)} mentions"
+        )
+
+    def set_recent_edits_context(
+        self, recent_edits_context: Optional[RecentEditsContext]
+    ):
         """Set recent edits context (always-send context)"""
         self.recent_edits_context = recent_edits_context
         if recent_edits_context:
@@ -97,93 +100,23 @@ class AnthropicStreamingAgent:
 
     async def update_context_memory(
         self,
-        system_info: Optional[dict] = None,
-        active_file: Optional[dict] = None,
-        open_files: Optional[list] = None,
-        recent_edits: Optional[RecentEditsContext] = None,
-        additional_context: Optional[dict] = None,
     ):
         """Update agent memory with enhanced context information"""
         try:
-            # Update internal context storage
-            if system_info:
-                self.system_info = system_info
-            if active_file is not None:  # Explicit None check to allow clearing
-                self.active_file_context = active_file
-            if open_files is not None:  # Explicit None check to allow clearing
-                self.open_files_context = open_files
-            if (
-                recent_edits is not None
-            ):  # Explicit None check to allow clearing
-                self.recent_edits_context = recent_edits
-            if additional_context:
-                self.additional_context.update(additional_context)
-
-            # Create enhanced system prompt with all context
-            enhanced_system_prompt = await self._create_enhanced_system_prompt()
-
-            # Update agent memory with enhanced system prompt
-            self.agent_memory.initialize_with_system_message(
-                enhanced_system_prompt
+            # Format system info context
+            system_info_context = format_system_info_context(
+                system_info=self.system_info
             )
-
+            system_prompt = CODING_AGENT_SYSTEM_PROMPT.format(
+                system_info_context=system_info_context
+            )
+            # Update agent memory with enhanced cached system prompt
+            self.agent_memory.initialize_with_system_message(system_prompt)
             logger.info("✅ Agent memory updated with enhanced context")
 
         except Exception as e:
             logger.error(f"Failed to update context memory: {e}")
             # Continue with basic operation even if context update fails
-
-    async def _create_enhanced_system_prompt(self) -> str:
-        """Create enhanced system prompt with all available context"""
-        try:
-            # Start with base system prompt
-            from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
-
-            # Format system info context
-            system_info_context = format_system_info_context(
-                system_info=self.system_info
-            )
-            base_prompt = CODING_AGENT_SYSTEM_PROMPT.format(
-                system_info_context=system_info_context
-            )
-
-            # Add always-send context sections
-            enhanced_prompt = base_prompt + "\n\n"
-
-            # Add active file context if available
-            if self.active_file_context:
-                enhanced_prompt += format_active_file_context(
-                    active_file_context=self.active_file_context
-                )
-
-            # Add open files context if available
-            if self.open_files_context:
-                enhanced_prompt += format_open_files_context(
-                    open_files_context=self.open_files_context
-                )
-
-            # Add recent edits context if available
-            if self.recent_edits_context:
-                enhanced_prompt += format_recent_edits_context(
-                    recent_edits_context=self.recent_edits_context
-                )
-
-            # Add on-demand context sections
-            if self.additional_context:
-                enhanced_prompt += format_additional_context(
-                    additional_context=self.additional_context
-                )
-
-            return enhanced_prompt
-
-        except Exception as e:
-            logger.error(f"Failed to create enhanced system prompt: {str(e)}")
-            # Fallback to basic prompt
-            return CODING_AGENT_SYSTEM_PROMPT.format(
-                system_info_context=format_system_info_context(
-                    system_info=self.system_info
-                )
-            )
 
     async def anthropic_streaming_api_call(
         self,
@@ -200,65 +133,32 @@ class AnthropicStreamingAgent:
             "content-type": "application/json",
             "anthropic-beta": "interleaved-thinking-2025-05-14",
         }
+        # Get cached system prompt from enhanced memory
+        system_content = self.agent_memory.get_system_prompt_with_cache()
 
-        # Convert OpenAI tool format to Anthropic tool format
-        anthropic_tools = []
-        for tool in tools:
-            if tool.get("type") == "function":
-                function_info = tool.get("function", {})
-                anthropic_tools.append(
-                    {
-                        "name": function_info.get("name", ""),
-                        "description": function_info.get("description", ""),
-                        "input_schema": function_info.get("parameters", {}),
-                    }
-                )
+        print(
+            f"Enhanced Memory: Using cached system prompt with {len(system_content)} blocks"
+        )
 
-        # Extract system message if present
-        system_content = None
-        for message in messages:
-            if message.get("role") == "system":
-                system_content = message.get("content")
-                if isinstance(system_content, str):
-                    # If it's a string, it's already in the correct format
-                    pass
-                elif isinstance(system_content, list):
-                    # If content is a list of blocks, extract text from text blocks
-                    system_text = ""
-                    for block in system_content:
-                        if (
-                            isinstance(block, dict)
-                            and block.get("type") == "text"
-                        ):
-                            system_text += block.get("text", "")
-                    system_content = system_text
-                break
-
-        print(f"System content: {system_content}")
-
-        # Prepare normal messages, skipping system message
-        anthropic_messages = []
-        for message in messages:
-            if message.get("role") != "system":
-                anthropic_messages.append(message)
-
+        # Use all messages directly (no system messages in the messages array)
+        anthropic_messages = messages
         payload = {
             "model": self.model_name,
             "max_tokens": params.get("max_tokens", 3000),
-            "tools": anthropic_tools,
+            "tools": tools,
             "messages": anthropic_messages,
             "thinking": {"type": "enabled", "budget_tokens": 2500},
             "stream": True,  # Enable streaming
             # "temperature": 0,
         }
 
-        # Add system parameter if we have a system message
+        # Add system parameter with correct format if we have a system message
         if system_content:
             payload["system"] = system_content
 
         # Debug: Print payload structure (remove in production)
         logger.info(
-            f"Sending request with {len(anthropic_messages)} messages and {len(anthropic_tools)} tools"
+            f"Sending request with {len(anthropic_messages)} messages and {len(tools)} tools"
         )
 
         try:
@@ -300,6 +200,16 @@ class AnthropicStreamingAgent:
                                     if event_type == "message_start":
                                         message_data = data.get("message", {})
                                         complete_message.update(message_data)
+
+                                        # Debug log initial token counts
+                                        initial_usage = message_data.get(
+                                            "usage", {}
+                                        )
+                                        if initial_usage:
+                                            logger.debug(
+                                                f"Initial usage from message_start: {initial_usage}"
+                                            )
+
                                         yield {
                                             "type": "message_start",
                                             "data": data,
@@ -546,6 +456,19 @@ class AnthropicStreamingAgent:
                                     elif event_type == "message_delta":
                                         delta = data.get("delta", {})
                                         complete_message.update(delta)
+
+                                        # Update usage information if present in message_delta
+                                        # The final token counts are in data.usage, not in delta
+                                        if "usage" in data:
+                                            if "usage" not in complete_message:
+                                                complete_message["usage"] = {}
+                                            complete_message["usage"].update(
+                                                data["usage"]
+                                            )
+                                            logger.debug(
+                                                f"Updated usage from message_delta: {data['usage']}"
+                                            )
+
                                         yield {
                                             "type": "message_delta",
                                             "data": data,
@@ -579,6 +502,12 @@ class AnthropicStreamingAgent:
                                                 )
                                                 cache_read_input_tokens = usage.get(
                                                     "cache_read_input_tokens", 0
+                                                )
+
+                                                # Debug log to verify correct token counts
+                                                logger.info(
+                                                    f"Final token usage - Input: {input_tokens}, Output: {output_tokens}, "
+                                                    f"Cache Creation: {cache_creation_input_tokens}, Cache Read: {cache_read_input_tokens}"
                                                 )
 
                                                 total_tokens = (
@@ -726,16 +655,17 @@ class AnthropicStreamingAgent:
                 # Convert FastMCP tools to Anthropic format
                 self.anthropic_tools = []
                 for tool in tools:
-                    self.anthropic_tools.append(
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "parameters": tool.inputSchema,
-                            },
-                        }
-                    )
+                    anthropic_tool = {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.inputSchema,
+                    }
+
+                    # Add cache_control for the last tool in the list
+                    if tool == tools[-1]:
+                        anthropic_tool["cache_control"] = {"type": "ephemeral"}
+
+                    self.anthropic_tools.append(anthropic_tool)
 
                 # Format system info context
                 system_info_context = format_system_info_context(
@@ -747,11 +677,15 @@ class AnthropicStreamingAgent:
                     system_info_context=system_info_context,
                 )
 
-                # Initialize agent memory with system message
+                # Initialize enhanced agent memory with cached system message
                 logger.info(
-                    "Initializing agent system prompt with system information and workspace context"
+                    "Initializing enhanced agent system prompt with system information and workspace context"
                 )
                 self.agent_memory.initialize_with_system_message(system_message)
+
+                # Log memory stats
+                stats = self.agent_memory.get_memory_stats()
+                logger.info(f"Enhanced Memory initialized: {stats}")
                 return True
 
             except Exception as e:

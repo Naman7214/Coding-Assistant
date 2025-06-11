@@ -127,7 +127,9 @@ class WorkspaceIndexingService:
         """Identify chunks and prepare them with embeddings from global collection or generate new ones"""
         try:
             # Get all incoming chunk hashes
-            incoming_hashes_raw = [chunk.raw_chunk_hash for chunk in incoming_chunks]
+            incoming_hashes_raw = [
+                chunk.raw_chunk_hash for chunk in incoming_chunks
+            ]
 
             # Get existing embeddings from global collection
             existing_embeddings = (
@@ -152,7 +154,9 @@ class WorkspaceIndexingService:
                         chunk_type=chunk_data.chunk_type,
                         git_branch=chunk_data.git_branch,
                         token_count=chunk_data.token_count,
-                        embedding=existing_embeddings[chunk_data.raw_chunk_hash],
+                        embedding=existing_embeddings[
+                            chunk_data.raw_chunk_hash
+                        ],
                         created_at=datetime.now(),
                         updated_at=datetime.now(),
                     )

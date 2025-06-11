@@ -302,10 +302,10 @@ class SearchReplaceService:
 
             for match in matches:
                 start, end = match.span()
-                before_ctx = original_content[max(0, start - 20) : start]
+                before_ctx = original_content[max(0, start - 50) : start]
                 matched_text = original_content[start:end]
                 after_ctx = original_content[
-                    end : min(len(original_content), end + 20)
+                    end : min(len(original_content), end + 50)
                 ]
 
                 replaced_text = pattern.sub(replacement, matched_text)

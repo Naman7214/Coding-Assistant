@@ -94,7 +94,7 @@ class FileSearchService:
                 "total_files": len(found_files),
                 "pattern": pattern,
                 "base_path": workspace_path,
-                "currentDirectory": current_directory,
+                "current_directory": current_directory,
             }
 
         except HTTPException:
