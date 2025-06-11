@@ -205,6 +205,24 @@
     }
 }
 
+/* Streaming content animation */
+.thinking-content,
+.response-content {
+    transition: all 0.1s ease-out;
+}
+
+/* Smooth content updates */
+.conversation-item.streaming {
+    border-left: 2px solid var(--vscode-focusBorder);
+    padding-left: 8px;
+    transition: border-left 0.3s ease;
+}
+
+.conversation-item:not(.streaming) {
+    border-left: 2px solid transparent;
+    padding-left: 8px;
+}
+
 /* Input container */
 .input-container {
     padding: 16px;
@@ -305,8 +323,19 @@
 }
 
 .permission-header h3 {
-    margin: 0 0 16px 0;
+    margin: 0 0 8px 0;
     font-size: 16px;
+}
+
+.permission-timer {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    background-color: var(--vscode-input-background);
+    border-radius: 4px;
+    border: 1px solid var(--vscode-input-border);
+    text-align: center;
 }
 
 .permission-content {
@@ -428,6 +457,68 @@
         padding: 16px;
         margin: 20px;
     }
+}
+
+/* Context mention styles */
+.context-hint {
+    margin-top: 16px;
+    padding: 12px;
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: var(--vscode-descriptionForeground);
+}
+
+.user-context-chips {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.user-context-chip {
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    border-radius: 8px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.user-context-chip.file {
+    background-color: rgba(0, 122, 204, 0.2);
+    color: #007acc;
+}
+
+.user-context-chip.directory {
+    background-color: rgba(255, 165, 0, 0.2);
+    color: #ffa500;
+}
+
+.user-context-chip.git {
+    background-color: rgba(40, 167, 69, 0.2);
+    color: #28a745;
+}
+
+.user-context-chip.project {
+    background-color: rgba(111, 66, 193, 0.2);
+    color: #6f42c1;
+}
+
+.user-context-chip.web {
+    background-color: rgba(220, 53, 69, 0.2);
+    color: #dc3545;
+}
+
+.input-wrapper-container {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
 }
 
 /* Smooth hover effects */

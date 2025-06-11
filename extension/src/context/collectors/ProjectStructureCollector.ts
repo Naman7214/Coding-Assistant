@@ -43,7 +43,7 @@ export class ProjectStructureCollector extends BaseCollector {
     ) {
         super(
             'ProjectStructureCollector',
-            'project_structure',
+            'projectStructure',
             7.0,
             outputChannel,
             cacheManager,
@@ -77,7 +77,7 @@ export class ProjectStructureCollector extends BaseCollector {
             // Generate tree structure
             const treeStructure = await this.generateProjectTree(workspacePath);
 
-        
+
             const data: ProjectStructureCollectorData = {
                 root: workspacePath,
                 treeStructure

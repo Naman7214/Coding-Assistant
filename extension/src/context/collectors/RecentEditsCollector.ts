@@ -18,7 +18,7 @@ export class RecentEditsCollector extends BaseCollector {
     private snapshotManager: SnapshotManager;
     private diffGenerator: DiffGenerator;
     private checkIntervalTimer: NodeJS.Timeout | null = null;
-    private readonly CHECK_INTERVAL_MS = 1 *60 * 1000; // 3 minutes
+    private readonly CHECK_INTERVAL_MS = 3 *60 * 1000; // 3 minutes
     private isInitialized = false;
     private currentGitBranch = 'default';
     private readonly context: vscode.ExtensionContext;

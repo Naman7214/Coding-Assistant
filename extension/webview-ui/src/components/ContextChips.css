@@ -1,0 +1,148 @@
+.context-chips-container {
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 6px;
+    animation: slideDown 0.2s ease-out;
+}
+
+.context-chips-header {
+    margin-bottom: 6px;
+}
+
+.context-chips-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.context-chips-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.context-chip {
+    display: flex;
+    align-items: center;
+    background-color: var(--vscode-badge-background);
+    border: 1px solid var(--vscode-badge-background);
+    border-radius: 12px;
+    padding: 4px 8px;
+    font-size: 12px;
+    gap: 4px;
+    transition: all 0.1s ease;
+    max-width: 300px;
+}
+
+.context-chip:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.context-chip-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.context-chip-display {
+    font-weight: 500;
+    color: var(--vscode-badge-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.context-chip-description {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    margin-left: 4px;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+}
+
+.context-chip-remove {
+    background: none;
+    border: none;
+    color: var(--vscode-badge-foreground);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 2px 4px;
+    border-radius: 50%;
+    margin-left: 4px;
+    transition: all 0.1s ease;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.context-chip-remove:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+/* File type specific styling */
+.context-chip[style*="#007acc"] {
+    /* File context */
+}
+
+.context-chip[style*="#ffa500"] {
+    /* Directory context */
+}
+
+.context-chip[style*="#28a745"] {
+    /* Git context */
+}
+
+.context-chip[style*="#6f42c1"] {
+    /* Project context */
+}
+
+.context-chip[style*="#dc3545"] {
+    /* Web context */
+}
+
+/* Animation */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+        max-height: 0;
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        max-height: 100px;
+    }
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+    .context-chips-list {
+        gap: 4px;
+    }
+
+    .context-chip {
+        padding: 3px 6px;
+        font-size: 11px;
+        max-width: 200px;
+    }
+
+    .context-chip-description {
+        display: none;
+    }
+
+    .context-chips-container {
+        padding: 6px 8px;
+    }
+}

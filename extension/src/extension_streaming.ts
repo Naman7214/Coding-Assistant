@@ -5,7 +5,16 @@ import { ContextApiServer } from './api/ContextApiServer';
 import { ContextManager } from './context/ContextManager';
 import { ProcessedContext } from './context/types/context';
 import { IndexingManager, IndexingStatusInfo, hashWorkspacePath } from './indexing';
+import { ContextMentionParser } from './services/ContextMentionParser';
+import { ContextResolver } from './services/ContextResolver';
 import { EnhancedStreamingClient } from './streaming_client';
+import {
+  ContextMention,
+  ContextSuggestionsResponse,
+  FileTreeItem,
+  FileTreeResponse,
+  ResolvedContextResponse
+} from './types/contextMentions';
 import { getWebviewContent } from './utilities';
 
 const execAsync = promisify(exec);
@@ -25,6 +34,10 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   private isContextManagerReady = false;
   private isIndexingReady = false;
   private workspaceDisposables: vscode.Disposable[] = [];
+
+  // Context mention services
+  private contextResolver: ContextResolver | null = null;
+  private contextMentionParser: ContextMentionParser | null = null;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -117,6 +130,9 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
       this.isContextManagerReady = true;
       this.outputChannel.appendLine('[Extension] Context manager and API server ready');
+
+      // Initialize context mention services
+      await this.initializeContextMentionServices();
 
       // Set up event listeners now that context manager is ready
       this.setupContextManagerEventListeners();
@@ -308,6 +324,41 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Initialize context mention services
+   */
+  private async initializeContextMentionServices(): Promise<void> {
+    try {
+      this.outputChannel.appendLine('[Extension] Initializing context mention services...');
+
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder || !this.contextManager) {
+        this.outputChannel.appendLine('[Extension] Cannot initialize context mention services - no workspace or context manager');
+        return;
+      }
+
+      const workspacePath = workspaceFolder.uri.fsPath;
+
+      // Initialize context resolver
+      this.contextResolver = new ContextResolver(
+        this.contextManager,
+        this.outputChannel,
+        workspacePath
+      );
+
+      // Initialize context mention parser
+      this.contextMentionParser = new ContextMentionParser(
+        this.outputChannel,
+        workspacePath
+      );
+
+      this.outputChannel.appendLine('[Extension] Context mention services initialized successfully');
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[Extension] Failed to initialize context mention services: ${error}`);
+    }
+  }
+
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
     context: vscode.WebviewViewResolveContext,
@@ -374,7 +425,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   private async handleMessage(message: any) {
     switch (message.command) {
       case 'sendQuery':
-        await this.handleQuery(message.text);
+        await this.handleQuery(message.text, message.context_mentions);
         return;
 
       case 'checkStreamingHealth':
@@ -420,6 +471,19 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
       case 'triggerIndexing':
         await this.triggerIndexingManually();
+        return;
+
+      // Context mention handlers
+      case 'getContextSuggestions':
+        await this.handleGetContextSuggestions(message.query, message.cursorPosition);
+        return;
+
+      case 'getFileTree':
+        await this.handleGetFileTree(message.path, message.maxDepth);
+        return;
+
+      case 'resolveContext':
+        await this.handleResolveContext(message.mentions);
         return;
     }
   }
@@ -478,7 +542,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   /**
    * Handle queries from the UI
    */
-  public async handleQuery(query: string) {
+  public async handleQuery(query: string, context_mentions: any[] = []) {
     if (!this._view) return;
 
     try {
@@ -509,9 +573,113 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         command: 'streamStart'
       });
 
-      // Parse @ mentions from query
-      const contextMentions = this.parseContextMentions(query);
-      this.outputChannel.appendLine(`[Query] Detected context mentions: ${JSON.stringify(contextMentions)}`);
+      // Parse and resolve @ mentions from query using new system
+      let resolvedContextData: any = {};
+
+      // Process context mentions from UI (context chips)
+      if (context_mentions && context_mentions.length > 0) {
+        this.outputChannel.appendLine(`[Query] Processing ${context_mentions.length} context mentions from UI`);
+
+        for (const contextChip of context_mentions) {
+          try {
+            switch (contextChip.type) {
+              case 'file':
+                // For file mentions, get first 50 lines of the file
+                if (contextChip.originalMention) {
+                  const filePath = contextChip.originalMention.replace('@', '');
+                  const fileContent = await this.getFileContent(filePath, 50);
+                  if (fileContent) {
+                    resolvedContextData.file_context = {
+                      path: filePath,
+                      content: fileContent,
+                      lines: 50
+                    };
+                  }
+                }
+                break;
+
+              case 'directory':
+                // For directory mentions, get list of files (max 20)
+                if (contextChip.originalMention) {
+                  const dirPath = contextChip.originalMention.replace('@', '').replace('/', '');
+                  const fileList = await this.getDirectoryFiles(dirPath, 20);
+                  if (fileList) {
+                    resolvedContextData.directory_context = {
+                      path: dirPath,
+                      files: fileList
+                    };
+                  }
+                }
+                break;
+
+              case 'git':
+                // For git context, use GitContextCollector
+                const gitContextResult = await this.contextManager!.collectSpecificContext('git_context');
+                if (gitContextResult && gitContextResult.data) {
+                  resolvedContextData.git_context = gitContextResult.data;
+                }
+                break;
+
+              case 'project':
+                // For project context, use ProjectStructureCollector
+                const projectContextResult = await this.contextManager!.collectSpecificContext('project_structure');
+                if (projectContextResult && projectContextResult.data) {
+                  resolvedContextData.project_context = projectContextResult.data;
+                }
+                break;
+
+              case 'web':
+                // For web context, add instruction for web search
+                resolvedContextData.web_context = {
+                  instruction: "Use web search to find current information about the query topic",
+                  enabled: true
+                };
+                break;
+            }
+          } catch (error) {
+            this.outputChannel.appendLine(`[Query] Error processing context mention ${contextChip.type}: ${error}`);
+          }
+        }
+      }
+
+      if (this.contextMentionParser && this.contextResolver) {
+        const parsedQuery = this.contextMentionParser.parseQuery(query);
+        this.outputChannel.appendLine(`[Query] Parsed query: ${parsedQuery.cleanQuery}`);
+        this.outputChannel.appendLine(`[Query] Detected ${parsedQuery.mentions.length} context mentions`);
+
+        if (parsedQuery.mentions.length > 0) {
+          // Resolve context mentions
+          const contextResult = await this.contextResolver.resolveContextMentions(parsedQuery.mentions);
+          this.outputChannel.appendLine(`[Query] Resolved ${contextResult.resolvedCount}/${parsedQuery.mentions.length} mentions`);
+
+          // Convert resolved mentions to data format expected by backend
+          for (const mention of contextResult.mentions) {
+            if (mention.resolved && mention.data) {
+              switch (mention.type) {
+                case 'file':
+                  resolvedContextData.file_context = mention.data;
+                  break;
+                case 'directory':
+                  resolvedContextData.directory_context = mention.data;
+                  break;
+                case 'git':
+                  resolvedContextData.git_context = mention.data;
+                  break;
+                case 'project':
+                  resolvedContextData.project_context = mention.data;
+                  break;
+                case 'web':
+                  resolvedContextData.web_context = mention.data;
+                  break;
+              }
+            }
+          }
+        }
+      } else {
+        // Fallback to old system if new services not ready
+        const contextMentions = this.parseContextMentions(query);
+        this.outputChannel.appendLine(`[Query] Fallback: Detected context mentions: ${JSON.stringify(contextMentions)}`);
+      }
 
       // Collect always-send context using ContextManager (includes system info + active file + open files + recent edits)
       const mustSendContexts = await this.contextManager!.collectMustSendContexts();
@@ -533,8 +701,41 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
       // Send query with always-send context to backend
       if (this.enhancedStreamingClient) {
+        // Prepare context mentions array for backend
+        let contextMentions: any[] = [];
+
+        // Add context mentions from UI chips
+        if (context_mentions && context_mentions.length > 0) {
+          contextMentions = context_mentions.map(chip => ({
+            type: chip.type,
+            value: chip.originalMention,
+            data: resolvedContextData[`${chip.type}_context`] || null
+          }));
+        }
+
+        // Add context mentions from parsed query
+        if (this.contextMentionParser && this.contextResolver) {
+          const parsedQuery = this.contextMentionParser.parseQuery(query);
+          if (parsedQuery.mentions.length > 0) {
+            const contextResult = await this.contextResolver.resolveContextMentions(parsedQuery.mentions);
+            for (const mention of contextResult.mentions) {
+              if (mention.resolved && mention.data) {
+                // Check if this mention type already exists in contextMentions
+                const existingMention = contextMentions.find(cm => cm.type === mention.type);
+                if (!existingMention) {
+                  contextMentions.push({
+                    type: mention.type,
+                    value: mention.label,
+                    data: mention.data
+                  });
+                }
+              }
+            }
+          }
+        }
+
         const streamRequest: any = {
-          query: query,
+          query: query, // Keep original query with @ symbols
           workspace_path: workspacePath,
           hashed_workspace_path: hashedWorkspacePath,
           git_branch: currentGitBranch,
@@ -542,7 +743,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           active_file_context: activeFileData?.data || null,
           open_files_context: openFilesData?.data || [],
           recent_edits_context: recentEditsData?.data || null,
-          context_mentions: contextMentions
+          context_mentions: contextMentions.length > 0 ? contextMentions : null
         };
         this.outputChannel.appendLine(`[Query] Stream request: ${JSON.stringify(streamRequest)}`);
         const requestHeaders = {
@@ -711,8 +912,6 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
 
     return mentions;
   }
-
-
 
   /**
    * Handle on-demand context requests from backend
@@ -1235,6 +1434,136 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
         const lastIndexed = new Date(status.lastIndexTime).toLocaleTimeString();
         this.statusBarItem.tooltip += `\nCodebase indexed at ${lastIndexed}`;
       }
+    }
+  }
+
+  /**
+   * Handle context suggestions request
+   */
+  private async handleGetContextSuggestions(query: string, cursorPosition: number): Promise<void> {
+    if (!this._view || !this.contextMentionParser) {
+      this.outputChannel.appendLine('[ContextMentions] Cannot get suggestions - services not ready');
+      return;
+    }
+
+    try {
+      const suggestions = this.contextMentionParser.generateContextSuggestions(query, cursorPosition);
+
+      // Get basic file tree for file browsing
+      let fileTree: FileTreeItem[] = [];
+      if (this.contextResolver) {
+        fileTree = await this.contextResolver.getFileTree(undefined, 2); // 2 levels deep
+      }
+
+      const response: ContextSuggestionsResponse = {
+        command: 'contextSuggestions',
+        suggestions: suggestions,
+        files: fileTree
+      };
+
+      this._view.webview.postMessage(response);
+      this.outputChannel.appendLine(`[ContextMentions] Sent ${suggestions.length} suggestions and ${fileTree.length} files`);
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[ContextMentions] Error getting suggestions: ${error}`);
+    }
+  }
+
+  /**
+   * Handle file tree request
+   */
+  private async handleGetFileTree(path?: string, maxDepth: number = 3): Promise<void> {
+    if (!this._view || !this.contextResolver) {
+      this.outputChannel.appendLine('[ContextMentions] Cannot get file tree - services not ready');
+      return;
+    }
+
+    try {
+      const fileTree = await this.contextResolver.getFileTree(path, maxDepth);
+
+      const response: FileTreeResponse = {
+        command: 'fileTree',
+        tree: fileTree,
+        path: path || ''
+      };
+
+      this._view.webview.postMessage(response);
+      this.outputChannel.appendLine(`[ContextMentions] Sent file tree with ${fileTree.length} items for path: ${path || 'root'}`);
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[ContextMentions] Error getting file tree: ${error}`);
+    }
+  }
+
+  /**
+   * Handle context resolution request
+   */
+  private async handleResolveContext(mentions: ContextMention[]): Promise<void> {
+    if (!this._view || !this.contextResolver) {
+      this.outputChannel.appendLine('[ContextMentions] Cannot resolve context - services not ready');
+      return;
+    }
+
+    try {
+      this.outputChannel.appendLine(`[ContextMentions] Resolving ${mentions.length} context mentions`);
+
+      const result = await this.contextResolver.resolveContextMentions(mentions);
+
+      const response: ResolvedContextResponse = {
+        command: 'resolvedContext',
+        result: result
+      };
+
+      this._view.webview.postMessage(response);
+      this.outputChannel.appendLine(`[ContextMentions] Resolved ${result.resolvedCount}/${mentions.length} mentions`);
+
+    } catch (error) {
+      this.outputChannel.appendLine(`[ContextMentions] Error resolving context: ${error}`);
+    }
+  }
+
+  /**
+   * Get file content (first N lines)
+   */
+  private async getFileContent(filePath: string, maxLines: number = 50): Promise<string | null> {
+    try {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) return null;
+
+      const absolutePath = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+      const fileContent = await vscode.workspace.fs.readFile(absolutePath);
+      const content = Buffer.from(fileContent).toString('utf8');
+
+      const lines = content.split('\n');
+      const limitedLines = lines.slice(0, maxLines);
+
+      return limitedLines.join('\n');
+    } catch (error) {
+      this.outputChannel.appendLine(`[FileContent] Error reading file ${filePath}: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get directory file list (max N files)
+   */
+  private async getDirectoryFiles(dirPath: string, maxFiles: number = 20): Promise<string[] | null> {
+    try {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      if (!workspaceFolder) return null;
+
+      const absolutePath = vscode.Uri.joinPath(workspaceFolder.uri, dirPath);
+      const entries = await vscode.workspace.fs.readDirectory(absolutePath);
+
+      const files = entries
+        .filter(([name, type]) => type === vscode.FileType.File)
+        .map(([name, type]) => name)
+        .slice(0, maxFiles);
+
+      return files;
+    } catch (error) {
+      this.outputChannel.appendLine(`[DirectoryFiles] Error reading directory ${dirPath}: ${error}`);
+      return null;
     }
   }
 }

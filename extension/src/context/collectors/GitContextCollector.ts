@@ -41,7 +41,7 @@ export class GitContextCollector extends BaseCollector {
     ) {
         super(
             'GitContextCollector',
-            'git_context',
+            'gitContext',
             6.0, // Important for understanding code changes
             outputChannel,
             cacheManager,

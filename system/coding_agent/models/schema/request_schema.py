@@ -9,6 +9,12 @@ from models.schema.context_schema import (
 from pydantic import BaseModel
 
 
+class ContextMention(BaseModel):
+    type: str
+    value: str
+    data: Optional[Dict[str, Any]] = None
+
+
 class QueryRequest(BaseModel):
     query: str
     workspace_path: str
@@ -18,7 +24,7 @@ class QueryRequest(BaseModel):
     active_file_context: Optional[ActiveFileContext] = None
     open_files_context: Optional[List[OpenFileInfo]] = None
     recent_edits_context: Optional[RecentEditsContext] = None
-    context_mentions: Optional[List[str]] = None
+    context_mentions: Optional[List[ContextMention]] = None
 
 
 class PermissionResponse(BaseModel):

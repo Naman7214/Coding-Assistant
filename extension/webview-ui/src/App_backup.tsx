@@ -1,8 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import './App.css';
-import ContextAwareInput from './components/ContextAwareInput';
-import ContextChips from './components/ContextChips';
-import { ContextChip } from './types/contextMentions';
 
 // Declare vscode API
 declare const vscode: any;
@@ -44,39 +41,9 @@ const App: React.FC = () => {
     const permissionTimerRef = useRef<NodeJS.Timeout | null>(null);
     const [isStreaming, setIsStreaming] = useState(false);
     const [pendingQuery, setPendingQuery] = useState('');
-    const [attachedContexts, setAttachedContexts] = useState<ContextChip[]>([]);
-    const [contextSuggestions, setContextSuggestions] = useState<any[]>([]);
 
+    const inputRef = useRef<HTMLTextAreaElement>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
-
-    // Context management functions
-    const handleRemoveContext = (contextId: string) => {
-        setAttachedContexts(prev => prev.filter(ctx => ctx.id !== contextId));
-    };
-
-    const handleContextSelected = useCallback((event: CustomEvent) => {
-        const { type, display, originalMention, description } = event.detail;
-
-        // Create a new context chip
-        const newContext: ContextChip = {
-            id: `${type}-${Date.now()}`,
-            type: type,
-            display: display,
-            originalMention: originalMention,
-            description: description
-        };
-
-        // Add to attached contexts if not already present
-        setAttachedContexts(prev => {
-            const exists = prev.some(ctx =>
-                ctx.type === newContext.type && ctx.originalMention === newContext.originalMention
-            );
-            if (!exists) {
-                return [...prev, newContext];
-            }
-            return prev;
-        });
-    }, []);
 
     // Helper function to handle streaming content deduplication
     const handleStreamingContent = (existingContent: string, newContent: string): string => {
@@ -168,14 +135,6 @@ const App: React.FC = () => {
                 case 'permission_timeout':  // Handle backend event type
                     handlePermissionTimeout(message);
                     break;
-                case 'contextSuggestions':
-                    console.log('[UI] Received context suggestions:', message.suggestions);
-                    setContextSuggestions(message.suggestions || []);
-                    break;
-                case 'fileTree':
-                    console.log('[UI] Received file tree:', message.tree);
-                    // Handle file tree if needed
-                    break;
                 default:
                     console.log('[UI] Unhandled message command:', message.command);
                     break;
@@ -183,20 +142,18 @@ const App: React.FC = () => {
         };
 
         window.addEventListener('message', handleMessage);
-        window.addEventListener('contextSelected', handleContextSelected as EventListener);
 
         // Debug: Log when component mounts
         console.log('[UI] App component mounted, waiting for messages...');
 
         return () => {
             window.removeEventListener('message', handleMessage);
-            window.removeEventListener('contextSelected', handleContextSelected as EventListener);
             // Clean up permission timer on unmount
             if (permissionTimerRef.current) {
                 clearInterval(permissionTimerRef.current);
             }
         };
-    }, [handleContextSelected]);
+    }, []);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -565,26 +522,43 @@ const App: React.FC = () => {
         return cleanNames[toolName] || friendlyName || toolName;
     };
 
-    // Input handling is now managed by ContextAwareInput component
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        setQuery(value);
+
+        // Auto-resize textarea
+        const textarea = e.target;
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSubmit();
+        }
+    };
 
     const handleSubmit = () => {
         if (query.trim() && !isStreaming) {
             const trimmedQuery = query.trim();
-            console.log('[UI] Submitting query:', trimmedQuery, 'with contexts:', attachedContexts, 'current streaming state:', isStreaming);
+            console.log('[UI] Submitting query:', trimmedQuery, 'current streaming state:', isStreaming);
 
             // Store the query before sending
             setPendingQuery(trimmedQuery);
 
-            // Send to extension with original query and attached contexts
+            // Send to extension
             vscode.postMessage({
                 command: 'sendQuery',
-                text: trimmedQuery,  // Keep original query with @ symbols
-                context_mentions: attachedContexts.length > 0 ? attachedContexts : null
+                text: trimmedQuery
             });
 
             setQuery('');
-            // Clear attached contexts after submission
-            setAttachedContexts([]);
+
+            // Reset textarea height
+            if (inputRef.current) {
+                inputRef.current.style.height = 'auto';
+            }
         } else {
             console.log('[UI] Submit blocked - query:', query.trim(), 'isStreaming:', isStreaming);
         }
@@ -678,23 +652,16 @@ const App: React.FC = () => {
             </div>
 
             <div className="input-container">
-                {/* Show attached contexts */}
-                {attachedContexts.length > 0 && (
-                    <ContextChips
-                        contexts={attachedContexts}
-                        onRemove={handleRemoveContext}
-                    />
-                )}
-
                 <div className="input-wrapper">
-                    <ContextAwareInput
-                        value={query}
-                        onChange={setQuery}
-                        onSubmit={handleSubmit}
-                        disabled={isStreaming}
+                    <textarea
+                        ref={inputRef}
+                        className="message-input"
                         placeholder="Ask anything..."
-                        suggestions={contextSuggestions}
-                        attachedContexts={attachedContexts}
+                        value={query}
+                        onChange={handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        disabled={isStreaming}
+                        rows={1}
                     />
 
                     <button

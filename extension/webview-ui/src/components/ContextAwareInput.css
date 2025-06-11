@@ -1,0 +1,105 @@
+.context-aware-input-container {
+    position: relative;
+    width: 100%;
+}
+
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 8px;
+    transition: border-color 0.1s ease;
+}
+
+.input-wrapper:focus-within {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.message-input.context-aware {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--vscode-input-foreground);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    line-height: 1.4;
+    padding: 12px 16px;
+    resize: none;
+    outline: none;
+    min-height: 44px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.message-input.context-aware::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+    opacity: 0.7;
+}
+
+.message-input.context-aware:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Hidden span for text measurement */
+.hidden-measurement-span {
+    position: absolute;
+    top: 0;
+    left: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    z-index: -1;
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    line-height: 1.4;
+    padding: 12px 16px;
+    border: 1px solid transparent;
+    overflow: hidden;
+}
+
+/* Context highlight within input */
+.message-input.context-aware:focus {
+    /* Add special styling when focusing with context */
+}
+
+/* Animation for mention detection */
+.input-wrapper.mention-active {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+/* Scrollbar styling for textarea */
+.message-input.context-aware::-webkit-scrollbar {
+    width: 6px;
+}
+
+.message-input.context-aware::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.message-input.context-aware::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background);
+    border-radius: 3px;
+}
+
+.message-input.context-aware::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+    .message-input.context-aware {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+
+    .hidden-measurement-span {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+}
