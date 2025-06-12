@@ -41,12 +41,6 @@ class EditFileRequest(BaseModel):
         ..., description="The content of the file to edit"
     )
     code_snippet: str = Field(..., description="The code snippet to edit")
-    explanation: str = Field(
-        default=None, description="The explanation for the file edit request"
-    )
-    workspace_path: str = Field(
-        default=None, description="The path to the workspace"
-    )
 
 
 class ReapplyRequest(BaseModel):
@@ -54,9 +48,3 @@ class ReapplyRequest(BaseModel):
         ..., description="The content of the file to reapply"
     )
     code_snippet: str = Field(..., description="The code snippet to reapply")
-    explanation: str = Field(
-        ..., description="The explanation for the file reapply request"
-    )
-    workspace_path: str = Field(
-        default=None, description="The path to the workspace"
-    )

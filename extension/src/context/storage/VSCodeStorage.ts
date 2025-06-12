@@ -344,8 +344,8 @@ export class VSCodeStorage {
 
             return {
                 workspace: workspace.metadata,
-                activeFile: recentFiles[0] || null,
-                openFiles: recentFiles,
+                activeFile: null, // Will be set by ContextManager with proper ActiveFileCollectorData
+                openFiles: [],
                 projectStructure: 'No project structure available',
                 gitContext: {
                     branch: 'main',

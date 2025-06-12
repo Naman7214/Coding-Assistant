@@ -556,22 +556,19 @@ const App: React.FC = () => {
     const getCleanToolName = (toolName: string, friendlyName: string): string => {
         // Clean, minimal tool descriptions like Cursor IDE Chat interface
         const cleanNames: Record<string, string> = {
-            "list_directory": "listing files",
-            "read_file": "reading file",
-            "edit_file": "editing file",
-            "search_and_replace": "modifying file",
-            "search_files": "searching codebase",
-            "run_terminal_command": "running command",
-            "create_file": "creating file",
-            "delete_file": "deleting file",
-            "move_file": "moving file",
-            "copy_file": "copying file",
-            "get_git_status": "checking git status",
-            "get_git_diff": "checking git changes",
-            "commit_changes": "committing changes",
-            "create_branch": "creating branch",
-            "switch_branch": "switching branch",
-            "merge_branch": "merging branch"
+            "grep_search": "Grepping the Codebase",
+            "read_file": "Reading File",
+            "run_terminal_command": "Running Terminal Command",
+            "delete_file": "Deleting File",
+            "list_directory": "Listing Directories",
+            "search_and_replace": "Searching and Replacing in Files",
+            "search_files": "Searching Files",
+            "web_search": "Searching the Web",
+            "codebase_search": "Searching the Codebase Semantically",
+            "edit_file": "Editing File",
+            "reapply": "Reapplying Smarter Changes",
+            "get_project_structure": "Getting Project Structure",
+            "get_git_context": "Fetching Git Context",
         };
 
         return cleanNames[toolName] || friendlyName || toolName;
@@ -777,9 +774,6 @@ const App: React.FC = () => {
                             )}
                         </div>
                         <div className="permission-content">
-                            <p>
-                                The AI assistant wants to run a {permissionRequest.friendlyName || 'terminal command'}.
-                            </p>
                             <p>{permissionRequest.message}</p>
                             <div className="permission-command-container">
                                 <div className="permission-command-label">Command:</div>

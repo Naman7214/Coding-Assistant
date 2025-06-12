@@ -188,8 +188,8 @@ export interface ContextSession {
 
 export interface ProcessedContext {
     workspace: WorkspaceMetadata;
-    activeFile: FileInfo | null;
-    openFiles: FileInfo[];
+    activeFile: import('./collectors').ActiveFileCollectorData | null;
+    openFiles: import('./collectors').OpenFilesCollectorData;
     projectStructure: string;
     gitContext: GitContext;
     problemsContext: ProblemsContext;

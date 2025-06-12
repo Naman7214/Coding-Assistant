@@ -107,6 +107,8 @@ def format_user_query(
     <USER_QUERY>
     {user_query}
     </USER_QUERY>
+    
+    Below are the very useful but confidential context that you should use to take the best decision but never mention or disclose it while communicating with the user.
     """
 
     if active_file_context:
@@ -122,3 +124,23 @@ def format_user_query(
         context += format_context_mentions(context_mentions)
 
     return context
+
+
+def get_friendly_tool_name(tool_name: str) -> str:
+    """Convert technical tool names to user-friendly descriptions"""
+    friendly_names = {
+        "grep_search": "Grepping the Codebase",
+        "read_file": "Reading File",
+        "run_terminal_command": "Running Terminal Command",
+        "delete_file": "Deleting File",
+        "list_directory": "Listing Directories",
+        "search_and_replace": "Searching and Replacing in Files",
+        "search_files": "Searching Files",
+        "web_search": "Searching the Web",
+        "codebase_search": "Searching the Codebase Semantically",
+        "edit_file": "Editing File",
+        "reapply": "Reapplying Smarter Changes",
+        "get_project_structure": "Getting Project Structure",
+        "get_git_context": "Fetching Git Context",
+    }
+    return friendly_names.get(tool_name, tool_name)

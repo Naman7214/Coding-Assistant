@@ -392,47 +392,53 @@ export class DiffRenderer implements IDiffRenderer {
     }
 
     /**
-     * **NEW: Show VSCode's native diff view for comparing original content with modified content**
+     * **FIXED: Show VSCode's native diff view without creating visible .original files**
      */
     showVSCodeDiff(
         originalContent: string,
         modifiedContent: string,
         filePath: string
     ): void {
-        // Create file name for the diff view
         const fileName = require('path').basename(filePath);
 
-        // Create temporary URIs in memory
-        const originalUri = vscode.Uri.parse(`untitled:${fileName}.original`).with({
-            scheme: 'untitled',
-            path: `${fileName}.original`
+        // Create proper in-memory URIs that won't create visible files
+        const scheme = 'vscode-diff-original';
+        const originalUri = vscode.Uri.parse(`${scheme}:${fileName} (Original)`).with({
+            scheme: scheme,
+            path: `/${fileName}-original`,
+            query: Date.now().toString() // Add timestamp to make URI unique
         });
 
         const modifiedUri = vscode.Uri.file(filePath);
 
-        // Start with opening the editor for original file
-        vscode.workspace.openTextDocument(originalUri).then(originalDoc => {
-            // Insert content to original document
-            const edit = new vscode.WorkspaceEdit();
-            edit.insert(
-                originalUri,
-                new vscode.Position(0, 0),
-                originalContent
-            );
+        // Register a document content provider for the original content
+        const provider = new class implements vscode.TextDocumentContentProvider {
+            provideTextDocumentContent(uri: vscode.Uri): string {
+                return originalContent;
+            }
+        };
 
-            // Apply the edit with original content
-            vscode.workspace.applyEdit(edit).then(success => {
-                if (success) {
-                    // Now open the diff view with original and modified content
-                    vscode.commands.executeCommand(
-                        'vscode.diff',
-                        originalUri,
-                        modifiedUri,
-                        `${fileName} (Before ↔ After)`,
-                        { viewColumn: vscode.ViewColumn.Beside }
-                    );
-                }
-            });
+        // Register the provider for this scheme
+        const registration = vscode.workspace.registerTextDocumentContentProvider(scheme, provider);
+
+        // Open the diff view directly using the URIs
+        Promise.resolve(vscode.commands.executeCommand(
+            'vscode.diff',
+            originalUri,
+            modifiedUri,
+            `${fileName} (Original ↔ Current)`,
+            {
+                viewColumn: vscode.ViewColumn.Beside,
+                preserveFocus: false
+            }
+        )).then(() => {
+            // Clean up the provider after a delay to ensure diff view is loaded
+            setTimeout(() => {
+                registration.dispose();
+            }, 1000);
+        }).catch((error) => {
+            console.error('Failed to open diff view:', error);
+            registration.dispose();
         });
     }
 } 

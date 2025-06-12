@@ -31,14 +31,24 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    min-height: 100%;
     height: 100%;
     padding: 2rem;
     color: #888;
     text-align: center;
+    position: relative;
+    top: 10%;
 }
 
 .welcome-icon {
     margin-bottom: 1.5rem;
+}
+
+.welcome-icon svg {
+    width: 80pt;
+    height: 85pt;
+    max-width: 100px;
+    max-height: 106px;
 }
 
 .welcome-message {
@@ -47,7 +57,7 @@
     max-width: 500px;
     text-align: center;
     font-weight: 500;
-    color: #333;
+    color: var(--vscode-editor-foreground);
 }
 
 /* Conversation Item Base */
@@ -536,7 +546,8 @@
 .response-content .markdown-content {
     margin: 0;
     padding: 0;
-    line-height: 1.5;
+    line-height: 1.4;
+    white-space: normal;
 }
 
 .response-content .markdown-content>*:first-child {
@@ -555,31 +566,34 @@
 .response-content .markdown-content h5,
 .response-content .markdown-content h6 {
     color: var(--vscode-editor-foreground);
-    margin: 12px 0 6px 0;
+    margin: 8px 0 4px 0;
     font-weight: 600;
+    line-height: 1.3;
 }
 
 .response-content .markdown-content p {
-    margin: 4px 0;
-    line-height: 1.5;
+    margin: 2px 0;
+    line-height: 1.4;
 }
 
 .response-content .markdown-content ul,
 .response-content .markdown-content ol {
-    margin: 6px 0;
+    margin: 4px 0;
     padding-left: 24px;
 }
 
 .response-content .markdown-content li {
-    margin: 2px 0;
+    margin: 1px 0;
+    line-height: 1.4;
 }
 
 .response-content .markdown-content blockquote {
-    margin: 8px 0;
-    padding: 6px 12px;
+    margin: 6px 0;
+    padding: 4px 10px;
     border-left: 4px solid var(--vscode-focusBorder);
     background-color: rgba(var(--vscode-textCodeBlock-background), 0.3);
     font-style: italic;
+    line-height: 1.4;
 }
 
 .response-content .markdown-content code:not(pre code) {
@@ -592,7 +606,7 @@
 }
 
 .response-content .markdown-content .code-block {
-    margin: 8px 0;
+    margin: 6px 0;
     border-radius: 6px;
     overflow: hidden;
     background-color: var(--vscode-textCodeBlock-background);
@@ -607,37 +621,20 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.response-content .markdown-content .copy-button {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: var(--vscode-button-background);
-    color: var(--vscode-button-foreground);
-    border: none;
-    padding: 4px 8px;
-    border-radius: 3px;
-    font-size: 12px;
-    cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.2s;
-}
 
-.response-content .markdown-content .copy-button:hover {
-    opacity: 1;
-    background: var(--vscode-button-hoverBackground);
-}
 
 .response-content .markdown-content table {
     border-collapse: collapse;
-    margin: 8px 0;
+    margin: 6px 0;
     width: 100%;
 }
 
 .response-content .markdown-content th,
 .response-content .markdown-content td {
     border: 1px solid var(--vscode-input-border);
-    padding: 6px 10px;
+    padding: 4px 8px;
     text-align: left;
+    line-height: 1.3;
 }
 
 .response-content .markdown-content th {

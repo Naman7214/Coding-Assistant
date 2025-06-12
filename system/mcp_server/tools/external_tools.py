@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -16,7 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 async def web_search_tool(
-    search_term: str, target_urls: list[str] = [], explanation: str = ""
+    search_term: str,
+    target_urls: Optional[list[str]] = [],
+    explanation: Optional[str] = None,
 ) -> str:
 
     url = settings.WEB_SEARCH_API

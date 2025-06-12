@@ -21,10 +21,7 @@ class EditFileController:
 
     async def execute(self, request: EditFileRequest):
         response = await self.edit_file_usecase.execute(
-            request.target_file_content,
-            request.code_snippet,
-            request.explanation,
-            request.workspace_path,
+            request.target_file_content, request.code_snippet
         )
 
         status_code = status.HTTP_200_OK
@@ -56,16 +53,12 @@ class EditFileController:
                 {
                     "code_snippet_length": len(request.code_snippet),
                     "target_content_length": len(request.target_file_content),
-                    "explanation": request.explanation,
                 },
             )
 
             # Stream the actual editing process
             async for event in self.edit_file_usecase.execute_stream(
-                request.target_file_content,
-                request.code_snippet,
-                request.explanation,
-                request.workspace_path,
+                request.target_file_content, request.code_snippet
             ):
                 yield event
 

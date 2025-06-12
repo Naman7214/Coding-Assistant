@@ -69,15 +69,9 @@ async def search_and_replace_tool(
         return f"An error occurred : {str(e)}"
 
 
-async def edit_file_tool(
-    target_file_path: str, code_snippet: str, explanation: str
-):
+async def edit_file_tool(target_file_path: str, code_snippet: str):
     url = settings.EDIT_FILE_API
-    payload = {
-        "target_file_path": target_file_path,
-        "code_snippet": code_snippet,
-        "explanation": explanation,
-    }
+    payload = {"filePath": target_file_path, "codeSnippet": code_snippet}
     try:
         async with httpx.AsyncClient(
             verify=False, timeout=settings.httpx_timeout
@@ -97,18 +91,14 @@ async def edit_file_tool(
         return f"Error: {str(e)}"
 
 
-async def reapply_tool(
-    target_file_path: str, code_snippet: str, explanation: str
-):
+async def reapply_tool(target_file_path: str, code_snippet: str):
     url = settings.REAPPLY_API
-    payload = {
-        "target_file_path": target_file_path,
-        "code_snippet": code_snippet,
-        "explanation": explanation,
-    }
+    payload = {"filePath": target_file_path, "codeSnippet": code_snippet}
     try:
 
-        async with httpx.AsyncClient(verify=False, timeout=60) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=settings.httpx_timeout
+        ) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()

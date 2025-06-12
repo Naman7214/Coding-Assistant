@@ -624,7 +624,7 @@ export class EnhancedStreamingClient {
                 granted: granted
             }, {
                 headers: { 'Content-Type': 'application/json' },
-                timeout: 10000
+                timeout: 300000
             });
 
             this.appendToOutput(`[PERMISSION] Response sent: ${granted ? 'GRANTED' : 'DENIED'} for ${permissionId}`);

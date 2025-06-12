@@ -105,7 +105,7 @@ class TerminalClientService:
         working_directory: Optional[str] = None,
         environment_variables: Optional[Dict[str, str]] = None,
         is_background: bool = False,
-        timeout: Optional[int] = None,
+        timeout: Optional[int] = 60,
         silent: bool = False,
     ) -> Dict[str, Any]:
         """Execute a terminal command on the client side."""

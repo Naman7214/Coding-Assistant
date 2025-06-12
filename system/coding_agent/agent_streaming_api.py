@@ -18,7 +18,7 @@ from models.schema.request_schema import (
     QueryRequest,
     StreamEvent,
 )
-from utils.context_formatter import format_user_query
+from utils.context_formatter import format_user_query, get_friendly_tool_name
 
 # Create FastAPI app
 app = FastAPI(title="Agent True Streaming API")
@@ -95,10 +95,12 @@ async def stream_agent_response(
 
             # Initialize agent with enhanced context system
             await agent_instance.initialize_session(
-                server_url,
-                transport_type,
-                workspace_path,
-                system_info.model_dump() if system_info else None,
+                server_url=server_url,
+                transport_type=transport_type,
+                workspace_path=workspace_path,
+                hashed_workspace_path=hashed_workspace_path,
+                git_branch=git_branch,
+                system_info=system_info.model_dump() if system_info else None,
             )
         except Exception as e:
             yield create_stream_event(
@@ -109,11 +111,11 @@ async def stream_agent_response(
     # Store workspace context for tool injection
     agent_instance.hashed_workspace_path = hashed_workspace_path
     agent_instance.git_branch = git_branch
-
     # Update agent with always-send context
     if system_info:
         agent_instance.set_system_info(system_info.model_dump())
     if active_file_context:
+        print(f"Active File Context: {active_file_context}")
         agent_instance.set_active_file_context(
             active_file_context.model_dump() if active_file_context else None
         )
@@ -218,10 +220,22 @@ async def handle_permission_response(response: PermissionResponse):
     permission_id = response.permission_id
     granted = response.granted
 
+    print(
+        f"[PERMISSION] Received response: {permission_id}, granted: {granted}"
+    )
+    print(
+        f"[PERMISSION] Current pending permissions: {list(pending_permissions.keys())}"
+    )
+
     if permission_id in pending_permissions:
         future = pending_permissions[permission_id]
         if not future.done():
             future.set_result(granted)
+
+        # Clean up the permission after processing
+        pending_permissions.pop(permission_id, None)
+        print(f"[PERMISSION] Cleaned up permission: {permission_id}")
+
         return {
             "status": "success",
             "message": f"Permission {'granted' if granted else 'denied'}",
@@ -443,6 +457,7 @@ async def process_enhanced_streaming_tool_calls(
 
             permission_future = asyncio.Future()
             pending_permissions[permission_id] = permission_future
+            print(f"[PERMISSION] Created permission request: {permission_id}")
 
             yield create_stream_event(
                 "permission_request",
@@ -454,7 +469,7 @@ async def process_enhanced_streaming_tool_calls(
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
                     "is_background": is_background,
-                    "timeout_seconds": 60,  # 5 minutes
+                    "timeout_seconds": 60,
                     "friendly_name": friendly_name,
                 },
             )
@@ -462,7 +477,7 @@ async def process_enhanced_streaming_tool_calls(
             try:
                 # Wait for permission response with 5-minute timeout
                 permission_granted = await asyncio.wait_for(
-                    permission_future, timeout=60.0  # 5 minutes
+                    permission_future, timeout=60.0
                 )
 
                 if not permission_granted:
@@ -491,7 +506,7 @@ async def process_enhanced_streaming_tool_calls(
                 # Send permission timeout event to close UI modal
                 yield create_stream_event(
                     "permission_timeout",
-                    "Permission request timed out after 5 minutes",
+                    "Permission request timed out after 1 minutes",
                     {
                         "permission_id": permission_id,
                         "timeout": True,
@@ -517,9 +532,105 @@ async def process_enhanced_streaming_tool_calls(
                     tool_use_id,
                     "Permission request timed out after 5 minutes. Command was not executed.",
                 )
-                continue
-            finally:
+                # Clean up pending permission only on timeout
                 pending_permissions.pop(permission_id, None)
+                continue
+
+        # Handle permission for file deletion
+        if tool_name == "delete_file":
+            # Get the file path from tool input (could be 'target_file', 'file_path', or 'path')
+            file_path = (
+                tool_input.get("target_file")
+                or tool_input.get("file_path")
+                or tool_input.get("path", "unknown file")
+            )
+            permission_id = f"perm_{tool_use_id}_{int(time.time())}"
+
+            permission_future = asyncio.Future()
+            pending_permissions[permission_id] = permission_future
+            print(
+                f"[PERMISSION] Created delete file permission request: {permission_id}"
+            )
+
+            yield create_stream_event(
+                "permission_request",
+                f"Permission required to delete file: {file_path}",
+                {
+                    "requires_permission": True,
+                    "file_path": file_path,
+                    "permission_id": permission_id,
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "timeout_seconds": 60,
+                    "friendly_name": friendly_name,
+                    "permission_type": "delete_file",
+                },
+            )
+
+            try:
+                # Wait for permission response with 1-minute timeout
+                permission_granted = await asyncio.wait_for(
+                    permission_future, timeout=60.0
+                )
+
+                if not permission_granted:
+                    yield create_stream_event(
+                        "tool_result",
+                        "User denied to delete the file",
+                        {
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_use_id,
+                            "friendly_name": friendly_name,
+                            "error": True,
+                            "permission_denied": True,
+                        },
+                    )
+                    agent_instance.agent_memory.add_tool_call(
+                        tool_call, "User denied to delete the file"
+                    )
+                    agent_instance.agent_memory.add_tool_result(
+                        tool_use_id, "User denied to delete the file"
+                    )
+                    continue
+
+                print(
+                    f"Enhanced: Permission granted to delete file: {file_path}"
+                )
+
+            except asyncio.TimeoutError:
+                # Send permission timeout event to close UI modal
+                yield create_stream_event(
+                    "permission_timeout",
+                    "File deletion permission request timed out after 1 minute",
+                    {
+                        "permission_id": permission_id,
+                        "timeout": True,
+                    },
+                )
+
+                yield create_stream_event(
+                    "tool_result",
+                    "File deletion permission request timed out after 1 minute. File was not deleted.",
+                    {
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_use_id,
+                        "friendly_name": friendly_name,
+                        "error": True,
+                        "timeout": True,
+                        "permission_denied": True,
+                    },
+                )
+                agent_instance.agent_memory.add_tool_call(
+                    tool_call,
+                    "File deletion permission request timed out after 1 minute",
+                )
+                agent_instance.agent_memory.add_tool_result(
+                    tool_use_id,
+                    "File deletion permission request timed out after 1 minute. File was not deleted.",
+                )
+                # Clean up pending permission only on timeout
+                pending_permissions.pop(permission_id, None)
+                continue
 
         # Enhanced tool execution with context injection
         try:
@@ -531,9 +642,9 @@ async def process_enhanced_streaming_tool_calls(
                 "run_terminal_command",
                 "search_and_replace",
                 "search_files",
-                "list_directory",
                 "read_file",
                 "delete_file",
+                "grep_search",
             }
 
             if (
@@ -546,12 +657,9 @@ async def process_enhanced_streaming_tool_calls(
                         f"✅ Enhanced: Injected workspace_path for {tool_name}"
                     )
 
-            # Enhanced workspace context injection for codebase_search_tool
-            if tool_name == "codebase_search_tool":
-                if (
-                    hasattr(agent_instance, "hashed_workspace_path")
-                    and agent_instance.hashed_workspace_path
-                ):
+            # Enhanced workspace context injection for codebase_search
+            if tool_name == "codebase_search":
+                if agent_instance.hashed_workspace_path:
                     if "hashed_workspace_path" not in tool_input:
                         tool_input["hashed_workspace_path"] = (
                             agent_instance.hashed_workspace_path
@@ -560,10 +668,7 @@ async def process_enhanced_streaming_tool_calls(
                             f"✅ Enhanced: Injected hashed_workspace_path for {tool_name}"
                         )
 
-                if (
-                    hasattr(agent_instance, "git_branch")
-                    and agent_instance.git_branch
-                ):
+                if agent_instance.git_branch:
                     if "git_branch" not in tool_input:
                         tool_input["git_branch"] = agent_instance.git_branch
                         print(
@@ -679,31 +784,8 @@ async def process_enhanced_streaming_tool_calls(
     print(f"Enhanced: Completed recursive call with depth {depth + 1}")
 
 
-def get_friendly_tool_name(tool_name: str) -> str:
-    """Convert technical tool names to user-friendly descriptions"""
-    friendly_names = {
-        "list_directory": "listing files",
-        "read_file": "reading file",
-        "edit_file": "editing file",
-        "search_and_replace": "modifying file",
-        "search_files": "searching codebase",
-        "run_terminal_command": "running command",
-        "create_file": "creating file",
-        "delete_file": "deleting file",
-        "move_file": "moving file",
-        "copy_file": "copying file",
-        "get_git_status": "checking git status",
-        "get_git_diff": "checking git changes",
-        "commit_changes": "committing changes",
-        "create_branch": "creating branch",
-        "switch_branch": "switching branch",
-        "merge_branch": "merging branch",
-    }
-    return friendly_names.get(tool_name, tool_name)
-
-
 if __name__ == "__main__":
     # Run the FastAPI app with uvicorn
     uvicorn.run(
-        app, host="0.0.0.0", port=5001
+        "agent_streaming_api:app", host="0.0.0.0", port=5001, reload=True
     )  # Different port for true streaming version

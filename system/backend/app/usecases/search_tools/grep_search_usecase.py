@@ -64,7 +64,7 @@ class GrepSearchUsecase:
             result = await self.terminal_client.execute_terminal_command(
                 command=command,
                 workspace_path=workspace_path,
-                timeout=30,  # 30 second timeout
+                timeout=60,  # 60 second timeout
                 silent=True,  # Don't show this command in terminal
             )
 

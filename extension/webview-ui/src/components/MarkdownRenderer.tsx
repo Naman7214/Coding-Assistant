@@ -28,20 +28,6 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ markdown }) => {
                 >
                   {String(children).replace(/\n$/, '')}
                 </SyntaxHighlighter>
-                <button 
-                  className="copy-button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(String(children));
-                    const button = document.activeElement as HTMLButtonElement;
-                    const originalText = button.textContent;
-                    button.textContent = 'Copied!';
-                    setTimeout(() => {
-                      button.textContent = originalText;
-                    }, 2000);
-                  }}
-                >
-                  Copy
-                </button>
               </div>
             ) : (
               <code className={className} {...props}>

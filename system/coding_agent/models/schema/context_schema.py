@@ -34,6 +34,7 @@ class CursorContext(BaseModel):
     character: int
     selection: List[Selection]
     lineContent: Dict[str, str]  # keys: current, above, below
+    selectedContent: str = None  # Optional field for large selections
 
 
 class ViewportRange(BaseModel):

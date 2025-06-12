@@ -10,8 +10,8 @@ from config.settings import settings
 from fastmcp import Client
 from memory.agent_memory import AgentMemory
 from models.schema.context_schema import RecentEditsContext
-from motor.motor_asyncio import AsyncIOMotorClient
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
+from repositories.llm_usage_repository import LLMUsageRepository
 from utils.context_formatter import format_system_info_context
 
 logger = getLogger(__name__)
@@ -27,6 +27,8 @@ class AnthropicStreamingAgent:
         self.client = None
         self.anthropic_tools = []
         self.workspace_path = None
+        self.hashed_workspace_path = None
+        self.git_branch = None
         self.system_info = None
         self.active_file_context = None  # New: store active file context
         self.open_files_context = []  # New: store open files context
@@ -40,15 +42,8 @@ class AnthropicStreamingAgent:
             pool=60.0,
         )
 
-        try:
-            self.mongodb_client = AsyncIOMotorClient(settings.MONGODB_URL)
-            self.llm_usage_collection = self.mongodb_client[
-                settings.MONGODB_DB_NAME
-            ][settings.LLM_USAGE_COLLECTION_NAME]
-        except Exception as e:
-            logger.error(f"MongoDB connection error: {str(e)}")
-            self.mongodb_client = None
-            self.llm_usage_collection = None
+        # Initialize LLM usage repository
+        self.llm_usage_repository = LLMUsageRepository()
 
     def set_system_info(self, system_info: dict):
         """Set system information for the agent"""
@@ -108,8 +103,10 @@ class AnthropicStreamingAgent:
                 system_info=self.system_info
             )
             system_prompt = CODING_AGENT_SYSTEM_PROMPT.format(
-                system_info_context=system_info_context
+                system_info_context=system_info_context,
+                current_date_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             )
+
             # Update agent memory with enhanced cached system prompt
             self.agent_memory.initialize_with_system_message(system_prompt)
             logger.info("✅ Agent memory updated with enhanced context")
@@ -131,7 +128,7 @@ class AnthropicStreamingAgent:
             "x-api-key": settings.ANTHROPIC_API_KEY,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
-            "anthropic-beta": "interleaved-thinking-2025-05-14",
+            "anthropic-beta": "interleaved-thinking-2025-05-14,extended-cache-ttl-2025-04-11",
         }
         # Get cached system prompt from enhanced memory
         system_content = self.agent_memory.get_system_prompt_with_cache()
@@ -479,69 +476,68 @@ class AnthropicStreamingAgent:
                                         # Calculate API call duration
                                         duration = time.time() - start_time
 
-                                        # Log API usage to MongoDB
-                                        if (
-                                            self.mongodb_client is not None
-                                            and self.llm_usage_collection
-                                            is not None
-                                        ):
-                                            try:
-                                                # Extract usage information
-                                                usage = complete_message.get(
-                                                    "usage", {}
-                                                )
-                                                input_tokens = usage.get(
-                                                    "input_tokens", 0
-                                                )
-                                                output_tokens = usage.get(
-                                                    "output_tokens", 0
-                                                )
-                                                cache_creation_input_tokens = usage.get(
-                                                    "cache_creation_input_tokens",
-                                                    0,
-                                                )
-                                                cache_read_input_tokens = usage.get(
-                                                    "cache_read_input_tokens", 0
-                                                )
+                                        # Log API usage via repository
+                                        try:
+                                            print("new new new")
+                                            # Extract usage information
+                                            usage = complete_message.get(
+                                                "usage", {}
+                                            )
+                                            input_tokens = usage.get(
+                                                "input_tokens", 0
+                                            )
+                                            output_tokens = usage.get(
+                                                "output_tokens", 0
+                                            )
+                                            cache_creation_input_tokens = usage.get(
+                                                "cache_creation_input_tokens", 0
+                                            )
+                                            cache_read_input_tokens = usage.get(
+                                                "cache_read_input_tokens", 0
+                                            )
 
-                                                # Debug log to verify correct token counts
-                                                logger.info(
-                                                    f"Final token usage - Input: {input_tokens}, Output: {output_tokens}, "
-                                                    f"Cache Creation: {cache_creation_input_tokens}, Cache Read: {cache_read_input_tokens}"
-                                                )
+                                            # Debug log to verify correct token counts
+                                            logger.info(
+                                                f"Final token usage - Input: {input_tokens}, Output: {output_tokens}, "
+                                                f"Cache Creation: {cache_creation_input_tokens}, Cache Read: {cache_read_input_tokens}"
+                                            )
 
-                                                total_tokens = (
-                                                    input_tokens
-                                                    + output_tokens
-                                                    + cache_creation_input_tokens
-                                                    + cache_read_input_tokens
-                                                )
+                                            total_tokens = (
+                                                input_tokens
+                                                + output_tokens
+                                                + cache_creation_input_tokens
+                                                + cache_read_input_tokens
+                                            )
 
-                                                # Create usage log document
-                                                llm_usage = {
-                                                    "input_tokens": input_tokens,
-                                                    "output_tokens": output_tokens,
-                                                    "total_tokens": total_tokens,
-                                                    "cache_creation_input_tokens": cache_creation_input_tokens,
-                                                    "cache_read_input_tokens": cache_read_input_tokens,
-                                                    "duration": duration,
-                                                    "provider": "Anthropic",
-                                                    "model": self.model_name,
-                                                    "created_at": datetime.utcnow(),
-                                                    "request_id": complete_message.get(
-                                                        "id", "unknown"
-                                                    ),
-                                                    "request_type": "chat_streaming",
-                                                }
+                                            # Create usage data dictionary
+                                            usage_data = {
+                                                "input_tokens": input_tokens,
+                                                "output_tokens": output_tokens,
+                                                "total_tokens": total_tokens,
+                                                "cache_creation_input_tokens": cache_creation_input_tokens,
+                                                "cache_read_input_tokens": cache_read_input_tokens,
+                                                "duration": duration,
+                                                "provider": "Anthropic",
+                                                "model": self.model_name,
+                                                "request_id": complete_message.get(
+                                                    "id", "unknown"
+                                                ),
+                                                "request_type": "chat_streaming",
+                                            }
 
-                                                # Log asynchronously without waiting for completion
-                                                await self.llm_usage_collection.insert_one(
-                                                    llm_usage
-                                                )
-                                            except Exception as log_error:
+                                            # Log via repository
+                                            success = await self.llm_usage_repository.log_llm_usage(
+                                                usage_data
+                                            )
+                                            if not success:
                                                 logger.warning(
-                                                    f"Failed to log API usage: {str(log_error)}"
+                                                    "Failed to log API usage via repository"
                                                 )
+
+                                        except Exception as log_error:
+                                            logger.warning(
+                                                f"Failed to log API usage: {str(log_error)}"
+                                            )
 
                                         yield {
                                             "type": "message_stop",
@@ -607,12 +603,20 @@ class AnthropicStreamingAgent:
             yield {"type": "error", "data": {"error": str(e)}}
 
     async def initialize_session(
-        self, server_url, transport_type, workspace_path, system_info=None
+        self,
+        server_url,
+        transport_type,
+        workspace_path,
+        hashed_workspace_path,
+        git_branch,
+        system_info=None,
     ):
         """Initialize the MCP session with optional system information and workspace ID"""
         try:
             # Store workspace path, system info, and workspace ID
             self.workspace_path = workspace_path or os.getcwd()
+            self.hashed_workspace_path = hashed_workspace_path
+            self.git_branch = git_branch
             if system_info:
                 self.set_system_info(system_info)
 
@@ -663,7 +667,10 @@ class AnthropicStreamingAgent:
 
                     # Add cache_control for the last tool in the list
                     if tool == tools[-1]:
-                        anthropic_tool["cache_control"] = {"type": "ephemeral"}
+                        anthropic_tool["cache_control"] = {
+                            "type": "ephemeral",
+                            "ttl": "1h",
+                        }
 
                     self.anthropic_tools.append(anthropic_tool)
 
@@ -705,6 +712,16 @@ class AnthropicStreamingAgent:
                     logger.info("FastMCP client closed successfully")
                 except Exception as e:
                     logger.error(f"Error closing FastMCP client: {str(e)}")
+
+            # Cleanup repository connections
+            if self.llm_usage_repository:
+                try:
+                    await self.llm_usage_repository.cleanup()
+                except Exception as e:
+                    logger.error(
+                        f"Error closing LLM usage repository: {str(e)}"
+                    )
+
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
 

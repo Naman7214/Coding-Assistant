@@ -491,7 +491,7 @@ export class ApplyManager implements IApplyManager {
     }
 
     /**
-     * **IMPROVED: Show diff with file-specific controls using VSCode's native diff view**
+     * **IMPROVED: Show diff with file-specific controls - offers both inline decorations and native diff view**
      */
     private showDiffWithFileControls(
         editor: vscode.TextEditor,
@@ -499,7 +499,13 @@ export class ApplyManager implements IApplyManager {
         streamedContent: string,
         filePath: string
     ): void {
-        // Show the VSCode's native diff view
+        // Calculate diff for inline decorations
+        const diff = this.diffRenderer.calculateDiff(originalContent, streamedContent);
+
+        // Show inline decorations with color highlighting (primary approach)
+        this.diffRenderer.renderDiff(editor, diff);
+
+        // Also show VSCode's native diff view in a side panel (fixed - no .original files)
         this.diffRenderer.showVSCodeDiff(originalContent, streamedContent, filePath);
 
         // Add file-specific accept/reject buttons
@@ -508,11 +514,13 @@ export class ApplyManager implements IApplyManager {
             filePath,
             async (accepted: boolean) => {
                 if (accepted) {
-                    // User accepted - changes are already applied, just clear diff
+                    // User accepted - changes are already applied, just clear diff decorations
+                    this.diffRenderer.clearDiff(editor);
                     this.statusIndicator.update('Changes accepted', 'check');
                 } else {
-                    // User rejected - restore original content
+                    // User rejected - restore original content and clear decorations
                     await this.fileUpdateService.writeFileContent(filePath, originalContent);
+                    this.diffRenderer.clearDiff(editor);
                     this.statusIndicator.update('Changes rejected - original restored', 'discard');
                 }
 

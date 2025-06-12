@@ -21,10 +21,7 @@ class ReapplyController:
 
     async def execute(self, request: ReapplyRequest):
         response = await self.reapply_usecase.execute(
-            request.target_file_content,
-            request.code_snippet,
-            request.explanation,
-            request.workspace_path,
+            request.target_file_content, request.code_snippet
         )
 
         status_code = status.HTTP_200_OK
@@ -56,16 +53,12 @@ class ReapplyController:
                 {
                     "code_snippet_length": len(request.code_snippet),
                     "target_content_length": len(request.target_file_content),
-                    "explanation": request.explanation,
                 },
             )
 
             # Stream the actual reapply process
             async for event in self.reapply_usecase.execute_stream(
-                request.target_file_content,
-                request.code_snippet,
-                request.explanation,
-                request.workspace_path,
+                request.target_file_content, request.code_snippet
             ):
                 yield event
 

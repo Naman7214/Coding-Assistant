@@ -213,3 +213,6 @@ yarn-error.log*
 Thumbs.db
 track.md
 todo.md
+.github
+.cursor
+.cursorignore

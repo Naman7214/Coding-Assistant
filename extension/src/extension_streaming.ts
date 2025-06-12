@@ -745,7 +745,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
           recent_edits_context: recentEditsData?.data || null,
           context_mentions: contextMentions.length > 0 ? contextMentions : null
         };
-        this.outputChannel.appendLine(`[Query] Stream request: ${JSON.stringify(streamRequest)}`);
+        this.outputChannel.appendLine(`[Query] Stream request: ${JSON.stringify(streamRequest, null, 2)}`);
         const requestHeaders = {
           'X-Workspace-ID': this.contextManager!.getWorkspaceId()
         };
@@ -1041,7 +1041,7 @@ class EnhancedAssistantViewProvider implements vscode.WebviewViewProvider {
   private getContextSummary(context: ProcessedContext): string {
     return [
       `Workspace: ${context.workspace.path}`,
-      `Current file: ${context.activeFile?.relativePath || 'none'}`,
+      `Current file: ${context.activeFile?.file?.path ? require('path').basename(context.activeFile.file.path) : 'none'}`,
       `Open files: ${context.openFiles.length}`,
       `Project structure: ${context.projectStructure.length > 0 ? 'Available' : 'Not available'}`,
       `Git branch: ${context.gitContext.branch || 'none'}`,

@@ -59,7 +59,10 @@ async def grep_search(
         ),
     ],
     workspace_path: Annotated[
-        Optional[str], Field(description="The workspace path to search in")
+        Optional[str],
+        Field(
+            description="The workspace path, this is automatically injected by the system"
+        ),
     ],
     case_sensitive: Annotated[
         bool, Field(description="Whether to use case-sensitive search")
@@ -114,7 +117,12 @@ async def read_file(
             description="explanation message that will be printed before reading the file."
         ),
     ] = None,
-    workspace_path: Optional[str] = None,
+    workspace_path: Annotated[
+        Optional[str],
+        Field(
+            description="The workspace path, this is automatically injected by the system"
+        ),
+    ] = None,
 ) -> str:
     """
     Reads the contents of a specified file. You may choose to read the a specific range of lines by providing optional start and end line numbers default is 1 and 100. The tool returns the file content.
@@ -145,7 +153,10 @@ async def run_terminal_command(
         str, Field(description="The terminal command to execute")
     ],
     workspace_path: Annotated[
-        str, Field(description="The path to the current workspace")
+        str,
+        Field(
+            description="The workspace path, this is automatically injected by the system"
+        ),
     ],
     is_background: Annotated[
         bool,
@@ -198,7 +209,12 @@ async def delete_file(
             description="A short explanation describing why this file or directory is being deleted and how it contributes to the overall task."
         ),
     ],
-    workspace_path: Optional[str] = None,
+    workspace_path: Annotated[
+        Optional[str],
+        Field(
+            description="The workspace path, this is automatically injected by the system"
+        ),
+    ] = None,
 ) -> str:
     """
     Deletes a file at the specified absolute path. The operation will fail gracefully if:
@@ -221,10 +237,10 @@ async def delete_file(
 
 @mcp.tool()
 async def list_directory(
-    dir_path: Annotated[
+    directoryPath: Annotated[
         str,
         Field(
-            description="The path of the directory to list. If not provided, the current working directory is used."
+            description="The path of the directory or workspace path to list."
         ),
     ],
     explanation: Annotated[
@@ -233,17 +249,14 @@ async def list_directory(
             description="A short explanation of why this directory listing is being performed and how it supports the overall goal."
         ),
     ],
-    workspace_path: Optional[str] = None,
 ) -> str:
     """
     List the contents of a directory. The quick tool to use for discovery, before using more targeted tools like semantic search or file reading. Useful to try to understand the file structure before diving deeper into specific files. This tool can be most useful to explore the codebase.
     """
-    logger.info(f"Listing directory: {dir_path}")
+    logger.info(f"Listing directory: {directoryPath}")
     try:
         result = await list_directory_tool(
-            dir_path=dir_path,
-            explanation=explanation,
-            workspace_path=workspace_path,
+            directoryPath=directoryPath, explanation=explanation
         )
     except Exception as e:
         logger.error(f"Error occurred while listing directory: {e}")
@@ -268,8 +281,11 @@ async def search_and_replace(
         ),
     ],
     workspace_path: Annotated[
-        str, Field(description="The path to the workspace")
-    ],
+        Optional[str],
+        Field(
+            description="The workspace path, this is automatically injected by the system"
+        ),
+    ] = None,
     options: Annotated[
         Optional[Dict[str, Any]],
         Field(description="Additional options for search and replace"),
@@ -305,8 +321,11 @@ async def search_files(
         ),
     ],
     workspace_path: Annotated[
-        str, Field(description="The path to the workspace")
-    ],
+        Optional[str],
+        Field(
+            description="The workspace path, this is automatically injected by the system"
+        ),
+    ] = None,
 ) -> str:
     """
     Fast file search based on fuzzy matching against file path. Use if you know part of the file path but don't know where it's located exactly. Response will be capped to 10 results. Make your query more specific if need to filter results further.
@@ -343,7 +362,7 @@ async def web_search(
         Field(
             description="Target urls to search on if this is given means this links will be directly used to search on."
         ),
-    ] = None,
+    ] = [],
 ) -> str:
     """
     Search the web for real-time information about any topic. Use this tool when you need up-to-date information that might not be available in your training data, or when you need to verify current facts. The search results will include relevant snippets and URLs from web pages. This is particularly useful for questions about current events, technology updates, or any topic that requires recent information. You can also specify target urls to search on. if target_urls are given then content of only those url will be used to search on.
@@ -411,13 +430,13 @@ async def codebase_search(
 
 @mcp.tool()
 async def edit_file(
-    target_file_path: Annotated[
+    filePath: Annotated[
         str,
         Field(
             description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
         ),
     ],
-    code_snippet: Annotated[
+    codeSnippet: Annotated[
         str,
         Field(
             description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**."
@@ -429,18 +448,14 @@ async def edit_file(
             description="A single sentence instruction describing what you are going to do for the sketched edit."
         ),
     ],
-    workspace_path: Optional[str] = None,
 ) -> str:
     """
     Use this tool to propose an edit to an existing file. This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write. You should still bias towards repeating as few lines of the original file as possible to convey the change. But, each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity. Make sure it is clear what the edit should be, and where it should be applied. You MUST provide the following required arguments: target_file_path (the file to edit), code_snippet (your proposed changes), and explanation (why you're making these changes).
     """
-    logger.info(f"Editing file: {target_file_path}")
+    logger.info(f"Editing file: {filePath}")
     try:
         result = await edit_file_tool(
-            target_file_path=target_file_path,
-            code_snippet=code_snippet,
-            explanation=explanation,
-            workspace_path=workspace_path,
+            target_file_path=filePath, code_snippet=codeSnippet
         )
     except Exception as e:
         logger.error(f"Error occurred while editing file: {e}")
@@ -452,13 +467,13 @@ async def edit_file(
 
 @mcp.tool()
 async def reapply(
-    target_file_path: Annotated[
+    filePath: Annotated[
         str,
         Field(
             description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
         ),
     ],
-    code_snippet: Annotated[
+    codeSnippet: Annotated[
         str,
         Field(
             description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**."
@@ -470,18 +485,14 @@ async def reapply(
             description="A single sentence instruction describing what you are going to do for the sketched edit."
         ),
     ],
-    workspace_path: Optional[str] = None,
 ) -> str:
     """
     Calls a smarter model to apply the last edit to the specified file. Use this tool immediately after the result of an edit_file tool call ONLY IF the diff is not what you expected, indicating the model applying the changes was not smart enough to follow your instructions.
     """
-    logger.info(f"Reapplying changes to file: {target_file_path}")
+    logger.info(f"Reapplying changes to file: {filePath}")
     try:
         result = await reapply_tool(
-            target_file_path=target_file_path,
-            code_snippet=code_snippet,
-            explanation=explanation,
-            workspace_path=workspace_path,
+            target_file_path=filePath, code_snippet=codeSnippet
         )
     except Exception as e:
         logger.error(f"Error occurred while reapplying changes: {e}")

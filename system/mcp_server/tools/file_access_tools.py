@@ -93,8 +93,7 @@ async def delete_file_tool(
 
 
 async def list_directory_tool(
-    dir_path: Optional[str] = None,
-    workspace_path: Optional[str] = None,
+    directoryPath: Optional[str] = None,
     explanation: str = "",
 ) -> List[Dict[str, Any]]:
 
@@ -102,10 +101,8 @@ async def list_directory_tool(
         "explanation": explanation,
     }
 
-    if dir_path:
-        payload["dir_path"] = dir_path
-    if workspace_path:
-        payload["workspace_path"] = workspace_path
+    if directoryPath:
+        payload["directoryPath"] = directoryPath
 
     try:
         async with httpx.AsyncClient(

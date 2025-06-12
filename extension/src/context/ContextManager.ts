@@ -760,32 +760,8 @@ export class ContextManager extends EventEmitter {
                 languages: this.workspaceMetadata?.languages || [],
                 packageManagers: this.workspaceMetadata?.packageManagers || []
             },
-            activeFile: activeFileData ? {
-                path: activeFileData.file?.path || '',
-                relativePath: activeFileData.file?.relativePath || '',
-                languageId: activeFileData.file?.languageId || '',
-                lineCount: activeFileData.file?.lineCount || 0,
-                fileSize: activeFileData.file?.fileSize || 0,
-                lastModified: activeFileData.file?.lastModified || new Date().toISOString(),
-                cursorPosition: activeFileData.cursor ? new vscode.Position(
-                    Math.max(0, (activeFileData.cursor.line || 0)),
-                    Math.max(0, (activeFileData.cursor.character || 1) - 1)
-                ) : new vscode.Position(0, 0),
-                selection: activeFileData.cursor?.selection || new vscode.Selection(
-                    new vscode.Position(0, 0),
-                    new vscode.Position(0, 0)
-                ),
-                visibleRanges: activeFileData.viewport?.visibleRanges || [],
-                cursorLineContent: activeFileData.cursor?.lineContent || undefined
-            } : null,
-            openFiles: openFilesData && Array.isArray(openFilesData) ? openFilesData.map((file: any) => ({
-                path: file.path || '',
-                relativePath: file.relativePath || '',
-                languageId: file.languageId || '',
-                lineCount: file.lineCount || 0,
-                fileSize: file.fileSize || 0,
-                lastModified: file.lastModified || new Date().toISOString()
-            })) : [],
+            activeFile: activeFileData || null,
+            openFiles: openFilesData || [],
             projectStructure: projectStructureData?.treeStructure || '',
             gitContext: gitContextData ? {
                 branch: gitContextData.repository?.currentBranch || '',

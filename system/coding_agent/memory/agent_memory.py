@@ -8,6 +8,7 @@ import httpx
 import tiktoken
 from config.settings import settings
 from prompts.memory_summarization_prompt import MEMORY_SUMMARIZATION_PROMPT
+from repositories.llm_usage_repository import LLMUsageRepository
 
 
 class AgentMemory:
@@ -51,6 +52,9 @@ class AgentMemory:
             pool=60.0,
         )
 
+        # Initialize LLM usage repository for logging OpenAI usage
+        self.llm_usage_repository = LLMUsageRepository()
+
     def _count_tokens(self, text: str) -> int:
         """Count tokens in text using tiktoken"""
         try:
@@ -75,7 +79,10 @@ class AgentMemory:
             {
                 "type": "text",
                 "text": system_message,
-                "cache_control": {"type": "ephemeral"},  # Enable caching
+                "cache_control": {
+                    "type": "ephemeral",
+                    "ttl": "1h",
+                },
             }
         ]
 
@@ -285,6 +292,8 @@ class AgentMemory:
             "temperature": 0.3,
         }
 
+        start_time = time.time()
+
         async with httpx.AsyncClient(
             verify=False, timeout=self.timeout
         ) as client:
@@ -292,11 +301,49 @@ class AgentMemory:
             response.raise_for_status()
 
             response_data = response.json()
+            duration = time.time() - start_time
+
+            # Log OpenAI usage
+            try:
+                usage_info = response_data.get("usage", {})
+                input_tokens = usage_info.get("input_tokens", 0)
+                output_tokens = usage_info.get("output_tokens", 0)
+                total_tokens = usage_info.get("total_tokens", 0)
+
+                # Create usage data for logging
+                usage_data = {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": total_tokens,
+                    "cache_creation_input_tokens": 0,  # OpenAI doesn't use cache tokens like Anthropic
+                    "cache_read_input_tokens": 0,
+                    "duration": duration,
+                    "provider": "OpenAI",
+                    "model": payload["model"],
+                    "request_id": response_data.get("id", "unknown"),
+                    "request_type": "memory_summarization",
+                }
+
+                # Log usage via repository
+                success = await self.llm_usage_repository.log_llm_usage(
+                    usage_data
+                )
+                if success:
+                    print(
+                        f"✅ Enhanced Memory: OpenAI usage logged - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}"
+                    )
+                else:
+                    print("⚠️ Enhanced Memory: Failed to log OpenAI usage")
+
+            except Exception as log_error:
+                print(
+                    f"⚠️ Enhanced Memory: Error logging OpenAI usage: {str(log_error)}"
+                )
 
             if "choices" in response_data and len(response_data["choices"]) > 0:
                 summary = response_data["choices"][0]["message"]["content"]
                 print(
-                    f"✅ Enhanced Memory: OpenAI summary generated: {summary}"
+                    f"✅ Enhanced Memory: OpenAI summary generated: {summary}..."
                 )
                 return summary
             else:

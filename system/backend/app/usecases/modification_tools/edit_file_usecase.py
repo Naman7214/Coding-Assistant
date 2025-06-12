@@ -14,23 +14,15 @@ class EditFileUsecase:
         self.edit_file_service = edit_file_service
 
     async def execute(
-        self,
-        target_file_content: str,
-        code_snippet: str,
-        explanation: str,
-        workspace_path: str = None,
+        self, target_file_content: str, code_snippet: str
     ) -> Dict[str, Any]:
 
         return await self.edit_file_service.edit_file(
-            target_file_content, code_snippet, explanation, workspace_path
+            target_file_content, code_snippet
         )
 
     async def execute_stream(
-        self,
-        target_file_content: str,
-        code_snippet: str,
-        explanation: str,
-        workspace_path: str = None,
+        self, target_file_content: str, code_snippet: str
     ) -> AsyncGenerator[str, None]:
         """Stream the file editing process as server-sent events"""
         try:
@@ -40,13 +32,13 @@ class EditFileUsecase:
                 "Preparing to apply code changes...",
                 {
                     "stage": "preparation",
-                    "workspace_path": workspace_path,
+                    "workspace_path": None,
                 },
             )
 
             # Stream from service layer
             async for event in self.edit_file_service.edit_file_stream(
-                target_file_content, code_snippet, explanation, workspace_path
+                target_file_content, code_snippet
             ):
                 yield event
 
