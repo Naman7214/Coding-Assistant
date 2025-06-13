@@ -273,9 +273,9 @@ python -m system.mcp_server.fastmcp_server --port 8001
 cd system/coding_agent
 python agent_streaming_api.py
 ```
-## Common Issues & Solutions
+#### Common Issues & Solutions
 
-### ImportError: cannot import name 'SON' from 'bson'
+##### ImportError: cannot import name 'SON' from 'bson'
 
 If you encounter this error while installing dependencies:
 ```
@@ -288,7 +288,7 @@ pip uninstall bson
 pip install --force-reinstall pymongo
 ```
 
-### Crawl4AI Error
+##### Crawl4AI Error
 
 If you encounter errors related to crawl4ai:
 ```
@@ -310,6 +310,11 @@ cd ..
 npm install
 npm run compile
 ```
+
+**Start Extension in Development Mode:**
+1. Open `extension/src/extension_streaming.ts` file in VS Code
+2. Press `F5` or go to `Run > Start Debugging` to launch the Extension Development Host
+3. This will open a new VS Code window with the Rocket Copilot extension loaded for testing
 
 ## 🔧 Advanced Features
 
