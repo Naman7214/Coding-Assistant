@@ -27,7 +27,7 @@ class AgentMemory:
         # Configuration
         self.model_name = model_name
         self.max_tokens = 100000
-        self.keep_last_messages = 5
+        self.keep_last_messages = 14
 
         # Token counting
         self.encoding = tiktoken.get_encoding("cl100k_base")
@@ -181,16 +181,103 @@ class AgentMemory:
                 # If no event loop, create one
                 asyncio.run(self._summarize_memory())
 
+    def _find_safe_split_point(
+        self, messages: List[Dict[str, Any]], min_keep_count: int
+    ) -> int:
+        """
+        SIMPLE SOLUTION: Find a safe point to split messages ensuring tool_use/tool_result pairs are not broken.
+
+        Logic:
+        1. Start from the end and work backwards
+        2. If we see a tool_result, make sure we include its tool_use
+        3. If we see a tool_use, make sure we include its tool_result
+        4. Keep going until we have a "complete" conversation without broken pairs
+        """
+        if len(messages) <= min_keep_count:
+            return 0
+
+        # Start from the end and find the first "safe" point
+        # We'll be more conservative and keep more messages to ensure safety
+        keep_from_index = len(messages) - min_keep_count
+
+        # Go backwards from our desired split point to find a safe boundary
+        for i in range(keep_from_index, -1, -1):
+            if self._is_safe_boundary(messages, i):
+                return i
+
+        # If no safe boundary found, don't summarize (keep all messages)
+        return 0
+
+    def _is_safe_boundary(
+        self, messages: List[Dict[str, Any]], split_index: int
+    ) -> bool:
+        """
+        Check if splitting at this index is safe (doesn't break tool pairs).
+
+        A boundary is safe if:
+        1. The first message we keep doesn't start with a tool_result (orphaned)
+        2. The last message we summarize doesn't end with a tool_use (incomplete)
+        """
+        if split_index >= len(messages):
+            return True
+
+        # Check if the first message we're keeping starts with tool_result
+        if split_index < len(messages):
+            first_kept_message = messages[split_index]
+            content = first_kept_message.get("content", [])
+
+            # If first message has tool_result, it's not safe (orphaned result)
+            has_tool_result = any(
+                block.get("type") == "tool_result"
+                for block in content
+                if isinstance(block, dict)
+            )
+            if has_tool_result:
+                return False
+
+        # Check if the last message we're summarizing ends with tool_use
+        if split_index > 0:
+            last_summarized_message = messages[split_index - 1]
+            content = last_summarized_message.get("content", [])
+
+            # If last summarized message has tool_use, it's not safe (incomplete call)
+            has_tool_use = any(
+                block.get("type") == "tool_use"
+                for block in content
+                if isinstance(block, dict)
+            )
+            if has_tool_use:
+                return False
+
+        return True
+
     async def _summarize_memory(self):
-        """Summarize memory excluding last 5 messages using OpenAI API"""
+        """Summarize memory ensuring tool_use/tool_result pairs are not broken"""
         if len(self.conversation_memory) <= self.keep_last_messages:
             return
 
+        # Find safe split point that doesn't break tool call/result pairs
+        safe_split_index = self._find_safe_split_point(
+            self.conversation_memory, self.keep_last_messages
+        )
+
+        print(
+            f"🔍 Memory: Total messages: {len(self.conversation_memory)}, "
+            f"Wanted to keep: {self.keep_last_messages}, "
+            f"Safe split at index: {safe_split_index}, "
+            f"Actually keeping: {len(self.conversation_memory) - safe_split_index}"
+        )
+
         # Split messages: old (to summarize) and recent (to keep)
-        messages_to_summarize = self.conversation_memory[
-            : -self.keep_last_messages
-        ]
-        recent_messages = self.conversation_memory[-self.keep_last_messages :]
+        messages_to_summarize = self.conversation_memory[:safe_split_index]
+        recent_messages = self.conversation_memory[safe_split_index:]
+
+        # If no messages to summarize (all recent messages are needed for tool pairs), skip
+        if not messages_to_summarize:
+            print(
+                "⚠️ Memory: No messages to summarize - all needed for tool pairing"
+            )
+            return
 
         # Create text for summarization
         summary_text = self._create_summary_text(messages_to_summarize)

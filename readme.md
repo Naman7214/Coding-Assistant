@@ -1,46 +1,289 @@
-# Code Generation Assistant
-# the final AIM is to build the coding agent extension like you Cursor 
-The Code Generation Assistant is a powerful AI agent system designed to help with coding tasks. It consists of three main components: the Backend, the MCP Server, and the AI Coding Agent, which work together to provide a comprehensive code assistance experience.
+# 🚀 Rocket Copilot - The SWE Killer
 
-## System Architecture
+> **A Next-Generation VS Code Extension for AI-Powered Software Engineering**
 
-- **AI Coding Agent**: An agent powered by Claude 3.7 Sonnet that can understand coding problems and use tools to solve them.
-- **MCP Server**: A middleware server that acts as a bridge between the AI agent and the backend. It provides a list of tools the AI agent can use.
-- **Backend**: A FastAPI application that implements the logic for the tools used by the AI agent through the MCP server.
+Rocket Copilot is an advanced VS Code extension that revolutionizes software development through intelligent AI assistance, sophisticated codebase indexing, and seamless integration with development workflows. Built with a secure, multi-layered architecture, it provides developers with unprecedented capabilities for code understanding, generation, and maintenance.
 
-## Prerequisites
+## 🌟 Key Features
 
-- Python 3.8+
-- pip
-- install ripgrep , for Mac : ```brew install ripgrep```
-- install fzf , for Mac : ```brew install fzf```
-- deploy fastapply model on hugging face to use edit_file and reapply tool
+### 🧠 **Intelligent AI Agent**
+- **Anthropic Claude-Powered**: Advanced reasoning and code understanding
+- **Context-Aware Responses**: Leverages comprehensive workspace context
+- **Memory Management**: Maintains conversation history and learns from interactions
+- **Tool Integration**: 13 specialized tools for comprehensive development tasks
+
+### 🏗️ **Advanced Codebase Indexing**
+- **Semantic Chunking**: Uses Tree-sitter for intelligent code parsing
+- **Merkle Tree Architecture**: Efficient change detection and incremental updates
+- **Multi-Database Strategy**: MongoDB + Pinecone for optimal performance
+- **Privacy-First Design**: Only start line, end line and obfuscated path is stored
+- **Branch-Aware**: Git-integrated indexing with branch-specific contexts
+
+### 💬 **Intuitive User Interface**
+- **Chat-Based Interaction**: Clean, modern conversational interface
+- **Context Mentions**: Use `@` symbol to reference files, directories, git context
+- **Streaming Responses**: Real-time AI responses with thinking process visibility
+- **Permission Management**: User approval required for terminal commands
+
+### 🔧 **Comprehensive Context Providers**
+- **Active File Context**: Real-time cursor position and selection awareness
+- **Open Files Tracking**: Monitor all active editor tabs
+- **Problems Integration**: VSCode diagnostics and linter errors
+- **Git Context**: Repository state, branches, commits, and diffs
+- **Project Structure**: Intelligent directory tree generation
+
+### 🛠️ **Powerful Tool Ecosystem**
+- **File Operations**: Read, edit, delete, and search files
+- **Code Modifications**: Intelligent editing with diff visualization
+- **Terminal Integration**: Secure command execution with persistent sessions
+- **Search Capabilities**: Semantic and regex-based code search
+- **External Integration**: Web search and external API access
+
+## 🏛️ Architecture Overview
+
+Rocket Copilot employs a sophisticated 5-layer architecture ensuring security, performance, and scalability:
+
+## 🔍 Layer-by-Layer Architecture
+
+### **Layer 1: React Webview UI (Client Side)**
+```
+📁 extension/webview-ui/src/
+├── components/     # UI Components
+├── types/         # TypeScript Types
+├── App.tsx        # Main Application
+└── index.tsx      # Entry Point
+```
+
+**Features:**
+- **Cursor-Like Interface**: Minimal, clean chatbot design
+- **Context Integration**: @ symbol for mentioning files, directories, git context
+- **Real-time Streaming**: Shows agent thinking → tool usage → response flow
+- **Permission Gates**: User approval required for terminal commands
+- **Diff Visualization**: Green/red code changes from apply/reapply tools
+
+### **Layer 2: VS Code Extension (Client Side)**
+```
+📁 extension/src/
+├── indexing/          # Codebase Indexing System
+├── apply/            # Code Application & Diff System
+├── bridge/           # Terminal Bridge (PersistentTerminalManager)
+├── context/          # Context Collectors & Storage
+├── services/         # Extension Services
+└── types/           # TypeScript Definitions
+```
+
+**Key Components:**
+
+#### 🧩 **Indexing System** (`extension/src/indexing/`)
+- **Merkle Tree Builder**: Detects file changes with cryptographic precision
+- **Tree-sitter Chunker**: Semantic code parsing
+- **Git Monitor**: Branch change detection and repository monitoring
+- **Storage Manager**: VSCode storage integration with compression
+- **Server Communication**: Secure chunk transmission to backend
+
+#### 🔄 **Apply System** (`extension/src/apply/`)
+- **Streaming Code Edits**: Real-time diff generation and display
+- **Linter Integration**: Automatic error detection and feedback
+- **Reapply Mechanism**: Smart model retry for failed edits
+- **Diff Visualization**: Visual code change representation
+
+#### 🌉 **Terminal Bridge** (`extension/src/bridge/`)
+- **Persistent Sessions**: Maintains terminal state across commands
+- **Shell Integration**: VSCode terminal shell integration
+- **Command Execution**: Background and interactive command support
+- **Environment Management**: Working directory and environment variables
+
+#### 📊 **Context Collectors** (`extension/src/context/`)
+- **Active File Collector**: Real-time cursor and selection tracking
+- **Open Files Collector**: Monitor all editor tabs and document states
+- **Problems Collector**: VSCode diagnostics and linter errors
+- **Git Context Collector**: Repository state, commits, and changes
+- **Project Structure Collector**: Intelligent directory tree generation
+
+### **Layer 3: Coding Agent (Server Side)**
+```
+📁 system/coding_agent/
+├── agent_with_stream.py     # Main Agent Implementation
+├── agent_streaming_api.py   # Streaming API Interface
+├── memory/                  # Memory Management
+├── prompts/                # System Prompts
+├── models/                 # Data Models
+├── repositories/           # Data Access
+└── utils/                  # Utilities
+```
+
+**Features:**
+- **Anthropic Claude Integration**: Advanced reasoning capabilities
+- **Recursive Tool Calling**: Loop until task completion or depth limit
+- **Memory Management**: Conversation history and context retention
+- **Streaming Responses**: Real-time thinking and response generation
+- **Permission Management**: Terminal command approval system
+
+### **Layer 4: Model Context Protocol (Server Side)**
+```
+📁 system/mcp_server/
+├── fastmcp_server.py       # FastMCP Server Implementation
+├── tools/                  # Tool Definitions
+├── config/                # Configuration
+└── utils/                 # Utilities
+```
+
+**Responsibilities:**
+- **Unified Tool Interface**: Standardized tool invocation
+- **Context Integration**: Client-side context API calls
+- **Tool Proxying**: Route requests to appropriate backend services
+- **Security Layer**: Request validation and sanitization
+
+### **Layer 5: FastAPI Backend (Server Side)**
+```
+📁 system/backend/app/
+├── controllers/            # API Controllers
+├── services/              # Business Logic
+├── usecases/             # Use Case Implementations
+├── repositories/         # Data Access
+├── models/              # Data Models
+└── config/             # Configuration
+```
+
+**Tool Categories:**
+- **File Access Tools**: Read, delete, list directory, search files
+- **Modification Tools**: Edit file, reapply, search and replace
+- **Search Tools**: Codebase search, grep search
+- **Environment Tools**: Terminal command execution
+- **External Tools**: Web search
+
+## 🧬 Advanced Indexing System
+
+The indexing system is the crown jewel of Rocket Copilot, providing intelligent codebase understanding through sophisticated algorithms:
 
 
-## Installation
+### ⚡ **Performance Characteristics**
 
-1. Clone the repository:
-   ```
-   git clone <repository-url>
-   cd Code-Generation-Assistant
-   ```
+#### **Speed Metrics**
+- **Merkle Tree Comparison**: Near-instantaneous for unchanged files
+- **Chunk Upsert**: 1000 chunks in 30 seconds (chunking → embedding → DB storage)
 
-2. Install requirements:
-   ```
-   pip install -r requirements.txt
-   ```
+#### **Storage Efficiency**
+- **Average Chunk Size**: ~1KB per chunk
+- **Local Storage**: Minimal (1-5MB per workspace)
+- **Compression Ratio**: ~70% reduction with Gzip
 
-3. Create environment variables:
-   - Create `.env` in the root directory following `.env.example`
-   - Create `.env` in the `/system/coding_agent` directory following `.env.example`
+#### **Indexing Cycle**
+- **Automatic Reindexing**: Every 10 minutes
+- **Git Branch Changes**: Immediate full reindexing
+- **File Changes**: Incremental updates only
+- **Concurrent Processing**: Configurable batch size
 
+### 🔒 **Privacy & Security**
+- **Path Obfuscation**: File paths hashed before transmission
+- **Semantic-Only Storage**: Complete files never transmitted
+- **Local MongoDB Replica**: Reduces Pinecone read operations
+- **Branch Isolation**: Separate namespaces per git branch
+- **Zero User Data Leakage**: Only embeddings in vector DB
+![Indexing System](extension/resources/indexing.svg)
+
+## 🛠️ Complete Tool Ecosystem (13 Tools)
+
+### **📁 File Access Tools (4 Tools)**
+1. **`read_file`** - Read file contents with line range support
+2. **`delete_file`** - Safely delete files and directories
+3. **`list_directory`** - List directory contents with filtering
+4. **`search_files`** - Fuzzy file search by name/path
+
+### **✏️ Modification Tools (3 Tools)**
+5. **`edit_file`** - Intelligent code editing with streaming diffs
+6. **`reapply`** - Smart retry mechanism for failed edits
+7. **`search_and_replace`** - Global find/replace with pattern matching
+
+### **🔍 Search Tools (2 Tools)**
+8. **`codebase_search`** - Semantic search using vector embeddings
+9. **`grep_search`** - Fast regex/text search using ripgrep
+
+### **⚙️ Environment Tools (1 Tool)**
+10. **`run_terminal_command`** - Secure terminal command execution
+
+### **🌐 External Tools (1 Tool)**
+11. **`web_search`** - Real-time web search integration
+
+### **📊 Context Tools (2 Tools)**
+12. **`get_project_structure`** - Generate project tree structure
+13. **`get_git_context`** - Retrieve git repository information
+
+## Architecture
+
+![System Architecture](extension/resources/system_architecture.svg)
+
+
+## 🚀 Installation & Setup
+
+### **Prerequisites**
+
+#### **System Requirements**
+- **Python 3.8+** with pip
+- **Node.js 16+** with npm
+- **VS Code 1.74.0+**
+
+#### **Required Tools**
+```bash
+# macOS
+brew install ripgrep fzf
+
+# Ubuntu/Debian
+sudo apt install ripgrep fzf
+
+# Windows (using winget)
+winget install BurntSushi.ripgrep fzf
+```
+
+#### **External Services**
+- **MongoDB**: Local instance or MongoDB Atlas
+- **Pinecone**: Vector database account and API key
+- **Anthropic**: Claude API access
+- **HuggingFace**: Deploy FastApply model for edit operations
+- **OpenAIKey**: For Summary Generation
+
+### **Step-by-Step Installation**
+
+#### **1. Clone and Setup Backend**
+```bash
+# Clone the repository
+git clone https://github.com/your-org/rocket-copilot.git
+cd rocket-copilot
+
+# Setup Python environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+#### **2. Configure Environment Variables**
+
+- Create `.env` in the root directory following `.env.example`
+- Create `.env` in the `/system/coding_agent` directory following `.env.example`
+- Create `.env` in the `/system/mcp_server` directory following `.env.example`
+
+
+#### **3. Start Backend Services**
+```bash
+# Terminal 1: Start FastAPI backend
+uvicorn system.backend.main:app --reload 
+
+# Terminal 2: Start MCP server
+python -m system.mcp_server.fastmcp_server --port 8001      
+
+# Terminal 3: Start Coding Agent
+cd system/coding_agent
+python agent_streaming_api.py
+```
 ## Common Issues & Solutions
 
 ### ImportError: cannot import name 'SON' from 'bson'
 
 If you encounter this error while installing dependencies:
 ```
-ImportError: cannot import name 'SON' from 'bson' (/Users/jaypanchal/.pyenv/versions/3.10.2/lib/python3.10/site-packages/bson/__init__.py)
+ImportError: cannot import name 'SON' from 'bson' (/Users/krish/.pyenv/versions/3.10.2/lib/python3.10/site-packages/bson/__init__.py)
 ```
 
 Run the following commands to fix it:
@@ -59,49 +302,40 @@ pip install Crawl4AI
 
 before running the application run this command to setup crawl4AI : ```crawl4ai-setup```
 
-## Running the Application
+#### **4. Build and Install Extension**
+```bash
+# Build webview UI
+cd extension/webview-ui
+npm install
+npm run build
 
-### 1. Start the Backend
-
-From the root directory(/Code-Generation-Assistant):
+# Package extension
+cd ..
+npm install
+npm run compile
 ```
-uvicorn system.backend.main:app
-```
-
-### 2. Start the MCP Server
-
-From the root directory(/Code-Generation-Assistant):
-```
-python -m system.mcp_server.server
-```
-
-### 3. Start the AI Coding Agent
-
-Navigate to the coding agent directory and run:
-```
-cd system/coding_agent
-python agent_with_cli.py
+**Terminal Integration**
 ```
 
-## Components
+## 🔧 Advanced Features
 
-### Backend
+### **Context Mentions**
+- **`@filename.ts`** - Reference specific files
+- **`@directory/`** - Include directory contents
+- **`@git`** - Current git status and changes
+- **`@structure`** - Project structure overview
+- **`@web`** - Access of internet
 
-The backend is a FastAPI application that implements various tools for file access, code modification, terminal commands, web search, and more.
+### **Intelligent Caching**
+- **Context Caching**: Smart invalidation based on file changes
+- **Index Caching**: Merkle tree-based incremental updates
+- **Network Caching**: MongoDB local replica for performance
 
-### MCP Server
+### **Developer Productivity**
+- **Diff Visualization**: Real-time code change preview
+- **Error Integration**: Automatic linter error incorporation
+- **Command Persistence**: Terminal state maintained across sessions
 
-The MCP server provides a standardized interface for the AI agent to interact with the backend tools. It handles tool registration, validation, and execution.
+**Built with ❤️ by Krish Goyani and with the support of the mentors**
 
-### AI Coding Agent
 
-The AI coding agent uses Claude 3.7 Sonnet to understand user queries and interact with the MCP server to execute appropriate tools based on the requirements.
-
-## List of Queries : 
-can you read the content of the main.py file since i won't be able to locate it.
-delete the markdown file since now i don't want it.
-what all things do I have in the models directory?
-is there file named generate_service or something similar?
-change the host from 0.0.0.0 to  192.168.17.184 in our main file.
-create a directory named frontend for me.
-how many times class word is being used?

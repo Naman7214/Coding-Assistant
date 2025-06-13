@@ -11,7 +11,7 @@ from system.backend.app.models.schemas.web_search_query_schema import (
 from system.backend.app.services.external_tools.scrape_webpages_service import (
     ScrapeWebpagesService,
 )
-from system.backend.app.services.external_tools.summerize_webpage_service import (
+from system.backend.app.services.external_tools.summarize_webpage_service import (
     SummarizeWebpageService,
 )
 from system.backend.app.services.external_tools.tavily_search_service import (

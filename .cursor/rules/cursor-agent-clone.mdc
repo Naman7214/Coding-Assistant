@@ -61,12 +61,13 @@ in both case if git does not exist then the git_branch = default
 </code_base_indexing>
 
 # Context and Tools
+
 | Client Side | Server Side | Must given | On Demand |
 | --- | --- | --- | --- |
 | ActiveFile Context 
-shoudn’t be cached given fresh context | web search | System Information in system prompt of Agent | those which are not in Must Given column |
+shoudn’t be cached given fresh context  | web search | System Information in system prompt of Agent | those which are not in Must Given column |
 | System Information one time only
-cached for the 24 hour and only recached when the workspace change | Apply | ActiveFile Context with every user query |  |
+cached for the 24 hour and only recached when the workspace change | Apply (edit_file) | ActiveFile Context with every user query |  |
 | Project structure:
 cached and reacached when the file, directory created or deleted | ReApply | Recent Edits with every user query |  |
 | Linter Error
@@ -77,9 +78,7 @@ shoudn’t be cached | read file |  |  |
 shoudn’t be cached | run terminal cmd |  |  |
 | List of Open Files in workspace
 shoudn’t be cached | grep search |  |  |
-| Repo Map
-shouldn’t be cached | search and replace |  |  |
-| Image
-shoudn’t be cached | file search |  |  |
+|  | search and replace |  |  |
+|  | file search |  |  |
 | List Directory
 shoudn’t be cached | delete file |  |  |

@@ -21,11 +21,6 @@ class FileDeletionService:
         self.terminal_client = terminal_client
         self.PROTECTED_PATHS = {
             "node_modules",
-            "package.json",
-            "package-lock.json",
-            "yarn.lock",
-            "tsconfig.json",
-            "next.config.js",
             ".git",
             ".env",
             ".env.local",

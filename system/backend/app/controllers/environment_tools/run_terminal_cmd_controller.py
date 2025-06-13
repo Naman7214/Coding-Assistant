@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from system.backend.app.models.schemas.run_terminal_command_schema import (
     RunTerminalCommandRequest,
 )
-from system.backend.app.usecases.enviornment_tools.run_terminal_cmd_usecase import (
+from system.backend.app.usecases.environment_tools.run_terminal_cmd_usecase import (
     RunTerminalCmdUsecase,
 )
 
