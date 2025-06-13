@@ -216,3 +216,7 @@ todo.md
 .github
 .cursor
 .cursorignore
+todo.md
+.github
+struct_logs/
+linters.sh
