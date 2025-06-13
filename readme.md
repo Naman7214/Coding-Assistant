@@ -40,7 +40,7 @@ Rocket Copilot is an advanced VS Code extension that revolutionizes software dev
 - **External Integration**: Web search and external API access
 
 ## 🏛️ Architecture Overview
-
+![System Architecture](extension/resources/system_architecture.svg)
 Rocket Copilot employs a sophisticated 5-layer architecture ensuring security, performance, and scalability:
 
 ## 🔍 Layer-by-Layer Architecture
@@ -153,6 +153,7 @@ Rocket Copilot employs a sophisticated 5-layer architecture ensuring security, p
 - **External Tools**: Web search
 
 ## 🧬 Advanced Indexing System
+![Indexing System](extension/resources/indexing.svg)
 
 The indexing system is the crown jewel of Rocket Copilot, providing intelligent codebase understanding through sophisticated algorithms:
 
@@ -180,7 +181,6 @@ The indexing system is the crown jewel of Rocket Copilot, providing intelligent 
 - **Local MongoDB Replica**: Reduces Pinecone read operations
 - **Branch Isolation**: Separate namespaces per git branch
 - **Zero User Data Leakage**: Only embeddings in vector DB
-![Indexing System](extension/resources/indexing.svg)
 
 ## 🛠️ Complete Tool Ecosystem (13 Tools)
 
@@ -208,10 +208,6 @@ The indexing system is the crown jewel of Rocket Copilot, providing intelligent 
 ### **📊 Context Tools (2 Tools)**
 12. **`get_project_structure`** - Generate project tree structure
 13. **`get_git_context`** - Retrieve git repository information
-
-## Architecture
-
-![System Architecture](extension/resources/system_architecture.svg)
 
 
 ## 🚀 Installation & Setup
@@ -313,8 +309,6 @@ npm run build
 cd ..
 npm install
 npm run compile
-```
-**Terminal Integration**
 ```
 
 ## 🔧 Advanced Features
