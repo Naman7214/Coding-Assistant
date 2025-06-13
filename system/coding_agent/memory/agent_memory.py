@@ -275,7 +275,7 @@ class AgentMemory:
 
     async def _generate_openai_summary(self, text_to_summarize: str) -> str:
         """Generate summary using OpenAI API"""
-        url = "https://api.openai.com/v1/chat/completions"
+        url = settings.OPENAI_BASE_URL
 
         headers = {
             "Content-Type": "application/json",
@@ -283,7 +283,7 @@ class AgentMemory:
         }
 
         payload = {
-            "model": "gpt-4.1-mini-2025-04-14",
+            "model": settings.OPENAI_MODEL,
             "messages": [
                 {"role": "system", "content": MEMORY_SUMMARIZATION_PROMPT},
                 {"role": "user", "content": f"{text_to_summarize}"},

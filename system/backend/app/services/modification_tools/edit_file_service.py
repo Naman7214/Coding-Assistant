@@ -78,7 +78,7 @@ class EditFileService:
                 "model_preparation",
                 "Initializing model for code generation...",
                 {
-                    "model": "tgi",
+                    "model": "FastApply",
                     "stage": "model_init",
                     "explanation": None,
                 },
@@ -129,9 +129,6 @@ class EditFileService:
             edited_content = ""
             for message in chat_completion:
                 content = message.choices[0].delta.content
-                print("==============")
-                print(content)
-                print("==============")
                 if content:
                     edited_content += content
 
@@ -190,7 +187,7 @@ class EditFileService:
                 "model_request",
                 "Sending request to code generation model...",
                 {
-                    "model": "tgi",
+                    "model": "FastApply",
                     "max_tokens": 20000,
                     "prompt_length": len(user_query),
                 },

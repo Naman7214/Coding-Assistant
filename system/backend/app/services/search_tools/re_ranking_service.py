@@ -1,7 +1,7 @@
 import logging
 
 import httpx
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 
 from system.backend.app.config.settings import settings
 from system.backend.app.models.domain.error import Error
@@ -71,7 +71,8 @@ class RerankerService:
                 )
             )
             raise HTTPException(
-                status_code=502, detail="Failed to connect to API"
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to connect to API",
             )
         except Exception as e:
             await self.error_repo.insert_error(
@@ -80,4 +81,6 @@ class RerankerService:
                     error_message=f"Error in reranking in Voyage {str(e)}",
                 )
             )
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+            )

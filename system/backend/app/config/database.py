@@ -1,4 +1,4 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from system.backend.app.config.settings import settings
@@ -16,14 +16,14 @@ class MongoDB:
             )
         except Exception as e:
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Unable to connect to MongoDB: {str(e)} \n error while connecting to MongoDB (from database.py in connect())",
             )
 
     def get_mongo_client(self):
         if not self.mongodb_client:
             raise HTTPException(
-                status_code=503,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="MongoDB client is not connected. \n error while connecting to MongoDB client in database.py in get_mongo_client()",
             )
         return self.mongodb_client
@@ -32,7 +32,7 @@ class MongoDB:
         try:
             if not self.mongodb_client:
                 raise HTTPException(
-                    status_code=503,
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="MongoDB client is not connected. \n error while connecting to MongoDB client in database.py in get_error_collection()",
                 )
             return self.mongodb_client[settings.MONGODB_DB_NAME][
@@ -40,7 +40,7 @@ class MongoDB:
             ]
         except Exception as e:
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Unable to access auth collection: {str(e)} \n error while accessing auth collection (from database.py in get_error_collection())",
             )
 
@@ -48,7 +48,7 @@ class MongoDB:
         try:
             if not self.mongodb_client:
                 raise HTTPException(
-                    status_code=503,
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="MongoDB client is not connected. \n error while connecting to MongoDB client (from database.py in get_llm_usage_collection())",
                 )
             return self.mongodb_client[settings.MONGODB_DB_NAME][
@@ -56,7 +56,7 @@ class MongoDB:
             ]
         except Exception as e:
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Unable to access auth collection: {str(e)} \n error while connecting to MongoDB client (from database.py in get_llm_usage_collection())",
             )
 
@@ -66,8 +66,8 @@ class MongoDB:
                 self.mongodb_client.close()
         except Exception as e:
             raise HTTPException(
-                status_code=500,
-                detail=f"Unable to close MongoDB connection: {str(e)} \n error while disconnecting MongoDB (from database.py in discconect())",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Unable to close MongoDB connection: {str(e)} \n error while disconnecting MongoDB (from database.py in disconnect())",
             )
 
 

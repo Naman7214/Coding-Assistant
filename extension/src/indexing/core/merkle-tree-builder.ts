@@ -12,21 +12,55 @@ export class MerkleTreeBuilder {
     constructor(excludePatterns: string[] = [], includePatterns: string[] = [], outputChannel?: vscode.OutputChannel) {
         this.excludePatterns = [
             ...excludePatterns,
-            'node_modules/**',
+            // Version control and git
             '.git/**',
             '**/.git/**',
-            '**/*.log',
+
+            // Node.js dependencies and build artifacts
+            'node_modules/**',
+            '**/node_modules/**',
             '**/dist/**',
             '**/build/**',
+            '**/out/**',
+            '**/.next/**',
+            '**/.nuxt/**',
+
+            // Python virtual environments and cache
+            '.venv/**',
+            '**/.venv/**',
+            'venv/**',
+            '**/venv/**',
+            'env/**',
+            '**/env/**',
+            '**/site-packages/**',
+            '**/lib/python*/**',
+            '**/bin/**',
+            '**/__pycache__/**',
+            '**/*.pyc',
+            '**/.pytest_cache/**',
+
+            // IDE and editor directories
+            '.vscode/**',
+            '**/.vscode/**',
+            '.idea/**',
+            '**/.idea/**',
+            '.vs/**',
+            '**/.vs/**',
+
+            // Cache and temporary directories
+            '**/.cache/**',
+            '**/tmp/**',
+            '**/temp/**',
+            '**/coverage/**',
+            '**/.nyc_output/**',
+
+            // System and misc files
             '**/.DS_Store',
             '**/thumbs.db',
-            ".venv/**",
-            "**/.venv/**",
-            "**/site-packages/**",
-            "**/lib/python*/**",
-            "**/bin/**",
-            "**/__pycache__/**",
-            "**/*.pyc",
+            '**/*.log',
+
+            // Snapshot directories (prevent recursive snapshots)
+            '**/.snapshots/**'
         ];
         this.includePatterns = includePatterns.length > 0 ? includePatterns : [
             '**/*.ts', '**/*.js', '**/*.tsx', '**/*.jsx',
@@ -174,7 +208,13 @@ export class MerkleTreeBuilder {
         const baseName = path.basename(filePath);
 
         // Quick exclusions for common directories
-        const excludedDirs = ['.git', 'node_modules', '.venv', 'site-packages', '__pycache__', 'bin', 'lib'];
+        const excludedDirs = [
+            '.git', 'node_modules', '.venv', 'venv', 'env',
+            'site-packages', '__pycache__', 'bin', 'lib',
+            '.vscode', '.idea', '.vs', 'dist', 'build', 'out',
+            '.next', '.nuxt', '.cache', 'tmp', 'temp', 'coverage',
+            '.nyc_output', '.pytest_cache', '.snapshots'
+        ];
         if (excludedDirs.includes(baseName)) {
             return true;
         }

@@ -1,6 +1,6 @@
 from typing import Dict, List
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pymongo import IndexModel
 
@@ -44,7 +44,7 @@ class EmbeddingRepository:
                 f"Error getting/creating embeddings collection: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error accessing embeddings collection: {str(e)}",
             )
 
@@ -72,7 +72,7 @@ class EmbeddingRepository:
         except Exception as e:
             loggers["main"].error(f"Error retrieving embeddings: {str(e)}")
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving embeddings: {str(e)}",
             )
 
@@ -114,21 +114,6 @@ class EmbeddingRepository:
         except Exception as e:
             loggers["main"].error(f"Error storing embeddings: {str(e)}")
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error storing embeddings: {str(e)}",
-            )
-
-    async def get_embedding_stats(self) -> Dict[str, int]:
-        """Get statistics about embeddings collection"""
-        try:
-            collection = await self._get_or_create_collection()
-            total_count = await collection.count_documents({})
-
-            return {"total_embeddings": total_count}
-
-        except Exception as e:
-            loggers["main"].error(f"Error getting embedding stats: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error getting embedding stats: {str(e)}",
             )

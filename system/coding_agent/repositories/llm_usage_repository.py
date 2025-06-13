@@ -1,11 +1,9 @@
 from datetime import datetime
-from logging import getLogger
 from typing import Any, Dict, Optional
 
 from config.settings import settings
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
-
-logger = getLogger(__name__)
+from utils.logger import logger
 
 
 class LLMUsageRepository:

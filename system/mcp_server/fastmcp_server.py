@@ -1,6 +1,5 @@
 import json
-import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, List, Optional
 
 import click
 from dotenv import load_dotenv
@@ -20,21 +19,12 @@ from system.mcp_server.tools.file_access_tools import (
     read_file_tool,
     search_files_tool,
 )
-from system.mcp_server.tools.modification_tools import (
-    edit_file_tool,
-    reapply_tool,
-    search_and_replace_tool,
-)
+from system.mcp_server.tools.modification_tools import search_and_replace_tool
 from system.mcp_server.tools.search_tools import (
     codebase_search_tool,
     execute_grep_search_tool,
 )
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+from system.mcp_server.utils.logger import logger
 
 # Create a FastMCP server instance
 mcp = FastMCP(name="mcp-tool-server")
@@ -81,6 +71,7 @@ async def grep_search(
             explanation=explanation,
             workspace_path=workspace_path,
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while executing grep_search: {e}")
         result = {"error": str(e)}
@@ -107,10 +98,10 @@ async def read_file(
     end_line: Annotated[
         Optional[int],
         Field(
-            default=100,
+            default=150,
             description="The ending line number (1-indexed, exclusive) to stop reading the file.",
         ),
-    ] = 100,
+    ] = 150,
     explanation: Annotated[
         Optional[str],
         Field(
@@ -125,7 +116,7 @@ async def read_file(
     ] = None,
 ) -> str:
     """
-    Reads the contents of a specified file. You may choose to read the a specific range of lines by providing optional start and end line numbers default is 1 and 100. The tool returns the file content.
+    Reads the contents of a specified file. You may choose to read the a specific range of lines by providing optional start and end line numbers default is 1 and 150. The tool returns the file content.
     When using this tool to gather information, it's your responsibility to ensure you have the COMPLETE context. Specifically, each time you call this command you should:
     - Assess if the contents you viewed are sufficient to proceed with your task.
     - When in doubt, call this tool again to gather more information. Remember that partial file views may miss critical dependencies, imports, or functionality.
@@ -139,6 +130,7 @@ async def read_file(
             explanation=explanation,
             workspace_path=workspace_path,
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while reading file: {e}")
         result = {"error": str(e)}
@@ -187,6 +179,7 @@ async def run_terminal_command(
             workspace_path=workspace_path,
             explanation=explanation,
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while running terminal command: {e}")
         result = {"error": str(e)}
@@ -227,6 +220,7 @@ async def delete_file(
         result = await delete_file_tool(
             path=path, explanation=explanation, workspace_path=workspace_path
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while deleting file: {e}")
         result = {"error": str(e)}
@@ -258,6 +252,7 @@ async def list_directory(
         result = await list_directory_tool(
             directoryPath=directoryPath, explanation=explanation
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while listing directory: {e}")
         result = {"error": str(e)}
@@ -286,16 +281,35 @@ async def search_and_replace(
             description="The workspace path, this is automatically injected by the system"
         ),
     ] = None,
-    options: Annotated[
-        Optional[Dict[str, Any]],
-        Field(description="Additional options for search and replace"),
-    ] = None,
+    case_sensitive: Annotated[
+        bool, Field(description="Whether to use case-sensitive search")
+    ] = False,
+    include_pattern: Annotated[
+        Optional[str], Field(description="Glob pattern for files to include")
+    ] = "*",
+    exclude_pattern: Annotated[
+        Optional[str], Field(description="Glob pattern for files to exclude")
+    ] = "",
+    search_paths: Annotated[
+        Optional[List[str]],
+        Field(description="List of paths to search for files"),
+    ] = [],
 ) -> str:
     """
     A tool for searching pattern in files and replace it with new text. this tool allows you to perform search and replace operation across files in codebase. you can specify file patterns to include/exclude and whether to do case-sensitive matching.
+    WHEN TO USE:
+    - Making identical changes across multiple files (e.g., renaming variables, functions, or imports)
+    - Updating API endpoints, configuration values, or constants throughout the project
+    - Refactoring patterns that appear in many locations
     """
     logger.info(f"Performing search and replace: {query} -> {replacement}")
     try:
+        options = {
+            "case_sensitive": case_sensitive,
+            "include_pattern": include_pattern,
+            "exclude_pattern": exclude_pattern,
+            "search_paths": search_paths,
+        }
         result = await search_and_replace_tool(
             query=query,
             replacement=replacement,
@@ -303,6 +317,7 @@ async def search_and_replace(
             workspace_path=workspace_path,
             options=options,
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while searching and replacing: {e}")
         result = {"error": str(e)}
@@ -335,6 +350,7 @@ async def search_files(
         result = await search_files_tool(
             query=query, explanation=explanation, workspace_path=workspace_path
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while searching files: {e}")
         result = {"error": str(e)}
@@ -374,6 +390,7 @@ async def web_search(
             explanation=explanation,
             target_urls=target_urls,
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while searching the web: {e}")
         result = {"error": str(e)}
@@ -420,6 +437,7 @@ async def codebase_search(
             hashed_workspace_path=hashed_workspace_path,
             git_branch=git_branch,
         )
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while searching the codebase: {e}")
         result = {"error": str(e)}
@@ -428,78 +446,84 @@ async def codebase_search(
     return json_output
 
 
-@mcp.tool()
-async def edit_file(
-    filePath: Annotated[
-        str,
-        Field(
-            description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
-        ),
-    ],
-    codeSnippet: Annotated[
-        str,
-        Field(
-            description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**."
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="A single sentence instruction describing what you are going to do for the sketched edit."
-        ),
-    ],
-) -> str:
-    """
-    Use this tool to propose an edit to an existing file. This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write. You should still bias towards repeating as few lines of the original file as possible to convey the change. But, each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity. Make sure it is clear what the edit should be, and where it should be applied. You MUST provide the following required arguments: target_file_path (the file to edit), code_snippet (your proposed changes), and explanation (why you're making these changes).
-    """
-    logger.info(f"Editing file: {filePath}")
-    try:
-        result = await edit_file_tool(
-            target_file_path=filePath, code_snippet=codeSnippet
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while editing file: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def edit_file(
+#     filePath: Annotated[
+#         str,
+#         Field(
+#             description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
+#         ),
+#     ],
+#     codeSnippet: Annotated[
+#         str,
+#         Field(
+#             description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**."
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="A single sentence instruction describing what you are going to do for the sketched edit."
+#         ),
+#     ],
+# ) -> str:
+#     """
+#     Use this tool to propose an edit to an existing file. This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write. You should still bias towards repeating as few lines of the original file as possible to convey the change. But, each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity. Make sure it is clear what the edit should be, and where it should be applied.
+#     CRITICAL FORMATTING REQUIREMENTS:
+#     - For ADDITIONS/MODIFICATIONS: Include 2-3 lines of UNCHANGED code above and below your new/modified code to provide precise context for placement
+#     - For DELETIONS: Show the code block WITH the target lines already removed, including 2-3 unchanged context lines around the deletion area
+#     - The FastApply model needs this context to accurately locate where changes should be applied
+#     """
+#     logger.info(f"Editing file: {filePath}")
+#     try:
+#         result = await edit_file_tool(
+#             target_file_path=filePath, code_snippet=codeSnippet
+#         )
+#         print(result)
+#     except Exception as e:
+#         logger.error(f"Error occurred while editing file: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
-@mcp.tool()
-async def reapply(
-    filePath: Annotated[
-        str,
-        Field(
-            description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
-        ),
-    ],
-    codeSnippet: Annotated[
-        str,
-        Field(
-            description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**."
-        ),
-    ],
-    explanation: Annotated[
-        str,
-        Field(
-            description="A single sentence instruction describing what you are going to do for the sketched edit."
-        ),
-    ],
-) -> str:
-    """
-    Calls a smarter model to apply the last edit to the specified file. Use this tool immediately after the result of an edit_file tool call ONLY IF the diff is not what you expected, indicating the model applying the changes was not smart enough to follow your instructions.
-    """
-    logger.info(f"Reapplying changes to file: {filePath}")
-    try:
-        result = await reapply_tool(
-            target_file_path=filePath, code_snippet=codeSnippet
-        )
-    except Exception as e:
-        logger.error(f"Error occurred while reapplying changes: {e}")
-        result = {"error": str(e)}
+# @mcp.tool()
+# async def reapply(
+#     filePath: Annotated[
+#         str,
+#         Field(
+#             description="The target file to modify. Always specify the target file as the first argument. You are supposed to use absolute path. If an absolute path is provided, it will be preserved as is."
+#         ),
+#     ],
+#     codeSnippet: Annotated[
+#         str,
+#         Field(
+#             description="Specify ONLY the precise lines of code that you wish to edit. **NEVER specify or write out unchanged code**."
+#         ),
+#     ],
+#     explanation: Annotated[
+#         str,
+#         Field(
+#             description="A single sentence instruction describing what you are going to do for the sketched edit."
+#         ),
+#     ],
+# ) -> str:
+#     """
+#     Calls a smarter model to apply the last edit to the specified file. Use this tool immediately after the result of an edit_file tool call ONLY IF the diff is not what you expected, indicating the model applying the changes was not smart enough to follow your instructions.
+#     """
+#     logger.info(f"Reapplying changes to file: {filePath}")
+#     try:
+#         result = await reapply_tool(
+#             target_file_path=filePath, code_snippet=codeSnippet
+#         )
+#         print(result)
+#     except Exception as e:
+#         logger.error(f"Error occurred while reapplying changes: {e}")
+#         result = {"error": str(e)}
 
-    json_output = json.dumps(result, indent=2)
-    return json_output
+#     json_output = json.dumps(result, indent=2)
+#     return json_output
 
 
 @mcp.tool()
@@ -527,6 +551,7 @@ async def get_project_structure(
     logger.info(f"Getting project structure with max depth: {max_depth}")
     try:
         result = await get_project_structure_tool(max_depth=max_depth)
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while getting project structure: {e}")
         result = {"error": str(e)}
@@ -557,6 +582,7 @@ async def get_git_context(
     logger.info(f"Getting git context with include_changes: {include_changes}")
     try:
         result = await get_git_context_tool(include_changes=include_changes)
+        print(result)
     except Exception as e:
         logger.error(f"Error occurred while getting git context: {e}")
         result = {"error": str(e)}

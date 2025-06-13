@@ -1,10 +1,10 @@
-import os
 from datetime import datetime
 from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import Depends, HTTPException, status
 
+from system.backend.app.config.settings import settings
 from system.backend.app.models.domain.error import Error
 from system.backend.app.repositories.error_repo import ErrorRepo
 
@@ -12,13 +12,11 @@ from system.backend.app.repositories.error_repo import ErrorRepo
 class TerminalClientService:
     def __init__(self, error_repo: ErrorRepo = Depends()):
         self.error_repo = error_repo
-        self.client_api_url = os.getenv(
-            "CLIENT_API_URL", "http://localhost:3001"
-        )
+        self.client_api_url = settings.CLIENT_API_URL
         self.timeout = httpx.Timeout(
             connect=60.0,
-            read=150.0,
-            write=150.0,
+            read=240.0,
+            write=240.0,
             pool=60.0,
         )
 
@@ -105,7 +103,7 @@ class TerminalClientService:
         working_directory: Optional[str] = None,
         environment_variables: Optional[Dict[str, str]] = None,
         is_background: bool = False,
-        timeout: Optional[int] = 60,
+        timeout: Optional[int] = 300000,
         silent: bool = False,
     ) -> Dict[str, Any]:
         """Execute a terminal command on the client side."""

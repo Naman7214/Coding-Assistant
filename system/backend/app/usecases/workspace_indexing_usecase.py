@@ -261,33 +261,3 @@ class WorkspaceIndexingUseCase:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error getting workspace stats: {str(e)}",
             )
-
-    async def get_embedding_stats(self) -> Dict:
-        """Get statistics about the global embedding collection"""
-        try:
-            loggers["main"].info("Getting global embedding stats")
-
-            # Get embedding statistics
-            stats = (
-                await self.workspace_indexing_service.embedding_repository.get_embedding_stats()
-            )
-
-            loggers["main"].info(
-                f"Retrieved global embedding stats: {stats['total_embeddings']} embeddings"
-            )
-
-            return stats
-
-        except Exception as e:
-            await self.error_repository.insert_error(
-                Error(
-                    tool_name="workspace_indexing_usecase",
-                    error_message=f"Error getting embedding stats: {str(e)}",
-                    timestamp=datetime.now().isoformat(),
-                )
-            )
-
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error getting embedding stats: {str(e)}",
-            )

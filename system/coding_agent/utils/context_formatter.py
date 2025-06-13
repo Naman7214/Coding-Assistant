@@ -16,16 +16,32 @@ def format_system_info_context(system_info) -> str:
     return system_info_message
 
 
+def truncate_to_words(text: str, max_words: int = 3000) -> str:
+    """Truncate text to maximum number of words"""
+    if not text:
+        return text
+
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+
+    truncated = " ".join(words[:max_words])
+    return f"{truncated}\n\n[... content truncated to {max_words} words ...]"
+
+
 def format_active_file_context(active_file_context) -> str:
     """Format active file context concisely"""
     if not active_file_context:
         return ""
 
     try:
+        # Truncate the active file context to 3000 words
+        truncated_context = truncate_to_words(str(active_file_context))
+
         context = f"""
         The Below context is about the active file user is working in with the position of the cursor and the selection of the cursor.
         <ACTIVE_FILE_CONTEXT>
-        {active_file_context}
+        {truncated_context}
         </ACTIVE_FILE_CONTEXT>
         """
 
@@ -45,10 +61,13 @@ def format_open_files_context(open_files_context) -> str:
         if count == 0:
             return ""
 
+        # Truncate the open files context to 3000 words
+        truncated_context = truncate_to_words(str(open_files_context))
+
         context = f"""
         The Below are the list of files that are open in the editor.
         <OPEN_FILES_CONTEXT>
-        {open_files_context}
+        {truncated_context}
         </OPEN_FILES_CONTEXT>
         """
         return context
@@ -63,10 +82,13 @@ def format_recent_edits_context(recent_edits_context) -> str:
         return ""
 
     try:
+        # Truncate the recent edits context to 3000 words
+        truncated_context = truncate_to_words(str(recent_edits_context))
+
         context = f"""
         The Below context is about the recent edits that user has made in the editor including the files which are added and deleted in last few minutes.
         <RECENT_EDITS_CONTEXT>
-        {recent_edits_context}
+        {truncated_context}
         </RECENT_EDITS_CONTEXT>
         """
 
@@ -81,10 +103,13 @@ def format_context_mentions(context_mentions) -> str:
     if not context_mentions:
         return ""
 
+    # Truncate the context mentions to 3000 words
+    truncated_context = truncate_to_words(str(context_mentions))
+
     context = f"""
     The Below context is about the context mentions that user has mentioned in the conversation.
     <CONTEXT_MENTIONS>
-    {context_mentions}
+    {truncated_context}
     </CONTEXT_MENTIONS>
     """
 

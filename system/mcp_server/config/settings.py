@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     EXECUTE_GREP_SEARCH_API: str
     EDIT_FILE_API: str
     CODEBASE_SEARCH_METADATA_API: str
+    PROJECT_STRUCTURE_API: str
+    GIT_CONTEXT_API: str = "http://localhost:3001/api/context/git"
 
     class Config:
         env_file = ".env"
@@ -23,9 +25,9 @@ class Settings(BaseSettings):
     @property
     def httpx_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(
-            connect=60.0,
-            read=150.0,
-            write=150.0,
+            connect=120.0,
+            read=220.0,
+            write=180.0,
             pool=60.0,
         )
 

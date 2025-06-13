@@ -34,7 +34,7 @@ export class PersistentTerminalManager implements vscode.Disposable {
     private terminals: Map<string, TerminalSession> = new Map();
     private outputChannel: vscode.OutputChannel;
     private disposables: vscode.Disposable[] = [];
-    private readonly TERMINAL_TIMEOUT = 30000; // 30 seconds default timeout
+    private readonly TERMINAL_TIMEOUT = 360000;
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;

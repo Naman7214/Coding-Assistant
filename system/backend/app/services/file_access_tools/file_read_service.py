@@ -133,7 +133,6 @@ class FileReadService:
                     end_line=end_line,
                 )
 
-                # Get current directory silently
                 current_dir_result = (
                     await self.terminal_client.execute_terminal_command(
                         command="pwd",

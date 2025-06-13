@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     LLM_USAGE_COLLECTION_NAME: str = "llm_usage_logs"
     VOYAGEAI_API_KEY: str
     VOYAGEAI_BASE_URL: str
+    CLIENT_API_URL: str = "http://localhost:3001"
 
     # Pinecone settings
     PINECONE_CREATE_INDEX_URL: str = "https://api.pinecone.io/indexes"
@@ -26,7 +27,7 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1/chat/completions"
     OPENAI_MODEL: str = "gpt-4.1-mini-2025-04-14"
     TAVILY_API_KEY: str
-    SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
+    SUMMARIZATION_TOKEN_THRESHOLD: int = 6000
 
     # HuggingFace settings
     HUGGINGFACE_API_KEY: str
@@ -65,7 +66,7 @@ class Settings(BaseSettings):
     INDEXING_SEMAPHORE_VALUE: int = 5
 
     CODEBASE_DIR: str = "/Users/codebase"
-    SUMMARIZATION_TOKEN_THRESHOLD: int = 3500
+    SUMMARIZATION_TOKEN_THRESHOLD: int = 5000
 
     class Config:
         env_file = ".env"

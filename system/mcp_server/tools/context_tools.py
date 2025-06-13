@@ -1,9 +1,9 @@
-import logging
 from typing import Any, Dict
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from system.mcp_server.config.settings import settings
+from system.mcp_server.utils.logger import logger
 
 
 async def get_project_structure_tool(max_depth: int = 8) -> Dict[str, Any]:
@@ -19,7 +19,7 @@ async def get_project_structure_tool(max_depth: int = 8) -> Dict[str, Any]:
     """
     try:
         # Construct the API endpoint URL
-        base_url = "http://localhost:3001/api/context/project-structure"
+        base_url = settings.PROJECT_STRUCTURE_API
 
         # Prepare query parameters
         params = {
@@ -31,7 +31,9 @@ async def get_project_structure_tool(max_depth: int = 8) -> Dict[str, Any]:
         )
 
         # Make the HTTP request to the extension's API
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(
+            timeout=settings.httpx_timeout, verify=False
+        ) as client:
             response = await client.get(base_url, params=params)
             response.raise_for_status()
 
@@ -81,8 +83,7 @@ async def get_git_context_tool(include_changes: bool = False) -> Dict[str, Any]:
     """
     try:
         # Construct the API endpoint URL
-        base_url = "http://localhost:3001/api/context/git"
-
+        base_url = settings.GIT_CONTEXT_API
         # Prepare query parameters
         params = {
             "includeChanges": str(include_changes).lower(),
@@ -93,7 +94,9 @@ async def get_git_context_tool(include_changes: bool = False) -> Dict[str, Any]:
         )
 
         # Make the HTTP request to the extension's API
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(
+            timeout=settings.httpx_timeout, verify=False
+        ) as client:
             response = await client.get(base_url, params=params)
             response.raise_for_status()
 

@@ -90,7 +90,7 @@ const ContextDropdown: React.FC<ContextDropdownProps> = ({
                         }}
                     >
                         <div className="context-item-icon">
-                            {suggestion.icon || getIcon(suggestion.type)}
+                            {getIcon(suggestion.type)}
                         </div>
                         <div className="context-item-content">
                             <div className="context-item-display">{suggestion.label || 'Unknown'}</div>

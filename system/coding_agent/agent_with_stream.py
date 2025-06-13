@@ -2,7 +2,6 @@ import json
 import os
 import time
 from datetime import datetime
-from logging import getLogger
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
@@ -13,8 +12,7 @@ from models.schema.context_schema import RecentEditsContext
 from prompts.coding_agent_prompt import CODING_AGENT_SYSTEM_PROMPT
 from repositories.llm_usage_repository import LLMUsageRepository
 from utils.context_formatter import format_system_info_context
-
-logger = getLogger(__name__)
+from utils.logger import logger
 
 
 class AnthropicStreamingAgent:
@@ -104,7 +102,9 @@ class AnthropicStreamingAgent:
             )
             system_prompt = CODING_AGENT_SYSTEM_PROMPT.format(
                 system_info_context=system_info_context,
-                current_date_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                current_date_time=str(
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                ),
             )
 
             # Update agent memory with enhanced cached system prompt
@@ -141,7 +141,7 @@ class AnthropicStreamingAgent:
         anthropic_messages = messages
         payload = {
             "model": self.model_name,
-            "max_tokens": params.get("max_tokens", 3000),
+            "max_tokens": params.get("max_tokens", 10000),
             "tools": tools,
             "messages": anthropic_messages,
             "thinking": {"type": "enabled", "budget_tokens": 2500},
@@ -682,6 +682,9 @@ class AnthropicStreamingAgent:
                 # Use the actual workspace path and system info
                 system_message = CODING_AGENT_SYSTEM_PROMPT.format(
                     system_info_context=system_info_context,
+                    current_date_time=str(
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    ),
                 )
 
                 # Initialize enhanced agent memory with cached system message
@@ -690,9 +693,6 @@ class AnthropicStreamingAgent:
                 )
                 self.agent_memory.initialize_with_system_message(system_message)
 
-                # Log memory stats
-                stats = self.agent_memory.get_memory_stats()
-                logger.info(f"Enhanced Memory initialized: {stats}")
                 return True
 
             except Exception as e:
@@ -712,15 +712,6 @@ class AnthropicStreamingAgent:
                     logger.info("FastMCP client closed successfully")
                 except Exception as e:
                     logger.error(f"Error closing FastMCP client: {str(e)}")
-
-            # Cleanup repository connections
-            if self.llm_usage_repository:
-                try:
-                    await self.llm_usage_repository.cleanup()
-                except Exception as e:
-                    logger.error(
-                        f"Error closing LLM usage repository: {str(e)}"
-                    )
 
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")

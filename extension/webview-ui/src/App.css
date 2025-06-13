@@ -322,14 +322,18 @@
     background-color: var(--vscode-editor-background);
     border: 1px solid var(--vscode-widget-border);
     border-radius: 8px;
-    padding: 20px;
     max-width: 500px;
     width: 90%;
+    max-height: 90vh;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
 }
 
 .permission-header {
-    margin-bottom: 16px;
+    padding: 20px 20px 0 20px;
+    margin-bottom: 0;
+    flex-shrink: 0;
 }
 
 .permission-header h3 {
@@ -340,7 +344,7 @@
 .permission-timer {
     font-size: 12px;
     color: var(--vscode-descriptionForeground);
-    margin-bottom: 8px;
+    margin-bottom: 16px;
     padding: 4px 8px;
     background-color: var(--vscode-input-background);
     border-radius: 4px;
@@ -348,8 +352,15 @@
     text-align: center;
 }
 
+.permission-content-scrollable {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 20px;
+    min-height: 0;
+}
+
 .permission-content {
-    margin-bottom: 20px;
+    margin-bottom: 0;
 }
 
 .permission-content p {
@@ -367,16 +378,24 @@
     opacity: 0.7;
 }
 
-.permission-command {
-    display: block;
-    background-color: var(--vscode-input-background);
+.permission-command-wrapper {
+    max-height: 300px;
+    overflow-y: auto;
     border: 1px solid var(--vscode-input-border);
     border-radius: 4px;
+    background-color: var(--vscode-input-background);
+}
+
+.permission-command {
+    display: block;
+    background-color: transparent;
+    border: none;
     padding: 8px;
     font-family: var(--vscode-editor-font-family);
     font-size: 13px;
     word-break: break-all;
     white-space: pre-wrap;
+    margin: 0;
 }
 
 .permission-background-note {
@@ -391,6 +410,10 @@
     display: flex;
     gap: 12px;
     justify-content: flex-end;
+    padding: 20px;
+    border-top: 1px solid var(--vscode-widget-border);
+    background-color: var(--vscode-editor-background);
+    flex-shrink: 0;
 }
 
 .permission-button {
@@ -424,23 +447,31 @@
 
 /* Scrollbar styling */
 .chat-messages::-webkit-scrollbar,
-.thinking-content::-webkit-scrollbar {
+.thinking-content::-webkit-scrollbar,
+.permission-content-scrollable::-webkit-scrollbar,
+.permission-command-wrapper::-webkit-scrollbar {
     width: 8px;
 }
 
 .chat-messages::-webkit-scrollbar-track,
-.thinking-content::-webkit-scrollbar-track {
+.thinking-content::-webkit-scrollbar-track,
+.permission-content-scrollable::-webkit-scrollbar-track,
+.permission-command-wrapper::-webkit-scrollbar-track {
     background: transparent;
 }
 
 .chat-messages::-webkit-scrollbar-thumb,
-.thinking-content::-webkit-scrollbar-thumb {
+.thinking-content::-webkit-scrollbar-thumb,
+.permission-content-scrollable::-webkit-scrollbar-thumb,
+.permission-command-wrapper::-webkit-scrollbar-thumb {
     background: var(--vscode-scrollbarSlider-background);
     border-radius: 4px;
 }
 
 .chat-messages::-webkit-scrollbar-thumb:hover,
-.thinking-content::-webkit-scrollbar-thumb:hover {
+.thinking-content::-webkit-scrollbar-thumb:hover,
+.permission-content-scrollable::-webkit-scrollbar-thumb:hover,
+.permission-command-wrapper::-webkit-scrollbar-thumb:hover {
     background: var(--vscode-scrollbarSlider-hoverBackground);
 }
 
@@ -464,8 +495,20 @@
     }
 
     .permission-modal {
-        padding: 16px;
         margin: 20px;
+        max-height: 80vh;
+    }
+
+    .permission-header {
+        padding: 16px 16px 0 16px;
+    }
+
+    .permission-content-scrollable {
+        padding: 0 16px;
+    }
+
+    .permission-actions {
+        padding: 16px;
     }
 }
 

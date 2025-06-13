@@ -24,13 +24,33 @@ export class MerkleTreeManager {
         // Initialize merkle tree builder with optimized patterns for recent edits
         this.merkleBuilder = new MerkleTreeBuilder(
             [
-                // Standard exclusions
-                'node_modules/**', '.git/**', '**/.git/**', '**/*.log',
-                '**/dist/**', '**/build/**', '**/.DS_Store', '**/thumbs.db',
-                '.venv/**', '**/.venv/**', '**/site-packages/**', '**/lib/python*/**',
-                '**/bin/**', '**/__pycache__/**', '**/*.pyc',
-                // Additional exclusions for recent edits
-                '**/.snapshots/**', '**/tmp/**', '**/temp/**', '**/.cache/**'
+                // Version control and git
+                '.git/**', '**/.git/**',
+
+                // Node.js dependencies and build artifacts
+                'node_modules/**', '**/node_modules/**',
+                '**/dist/**', '**/build/**', '**/out/**',
+                '**/.next/**', '**/.nuxt/**',
+
+                // Python virtual environments and cache
+                '.venv/**', '**/.venv/**', 'venv/**', '**/venv/**',
+                'env/**', '**/env/**', '**/site-packages/**',
+                '**/lib/python*/**', '**/bin/**', '**/__pycache__/**',
+                '**/*.pyc', '**/.pytest_cache/**',
+
+                // IDE and editor directories
+                '.vscode/**', '**/.vscode/**', '.idea/**', '**/.idea/**',
+                '.vs/**', '**/.vs/**',
+
+                // Cache and temporary directories
+                '**/.cache/**', '**/tmp/**', '**/temp/**',
+                '**/coverage/**', '**/.nyc_output/**',
+
+                // System and misc files
+                '**/.DS_Store', '**/thumbs.db', '**/*.log',
+
+                // Snapshot directories (prevent recursive snapshots)
+                '**/.snapshots/**'
             ],
             [
                 // Include common source code files

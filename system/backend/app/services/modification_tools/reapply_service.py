@@ -80,7 +80,7 @@ class ReapplyService:
                 "model_preparation",
                 "Initializing model for code generation...",
                 {
-                    "model": "tgi",
+                    "model": "FastApply",
                     "stage": "model_init",
                     "explanation": None,
                 },
@@ -189,7 +189,7 @@ class ReapplyService:
                 "model_request",
                 "Sending request to code generation model...",
                 {
-                    "model": "tgi",
+                    "model": "FastApply",
                     "max_tokens": 20000,
                     "prompt_length": len(user_query),
                 },

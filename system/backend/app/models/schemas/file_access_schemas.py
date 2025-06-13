@@ -7,7 +7,7 @@ class FileReadRequest(BaseModel):
         default=0, description="The line number to start reading from"
     )
     end_line: int = Field(
-        default=100, description="The line number to stop reading at"
+        default=150, description="The line number to stop reading at"
     )
     explanation: str = Field(
         ..., description="The explanation for the file read request"

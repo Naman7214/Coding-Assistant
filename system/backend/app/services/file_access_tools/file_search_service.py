@@ -9,7 +9,6 @@ from system.backend.app.repositories.error_repo import ErrorRepo
 from system.backend.app.services.terminal_client_service import (
     TerminalClientService,
 )
-from system.backend.app.utils.path_validator import is_safe_path
 
 
 class FileSearchService:
@@ -41,15 +40,6 @@ class FileSearchService:
         try:
             workspace_path = workspace_path or "/"
 
-            # Check if workspace path is safe
-            is_safe, error_msg = is_safe_path(workspace_path)
-            if not is_safe:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Unsafe path: {error_msg}",
-                )
-
-            # Get current directory silently
             current_dir_result = (
                 await self.terminal_client.execute_terminal_command(
                     command="pwd", workspace_path=workspace_path, silent=True

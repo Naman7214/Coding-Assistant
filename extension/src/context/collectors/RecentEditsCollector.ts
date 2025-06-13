@@ -18,7 +18,7 @@ export class RecentEditsCollector extends BaseCollector {
     private snapshotManager: SnapshotManager;
     private diffGenerator: DiffGenerator;
     private checkIntervalTimer: NodeJS.Timeout | null = null;
-    private readonly CHECK_INTERVAL_MS = 3 *60 * 1000; // 3 minutes
+    private readonly CHECK_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
     private isInitialized = false;
     private currentGitBranch = 'default';
     private readonly context: vscode.ExtensionContext;
@@ -201,12 +201,33 @@ export class RecentEditsCollector extends BaseCollector {
 
         // Define patterns to exclude (same as MerkleTreeBuilder)
         const excludePatterns = [
-            'node_modules/**', '.git/**', '**/.git/**', '**/*.log',
-            '**/dist/**', '**/build/**', '**/.DS_Store', '**/thumbs.db',
-            '.venv/**', '**/.venv/**', '**/site-packages/**', '**/lib/python*/**',
-            '**/bin/**', '**/__pycache__/**', '**/*.pyc', 'env/**', '**/.env/**',
-            '**/tmp/**', '**/temp/**', '**/.cache/**', '**/coverage/**',
-            '**/.nyc_output/**', '**/out/**', '**/.next/**', '**/.nuxt/**'
+            // Version control and git
+            '.git/**', '**/.git/**',
+
+            // Node.js dependencies and build artifacts
+            'node_modules/**', '**/node_modules/**',
+            '**/dist/**', '**/build/**', '**/out/**',
+            '**/.next/**', '**/.nuxt/**',
+
+            // Python virtual environments and cache
+            '.venv/**', '**/.venv/**', 'venv/**', '**/venv/**',
+            'env/**', '**/env/**', '**/site-packages/**',
+            '**/lib/python*/**', '**/bin/**', '**/__pycache__/**',
+            '**/*.pyc', '**/.pytest_cache/**',
+
+            // IDE and editor directories
+            '.vscode/**', '**/.vscode/**', '.idea/**', '**/.idea/**',
+            '.vs/**', '**/.vs/**',
+
+            // Cache and temporary directories
+            '**/.cache/**', '**/tmp/**', '**/temp/**',
+            '**/coverage/**', '**/.nyc_output/**',
+
+            // System and misc files
+            '**/.DS_Store', '**/thumbs.db', '**/*.log',
+
+            // Snapshot directories (prevent recursive snapshots)
+            '**/.snapshots/**'
         ];
 
         // Define patterns to include (same as MerkleTreeBuilder)

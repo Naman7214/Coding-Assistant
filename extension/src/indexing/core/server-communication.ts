@@ -70,7 +70,7 @@ export class ServerCommunication {
                         'Content-Encoding': 'gzip',
                         ...(this.config.apiKey && { 'Authorization': `Bearer ${this.config.apiKey}` })
                     },
-                    timeout: 30 * 60 * 1000 // 30 minutes
+                    timeout: 30 * 60 * 1000
                 }
             );
 

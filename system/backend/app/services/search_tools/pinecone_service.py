@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict
 
 import httpx
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 from pinecone import Pinecone
 
 from system.backend.app.config.settings import settings
@@ -26,10 +26,10 @@ class PineconeService:
         self.pc = Pinecone(api_key=settings.PINECONE_API_KEY)
         self.error_repo = error_repo
         self.timeout = httpx.Timeout(
-            connect=60.0,  # Time to establish a connection
-            read=120.0,  # Time to read the response
-            write=120.0,  # Time to send data
-            pool=60.0,  # Time to wait for a connection from the pool
+            connect=60.0,
+            read=120.0,
+            write=120.0,
+            pool=60.0,
         )
 
     async def list_pinecone_indexes(self):
@@ -41,7 +41,9 @@ class PineconeService:
         }
 
         try:
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(
+                verify=False, timeout=self.timeout
+            ) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 return response.json()
@@ -54,7 +56,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Error in listing pinecone indexes HTTPStatusError: {e.response.text} - {str(e)}",
             )
         except Exception as e:
@@ -65,7 +67,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error in pinecone list indexes: {str(e)}",
             )
 
@@ -91,7 +93,9 @@ class PineconeService:
             }
 
             try:
-                async with httpx.AsyncClient(verify=False) as client:
+                async with httpx.AsyncClient(
+                    verify=False, timeout=self.timeout
+                ) as client:
                     response = await client.post(
                         self.index_url, headers=headers, json=index_data
                     )
@@ -100,14 +104,14 @@ class PineconeService:
                     retry_count = 0
                     max_retries = 30
                     while retry_count < max_retries:
-                        status = (
+                        index_status = (
                             self.pc.describe_index(index_name)
                             .get("status")
                             .get("state")
                         )
-                        loggers["main"].info(f"Index status: {status}")
+                        loggers["main"].info(f"Index status: {index_status}")
 
-                        if status == "Ready":
+                        if index_status == "Ready":
                             loggers["main"].info(f"Index {index_name} is ready")
                             break
 
@@ -116,7 +120,8 @@ class PineconeService:
 
                     if retry_count > max_retries:
                         raise HTTPException(
-                            status_code=500, detail="Index creation timed out"
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Index creation timed out",
                         )
 
                     loggers["main"].info("Index Created")
@@ -131,7 +136,7 @@ class PineconeService:
                 )
 
                 raise HTTPException(
-                    status_code=400,
+                    status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Error creating index HTTPStatusError: {e.response.text} - {str(e)}",
                 )
             except Exception as e:
@@ -142,7 +147,8 @@ class PineconeService:
                     )
                 )
                 raise HTTPException(
-                    status_code=500, detail=f"Error creating index: {str(e)}"
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error creating index: {str(e)}",
                 )
 
         else:
@@ -204,7 +210,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Error in upsert vectors http status error : {str(e)} - {e.response.text}",
             )
 
@@ -216,7 +222,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Error in upsert vectors http error : {str(e)}",
             )
 
@@ -228,7 +234,9 @@ class PineconeService:
                 )
             )
 
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+            )
 
     def hybrid_scale(self, dense, sparse, alpha: float):
 
@@ -302,7 +310,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"HTTP status error in hybrid query: {e.response.text} - {str(e)}",
             )
 
@@ -314,7 +322,8 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400, detail=f"HTTP error in hybrid query: {str(e)}"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"HTTP error in hybrid query: {str(e)}",
             )
 
         except Exception as e:
@@ -324,7 +333,9 @@ class PineconeService:
                     error_message=f"Error performing hybrid query: {str(e)}",
                 )
             )
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+            )
 
     async def pinecone_query(
         self,
@@ -373,7 +384,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"HTTP status error in pinecone query: {e.response.text} - {str(e)}",
             )
 
@@ -385,7 +396,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Request error in pinecone query: {str(e)}",
             )
 
@@ -397,7 +408,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"HTTP error in pinecone query: {str(e)}",
             )
 
@@ -409,7 +420,8 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=500, detail=f"Error in pinecone query : {str(e)}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error in pinecone query : {str(e)}",
             )
 
     async def get_index_details(self, index_name: str):
@@ -421,7 +433,9 @@ class PineconeService:
         }
 
         try:
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(
+                verify=False, timeout=self.timeout
+            ) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 index_details = response.json()
@@ -446,7 +460,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving index details: {str(e)}",
             )
 
@@ -455,7 +469,7 @@ class PineconeService:
             index_details = await self.get_index_details(index_name)
             if "host" not in index_details:
                 raise HTTPException(
-                    status_code=400,
+                    status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Host not found in index details for {index_name}",
                 )
             return index_details["host"]
@@ -469,7 +483,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error extracting host from index details: {str(e)}",
             )
 
@@ -490,7 +504,7 @@ class PineconeService:
 
         try:
             async with httpx.AsyncClient(
-                timeout=self.timeout, verify=False
+                verify=False, timeout=self.timeout
             ) as client:
                 response = await client.post(
                     url=delete_url, headers=headers, json=payload
@@ -512,7 +526,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Error deleting vectors http status error: {str(e)} - {e.response.text}",
             )
 
@@ -524,7 +538,7 @@ class PineconeService:
                 )
             )
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Error deleting vectors http error: {str(e)}",
             )
 
@@ -535,4 +549,6 @@ class PineconeService:
                     error_message=f"Error deleting vectors: {str(e)}",
                 )
             )
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+            )

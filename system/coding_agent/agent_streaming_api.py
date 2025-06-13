@@ -5,7 +5,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import uvicorn
 from agent_with_stream import AnthropicStreamingAgent
-from fastapi import FastAPI, HTTPException
+from config.settings import settings
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from models.schema.context_schema import (
@@ -18,7 +19,11 @@ from models.schema.request_schema import (
     QueryRequest,
     StreamEvent,
 )
-from utils.context_formatter import format_user_query, get_friendly_tool_name
+from utils.context_formatter import (
+    format_user_query,
+    get_friendly_tool_name,
+    truncate_to_words,
+)
 
 # Create FastAPI app
 app = FastAPI(title="Agent True Streaming API")
@@ -36,9 +41,6 @@ app.add_middleware(
 agent_instance = None
 # Store pending permission requests
 pending_permissions = {}
-
-# Context API base URL (extension's context server)
-CONTEXT_API_BASE = "http://localhost:3001"
 
 
 @app.on_event("startup")
@@ -87,7 +89,7 @@ async def stream_agent_response(
     if not agent_instance or not agent_instance.client:
         try:
             agent_instance = AnthropicStreamingAgent()
-            server_url = "http://localhost:8001/sse"
+            server_url = settings.SERVER_URL
             transport_type = "sse"
             print(
                 f"🔧 Initializing enhanced agent with workspace: {workspace_path}"
@@ -211,7 +213,9 @@ async def stream_query(request: QueryRequest):
         )
     except Exception as e:
         print(f"Error in enhanced stream_query: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.post("/permission")
@@ -242,7 +246,8 @@ async def handle_permission_response(response: PermissionResponse):
         }
     else:
         raise HTTPException(
-            status_code=404, detail="Permission request not found or expired"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Permission request not found or expired",
         )
 
 
@@ -286,7 +291,7 @@ async def process_enhanced_streaming_tool_calls(
     """
     global agent_instance
 
-    MAX_TOOL_CALL_DEPTH = 100
+    MAX_TOOL_CALL_DEPTH = settings.ANTHROPIC_MAX_TOOL_CALL_DEPTH
 
     if depth >= MAX_TOOL_CALL_DEPTH:
         yield create_stream_event(
@@ -475,9 +480,9 @@ async def process_enhanced_streaming_tool_calls(
             )
 
             try:
-                # Wait for permission response with 5-minute timeout
+                # Wait for permission response with 3-minute timeout
                 permission_granted = await asyncio.wait_for(
-                    permission_future, timeout=60.0
+                    permission_future, timeout=180.0
                 )
 
                 if not permission_granted:
@@ -506,7 +511,7 @@ async def process_enhanced_streaming_tool_calls(
                 # Send permission timeout event to close UI modal
                 yield create_stream_event(
                     "permission_timeout",
-                    "Permission request timed out after 1 minutes",
+                    "Permission request timed out after 3 minutes",
                     {
                         "permission_id": permission_id,
                         "timeout": True,
@@ -515,7 +520,7 @@ async def process_enhanced_streaming_tool_calls(
 
                 yield create_stream_event(
                     "tool_result",
-                    "Permission request timed out after 5 minutes. Command was not executed.",
+                    "Permission request timed out after 3 minutes. Command was not executed.",
                     {
                         "tool_name": tool_name,
                         "tool_use_id": tool_use_id,
@@ -526,11 +531,11 @@ async def process_enhanced_streaming_tool_calls(
                     },
                 )
                 agent_instance.agent_memory.add_tool_call(
-                    tool_call, "Permission request timed out after 5 minutes"
+                    tool_call, "Permission request timed out after 3 minutes"
                 )
                 agent_instance.agent_memory.add_tool_result(
                     tool_use_id,
-                    "Permission request timed out after 5 minutes. Command was not executed.",
+                    "Permission request timed out after 3 minutes. Command was not executed.",
                 )
                 # Clean up pending permission only on timeout
                 pending_permissions.pop(permission_id, None)
@@ -561,16 +566,16 @@ async def process_enhanced_streaming_tool_calls(
                     "permission_id": permission_id,
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
-                    "timeout_seconds": 60,
+                    "timeout_seconds": 180,
                     "friendly_name": friendly_name,
                     "permission_type": "delete_file",
                 },
             )
 
             try:
-                # Wait for permission response with 1-minute timeout
+                # Wait for permission response with 3-minute timeout
                 permission_granted = await asyncio.wait_for(
-                    permission_future, timeout=60.0
+                    permission_future, timeout=180.0
                 )
 
                 if not permission_granted:
@@ -601,7 +606,7 @@ async def process_enhanced_streaming_tool_calls(
                 # Send permission timeout event to close UI modal
                 yield create_stream_event(
                     "permission_timeout",
-                    "File deletion permission request timed out after 1 minute",
+                    "File deletion permission request timed out after 3 minutes",
                     {
                         "permission_id": permission_id,
                         "timeout": True,
@@ -610,7 +615,7 @@ async def process_enhanced_streaming_tool_calls(
 
                 yield create_stream_event(
                     "tool_result",
-                    "File deletion permission request timed out after 1 minute. File was not deleted.",
+                    "File deletion permission request timed out after 3 minutes. File was not deleted.",
                     {
                         "tool_name": tool_name,
                         "tool_use_id": tool_use_id,
@@ -622,11 +627,11 @@ async def process_enhanced_streaming_tool_calls(
                 )
                 agent_instance.agent_memory.add_tool_call(
                     tool_call,
-                    "File deletion permission request timed out after 1 minute",
+                    "File deletion permission request timed out after 3 minutes",
                 )
                 agent_instance.agent_memory.add_tool_result(
                     tool_use_id,
-                    "File deletion permission request timed out after 1 minute. File was not deleted.",
+                    "File deletion permission request timed out after 3 minutes. File was not deleted.",
                 )
                 # Clean up pending permission only on timeout
                 pending_permissions.pop(permission_id, None)
@@ -684,57 +689,29 @@ async def process_enhanced_streaming_tool_calls(
                 tool_name, tool_input
             )
 
+            tool_result = truncate_to_words(str(tool_result))
+
             print(f"Enhanced: Tool input: {tool_input}")
             print(
                 f"Enhanced: Received result from MCP server for tool: {tool_name}"
             )
 
-            if tool_result:
-                # Enhanced result processing
-                try:
-                    if isinstance(tool_result, list):
-                        tool_content = "\n".join(
-                            str(item) for item in tool_result
-                        )
-                    else:
-                        tool_content = str(tool_result)
-                except Exception as e:
-                    print(f"Enhanced: Error processing tool result: {e}")
-                    tool_content = (
-                        f"Tool completed (result processing error: {e})"
-                    )
-
-                # Enhanced content length management
-                original_length = len(tool_content)
-                if original_length > 8000:
-                    tool_content = (
-                        tool_content[:8000]
-                        + f"\n[Content truncated from {original_length} to 8000 characters]"
-                    )
-            else:
-                tool_content = "No result from tool"
-
             # Stream enhanced tool result
             yield create_stream_event(
                 "tool_result",
-                tool_content,
+                tool_result,
                 {
                     "tool_name": tool_name,
                     "friendly_name": friendly_name,
                     "tool_use_id": tool_use_id,
-                    "result_length": len(tool_content),
-                    "truncated": (
-                        original_length > 8000
-                        if "original_length" in locals()
-                        else False
-                    ),
+                    "result_length": len(tool_result),
                 },
             )
 
             # Record the tool call and result in agent memory
-            agent_instance.agent_memory.add_tool_call(tool_call, tool_content)
+            agent_instance.agent_memory.add_tool_call(tool_call, tool_result)
             agent_instance.agent_memory.add_tool_result(
-                tool_use_id, tool_content
+                tool_use_id, tool_result
             )
 
         except Exception as e:
@@ -788,4 +765,4 @@ if __name__ == "__main__":
     # Run the FastAPI app with uvicorn
     uvicorn.run(
         "agent_streaming_api:app", host="0.0.0.0", port=5001, reload=True
-    )  # Different port for true streaming version
+    )

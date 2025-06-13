@@ -32,7 +32,7 @@ app.include_router(
     web_search_route.router, prefix="/api/v1", tags=["external tools"]
 )
 app.include_router(
-    run_terminal_cmd_route.router, prefix="/api/v1", tags=["enviornment tools"]
+    run_terminal_cmd_route.router, prefix="/api/v1", tags=["environment tools"]
 )
 app.include_router(
     modification_routes.router, prefix="/api/v1", tags=["modification tools"]

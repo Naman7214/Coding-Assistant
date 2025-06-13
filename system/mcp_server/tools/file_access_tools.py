@@ -1,5 +1,4 @@
 import json
-import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -8,12 +7,6 @@ from dotenv import load_dotenv
 from system.mcp_server.config.settings import settings
 
 load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 
 async def read_file_tool(
@@ -111,10 +104,7 @@ async def list_directory_tool(
             response = await client.post(settings.LIST_DIR_API, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
 
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
@@ -146,7 +136,6 @@ async def search_files_tool(
             # print(response_json)
             print(json.dumps(response_json, indent=4))
 
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"

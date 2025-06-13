@@ -1,5 +1,4 @@
 import json
-import logging
 from typing import Optional
 
 import httpx
@@ -8,12 +7,6 @@ from dotenv import load_dotenv
 from system.mcp_server.config.settings import settings
 
 load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 
 async def run_terminal_command_tool(
@@ -39,7 +32,7 @@ async def run_terminal_command_tool(
     payload = {
         "cmd": command,
         "workspace_path": workspace_path,
-        "is_background": False,
+        "is_background": is_background,
     }
     if explanation:
         payload["explanation"] = explanation

@@ -773,17 +773,21 @@ const App: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                        <div className="permission-content">
-                            <p>{permissionRequest.message}</p>
-                            <div className="permission-command-container">
-                                <div className="permission-command-label">Command:</div>
-                                <code className="permission-command">{permissionRequest.command}</code>
-                            </div>
-                            {permissionRequest.isBackground && (
-                                <div className="permission-background-note">
-                                    ⚠️ This command will run in the background
+                        <div className="permission-content-scrollable">
+                            <div className="permission-content">
+                                <p>{permissionRequest.message}</p>
+                                <div className="permission-command-container">
+                                    <div className="permission-command-label">Command:</div>
+                                    <div className="permission-command-wrapper">
+                                        <code className="permission-command">{permissionRequest.command}</code>
+                                    </div>
                                 </div>
-                            )}
+                                {permissionRequest.isBackground && (
+                                    <div className="permission-background-note">
+                                        ⚠️ This command will run in the background
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <div className="permission-actions">
                             <button

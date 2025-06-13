@@ -135,8 +135,8 @@ class RunTerminalCmdUsecase:
                 workspace_path=workspace_path or "/",
                 is_background=is_background,
                 timeout=(
-                    60 if not is_background else None
-                ),  # 60 second timeout for foreground commands
+                    300000 if not is_background else None
+                ),  # Extension expects timeout in milliseconds, not seconds
                 silent=False,  # Always show run_terminal_cmd commands in terminal
             )
 

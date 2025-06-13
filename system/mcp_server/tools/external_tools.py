@@ -1,5 +1,4 @@
 import json
-import logging
 from typing import Optional
 
 import httpx
@@ -8,12 +7,6 @@ from dotenv import load_dotenv
 from system.mcp_server.config.settings import settings
 
 load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 
 async def web_search_tool(

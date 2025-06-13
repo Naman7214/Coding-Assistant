@@ -61,14 +61,6 @@ class FileDeletionService:
                 # If it's a relative path, make it relative to workspace
                 path = os.path.join(workspace_path or ".", path)
 
-            # # Check if path is safe
-            # is_safe, error_msg = is_safe_path(path)
-            # if not is_safe:
-            #     raise HTTPException(
-            #         status_code=status.HTTP_400_BAD_REQUEST,
-            #         detail=f"Unsafe path: {error_msg}"
-            #     )
-
             # Check if the path is protected
             file_name = os.path.basename(path)
             if file_name in self.PROTECTED_PATHS:

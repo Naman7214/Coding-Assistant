@@ -1,6 +1,6 @@
 from typing import Dict, List, Set
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pymongo import IndexModel
 
@@ -39,7 +39,6 @@ class ChunkRepository:
                     IndexModel([("chunk_hash", 1)], unique=True),
                     IndexModel([("git_branch", 1)]),
                     IndexModel([("language", 1)]),
-                    IndexModel([("chunk_type", 1)]),
                     IndexModel([("created_at", -1)]),
                 ]
                 await collection.create_indexes(index_models)
@@ -54,7 +53,7 @@ class ChunkRepository:
                 f"Error getting/creating collection for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error accessing workspace collection: {str(e)}",
             )
 
@@ -82,7 +81,8 @@ class ChunkRepository:
                 f"Error retrieving chunks for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500, detail=f"Error retrieving chunks: {str(e)}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error retrieving chunks: {str(e)}",
             )
 
     async def upsert_chunks_batch(
@@ -139,7 +139,8 @@ class ChunkRepository:
                 f"Error upserting chunks batch for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500, detail=f"Error upserting chunks: {str(e)}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error upserting chunks: {str(e)}",
             )
 
     async def get_chunks_by_obfuscated_paths(
@@ -170,7 +171,7 @@ class ChunkRepository:
                 f"Error retrieving chunks by obfuscated paths for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving chunks by obfuscated paths: {str(e)}",
             )
 
@@ -196,7 +197,7 @@ class ChunkRepository:
                 f"Error deleting chunks by hashes and branch for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error deleting chunks by hashes and branch: {str(e)}",
             )
 
@@ -231,7 +232,7 @@ class ChunkRepository:
                 f"Error retrieving chunks by obfuscated paths and branch for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving chunks by obfuscated paths and branch: {str(e)}",
             )
 
@@ -264,7 +265,7 @@ class ChunkRepository:
                 f"Error retrieving chunk hashes by path and branch for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving chunk hashes by path and branch: {str(e)}",
             )
 
@@ -308,6 +309,6 @@ class ChunkRepository:
                 f"Error retrieving grouped chunks for workspace {workspace_hash}: {str(e)}"
             )
             raise HTTPException(
-                status_code=500,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving grouped chunks: {str(e)}",
             )

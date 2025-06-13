@@ -5,7 +5,7 @@ from system.backend.app.config.settings import settings
 
 class TavilySearchService:
     def __init__(self):
-        pass
+        self.time_out = httpx.Timeout(180)
 
     async def tavily_search(
         self, query: str, max_results: int = 2, time_range: str = "month"
@@ -32,7 +32,13 @@ class TavilySearchService:
             "time_range": time_range,
         }
 
-        async with httpx.AsyncClient(verify=False) as client:
-            response = await client.post(url, headers=headers, json=data)
-            response.raise_for_status()
-            return response.json()
+        async with httpx.AsyncClient(
+            verify=False, timeout=self.time_out
+        ) as client:
+            try:
+                response = await client.post(url, headers=headers, json=data)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                print(str(e))
+                return None
