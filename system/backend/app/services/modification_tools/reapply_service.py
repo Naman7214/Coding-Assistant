@@ -124,7 +124,7 @@ class ReapplyService:
             chat_completion = self.client.chat.completions.create(
                 model="tgi",
                 messages=[{"role": "user", "content": user_query}],
-                max_tokens=20000,
+                max_tokens=8000,
                 stream=True,
             )
 
@@ -190,7 +190,7 @@ class ReapplyService:
                 "Sending request to code generation model...",
                 {
                     "model": "FastApply",
-                    "max_tokens": 20000,
+                    "max_tokens": 8000,
                     "prompt_length": len(user_query),
                 },
             )
@@ -198,7 +198,7 @@ class ReapplyService:
             chat_completion = self.client.chat.completions.create(
                 model="tgi",
                 messages=[{"role": "user", "content": user_query}],
-                max_tokens=20000,
+                max_tokens=8000,
                 stream=True,
             )
 

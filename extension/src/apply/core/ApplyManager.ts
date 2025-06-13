@@ -61,6 +61,12 @@ export class ApplyManager implements IApplyManager {
             // Validate request
             this.validateRequest(request);
 
+            // Ensure file exists, create if not
+            const fileExists = await this.fileUpdateService.fileExists(request.filePath);
+            if (!fileExists) {
+                await this.fileUpdateService.createFileWithDirs(request.filePath);
+            }
+
             // Emit start event
             this.emitEvent({
                 type: 'apply_start',
@@ -124,7 +130,7 @@ export class ApplyManager implements IApplyManager {
             // **FIX: Return response immediately to agent**
             return {
                 success: true,
-                message: 'Code applied successfully. Review changes and accept/reject as needed.',
+                message: 'Code applied successfully.',
                 linterErrors,
                 appliedChanges: this.generateAppliedChanges(originalContent, streamedContent),
             };
@@ -301,8 +307,8 @@ export class ApplyManager implements IApplyManager {
         }
 
         try {
-            // Wait a short delay to ensure linters have processed the file after changes
-            await this.delay(500);
+            // Wait a 2 second delay to ensure linters have processed the file after changes
+            await this.delay(2000);
 
             const uri = vscode.Uri.file(filePath);
 

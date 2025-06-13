@@ -1,4 +1,3 @@
-import json
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -72,10 +71,6 @@ async def delete_file_tool(
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
@@ -133,9 +128,6 @@ async def search_files_tool(
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"

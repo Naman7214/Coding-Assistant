@@ -1,4 +1,3 @@
-import json
 from typing import Optional
 
 import httpx
@@ -30,10 +29,6 @@ async def web_search_tool(
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"

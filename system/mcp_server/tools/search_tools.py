@@ -1,4 +1,3 @@
-import json
 from typing import Optional
 
 import httpx
@@ -60,9 +59,6 @@ async def codebase_search_tool(
                 )
                 code_content_response.raise_for_status()
                 code_content_response_json = code_content_response.json()
-                print(
-                    f"Codebase search API response: {code_content_response_json}"
-                )
                 return code_content_response_json
 
             except httpx.HTTPStatusError as e:
@@ -127,10 +123,6 @@ async def execute_grep_search_tool(
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"

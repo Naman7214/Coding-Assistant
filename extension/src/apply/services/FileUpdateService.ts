@@ -437,4 +437,22 @@ export class FileUpdateService implements IFileUpdateService {
             console.warn('Failed to clean backups on dispose:', error);
         });
     }
+
+    /**
+     * Create a file and its parent directories if they do not exist
+     */
+    async createFileWithDirs(filePath: string): Promise<void> {
+        const dir = path.dirname(filePath);
+        try {
+            // Create parent directories if they do not exist
+            await fs.mkdir(dir, { recursive: true });
+            // Only create the file if it does not exist
+            const exists = await this.fileExists(filePath);
+            if (!exists) {
+                await fs.writeFile(filePath, '', 'utf-8');
+            }
+        } catch (error) {
+            throw new Error(`Failed to create file or directories for ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
 } 

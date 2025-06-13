@@ -380,8 +380,7 @@ class SearchReplaceService:
             )
 
             if write_result.get("exitCode", 1) != 0:
-                # Fallback: try using cat with here document
-                # This approach handles multiline content better
+
                 escaped_content = content.replace(
                     "'", "'\"'\"'"
                 )  # Escape single quotes

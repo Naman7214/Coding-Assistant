@@ -141,7 +141,7 @@ class AnthropicStreamingAgent:
         anthropic_messages = messages
         payload = {
             "model": self.model_name,
-            "max_tokens": params.get("max_tokens", 10000),
+            "max_tokens": 7000,  # apply model's output token limit is 8000 so when the LLM generate the code that is more then 8000 apply model is failing so i am setting the max token to 7000
             "tools": tools,
             "messages": anthropic_messages,
             "thinking": {"type": "enabled", "budget_tokens": 2500},
@@ -153,7 +153,6 @@ class AnthropicStreamingAgent:
         if system_content:
             payload["system"] = system_content
 
-        # Debug: Print payload structure (remove in production)
         logger.info(
             f"Sending request with {len(anthropic_messages)} messages and {len(tools)} tools"
         )
@@ -187,9 +186,7 @@ class AnthropicStreamingAgent:
                         async for line in response.aiter_lines():
                             if line.startswith("data: "):
                                 try:
-                                    data = json.loads(
-                                        line[6:]
-                                    )  # Remove "data: " prefix
+                                    data = json.loads(line[6:])
 
                                     # Handle different event types
                                     event_type = data.get("type")
@@ -454,8 +451,6 @@ class AnthropicStreamingAgent:
                                         delta = data.get("delta", {})
                                         complete_message.update(delta)
 
-                                        # Update usage information if present in message_delta
-                                        # The final token counts are in data.usage, not in delta
                                         if "usage" in data:
                                             if "usage" not in complete_message:
                                                 complete_message["usage"] = {}

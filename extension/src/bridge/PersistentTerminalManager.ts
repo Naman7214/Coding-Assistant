@@ -370,47 +370,32 @@ export class PersistentTerminalManager implements vscode.Disposable {
 
             // Execute the command using child_process to capture output
             const result = await new Promise<{ stdout: string, stderr: string, exitCode: number | null }>((resolve, reject) => {
-                const options: cp.SpawnOptions = {
+                const options: cp.ExecOptions = {
                     cwd: currentDir,
-                    shell: true,
                     env: {
                         ...process.env,
                         ...Object.fromEntries(session.environmentVariables.entries())
-                    }
+                    },
+                    timeout: timeout,
+                    maxBuffer: 1024 * 1024 * 10 // 10MB buffer
                 };
 
-                const child = cp.spawn(execution.command, [], options);
-                let stdout = '';
-                let stderr = '';
+                // Use exec instead of spawn for better shell command handling
+                const child = cp.exec(execution.command, options, (error, stdout, stderr) => {
+                    if (error && error.message.includes('timeout')) {
+                        reject(new Error('Command timeout'));
+                        return;
+                    }
 
-                child.stdout?.on('data', (data) => {
-                    stdout += data.toString();
-                });
-
-                child.stderr?.on('data', (data) => {
-                    stderr += data.toString();
-                });
-
-                child.on('close', (code) => {
                     resolve({
                         stdout: stdout.trim(),
                         stderr: stderr.trim(),
-                        exitCode: code
+                        exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0
                     });
                 });
 
                 child.on('error', (error) => {
                     reject(error);
-                });
-
-                // Timeout handling
-                const timeoutId = setTimeout(() => {
-                    child.kill('SIGTERM');
-                    reject(new Error('Command timeout'));
-                }, timeout);
-
-                child.on('close', () => {
-                    clearTimeout(timeoutId);
                 });
             });
 

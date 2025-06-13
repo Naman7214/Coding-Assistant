@@ -1,5 +1,4 @@
 # import aiofiles
-import json
 from typing import Any, Dict, Optional
 
 import httpx
@@ -49,10 +48,6 @@ async def search_and_replace_tool(
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP Status error occurred : {e.response.status_code} {e.response.text}"
@@ -72,9 +67,6 @@ async def edit_file_tool(target_file_path: str, code_snippet: str):
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP status error occurred: {e.response.status_code} {e.response.text}"
@@ -95,9 +87,6 @@ async def reapply_tool(target_file_path: str, code_snippet: str):
             response = await client.post(url, json=payload)
             response.raise_for_status()
             response_json = response.json()
-            # print(response_json)
-            print(json.dumps(response_json, indent=4))
-            # result = response_json.get("content", "")
             return response_json
     except httpx.HTTPStatusError as e:
         return f"HTTP status error occurred: {e.response.status_code} {e.response.text}"

@@ -180,15 +180,6 @@ async def stream_agent_response(
 async def stream_query(request: QueryRequest):
     """Stream the agent's enhanced response with context system"""
     try:
-        print(f"Query : {request.query}")
-        print(f"Workspace Path: {request.workspace_path}")
-        print(f"Hashed Workspace Path: {request.hashed_workspace_path}")
-        print(f"Git Branch: {request.git_branch}")
-        print(f"Context Mentions: {request.context_mentions}")
-        print(f"System Info: {request.system_info}")
-        print(f"Active File: {request.active_file_context}")
-        print(f"Open Files: {request.open_files_context}")
-        print(f"Recent Edits: {request.recent_edits_context}")
 
         return StreamingResponse(
             stream_agent_response(

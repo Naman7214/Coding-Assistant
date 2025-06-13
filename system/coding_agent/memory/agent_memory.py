@@ -59,6 +59,7 @@ class AgentMemory:
         """Count tokens in text using tiktoken"""
         try:
             tokens = self.encoding.encode(text)
+
             return len(tokens)
         except Exception as e:
             # Fallback: estimate 4 characters per token
@@ -90,10 +91,6 @@ class AgentMemory:
         system_tokens = self._count_tokens(system_message)
         self.current_token_count = system_tokens
 
-        print(
-            f"✅ Enhanced Memory: System prompt initialized with {system_tokens} tokens (cached)"
-        )
-
     def add_user_message(self, message: str):
         """Add user message to memory"""
         user_msg = {
@@ -106,7 +103,6 @@ class AgentMemory:
         message_tokens = self._count_message_tokens(user_msg)
         self.current_token_count += message_tokens
 
-        print(f"Enhanced Memory: Added user message ({message_tokens} tokens)")
         self._check_and_summarize()
 
     def add_assistant_message(self, message: Dict[str, Any]):
@@ -119,9 +115,6 @@ class AgentMemory:
         message_tokens = self._count_message_tokens(message_with_meta)
         self.current_token_count += message_tokens
 
-        print(
-            f"Enhanced Memory: Added assistant message ({message_tokens} tokens)"
-        )
         self._check_and_summarize()
 
     def add_tool_call(self, tool_call: Dict[str, Any], result: str):
@@ -151,9 +144,6 @@ class AgentMemory:
                     ):
                         # Generate new unique ID
                         new_id = f"unique_{uuid.uuid4().hex[:8]}"
-                        print(
-                            f"Enhanced Memory: Duplicate tool ID detected. Changing {tool_use_id} to {new_id}"
-                        )
                         tool_use_id = new_id
                         break
 
@@ -173,15 +163,11 @@ class AgentMemory:
         message_tokens = self._count_message_tokens(tool_result_msg)
         self.current_token_count += message_tokens
 
-        print(f"Enhanced Memory: Added tool result ({message_tokens} tokens)")
         self._check_and_summarize()
 
     def _check_and_summarize(self):
         """Check if summarization is needed and perform it"""
         if self.current_token_count > self.max_tokens:
-            print(
-                f"Enhanced Memory: Token limit exceeded ({self.current_token_count} > {self.max_tokens}). Starting summarization..."
-            )
             # Schedule summarization to run asynchronously
             try:
                 loop = asyncio.get_event_loop()
@@ -198,7 +184,6 @@ class AgentMemory:
     async def _summarize_memory(self):
         """Summarize memory excluding last 5 messages using OpenAI API"""
         if len(self.conversation_memory) <= self.keep_last_messages:
-            print("Enhanced Memory: Too few messages to summarize")
             return
 
         # Split messages: old (to summarize) and recent (to keep)
@@ -227,10 +212,6 @@ class AgentMemory:
 
             # Recalculate token count
             self._recalculate_token_count()
-
-            print(
-                f"✅ Enhanced Memory: Summarization complete. New token count: {self.current_token_count}"
-            )
 
         except Exception as e:
             print(f"❌ Enhanced Memory: Summarization failed: {str(e)}")
